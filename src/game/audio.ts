@@ -3,9 +3,16 @@ let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let enabled = true;
 let lastShot = 0;
+let volume = 0.7;
 
 export function setSfx(on: boolean) {
   enabled = on;
+}
+
+/** master volume, 0..1 */
+export function setVolume(v: number) {
+  volume = Math.min(1, Math.max(0, v));
+  if (master && ctx) master.gain.value = 0.35 * volume;
 }
 
 export function initAudio() {
@@ -16,7 +23,7 @@ export function initAudio() {
   try {
     ctx = new AudioContext();
     master = ctx.createGain();
-    master.gain.value = 0.35;
+    master.gain.value = 0.35 * volume;
     master.connect(ctx.destination);
   } catch {
     ctx = null;
@@ -188,5 +195,24 @@ export const sfx = {
     tone(740, 0.1, "sine", 0.25);
     tone(1100, 0.14, "sine", 0.25, 0, 0.09);
     tone(1480, 0.2, "sine", 0.25, 0, 0.18);
+  },
+  buy: () => {
+    tone(620, 0.07, "square", 0.22);
+    tone(930, 0.1, "square", 0.2, 0, 0.06);
+    noise(0.1, 0.12, 1400);
+  },
+  rally: () => {
+    noise(0.35, 0.3, 1800);
+    [392, 523, 659, 784].forEach((f, i) => tone(f, 0.22, "sawtooth", 0.22, 0, i * 0.07));
+  },
+  /** bigger, longer fanfare for the awakening ceremony */
+  ceremony: () => {
+    [523, 659, 784, 1046, 1318].forEach((f, i) => tone(f, 0.3, "triangle", 0.28, 0, i * 0.11));
+    [261, 392, 523].forEach((f, i) => tone(f, 0.6, "sine", 0.2, 0, i * 0.05));
+    noise(0.5, 0.14, 2600);
+  },
+  merge2: () => {
+    tone(300, 0.12, "square", 0.24, 500);
+    tone(1200, 0.2, "sine", 0.2, 0, 0.1);
   },
 };

@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { SaveData } from "../game/save";
 import { randFrag } from "../game/save";
 import { sfx } from "../game/audio";
-import { CHESTS, TOWERS, TOWER_BY_ID } from "../game/data";
+import { CHESTS, TOWERS, TOWER_BY_ID, RARITY, type Rarity } from "../game/data";
 import { CoinIcon, GemIcon, Modal, TokenIcon, TowerIcon } from "../components/ui";
 import { ChestSVG } from "./Menus";
 
@@ -12,6 +12,15 @@ interface Reward {
   tokens: number;
   frags: { id: string; n: number }[];
 }
+
+/** gold price of one fragment of each rarity */
+const FRAG_PRICE: Record<Rarity, number> = { normal: 120, decent: 320, epic: 750, legendary: 1400 };
+
+const TOKEN_PACKS = [
+  { tokens: 1, gems: 1 },
+  { tokens: 5, gems: 4 },
+  { tokens: 12, gems: 9 },
+];
 
 function rollReward(chestId: string): Reward {
   const c = CHESTS.find((x) => x.id === chestId)!;
@@ -46,8 +55,13 @@ export default function Shop({
   const [opening, setOpening] = useState<string | null>(null);
   const [stage, setStage] = useState<"closed" | "shaking" | "reward">("closed");
   const [reward, setReward] = useState<Reward | null>(null);
+  const [fragPick, setFragPick] = useState<string>(TOWERS[0].id);
+  const [fragQty, setFragQty] = useState<1 | 5>(1);
 
   const chest = CHESTS.find((c) => c.id === opening);
+  const picked = TOWER_BY_ID[fragPick];
+  const unit = FRAG_PRICE[picked.rarity];
+  const fragCost = unit * fragQty;
 
   const tryBuy = (id: string) => {
     const c = CHESTS.find((x) => x.id === id)!;
@@ -65,6 +79,34 @@ export default function Shop({
     setStage("closed");
     setReward(null);
     setTimeout(() => setStage("shaking"), 500);
+  };
+
+  const buyFrags = () => {
+    if (save.gold < fragCost) {
+      sfx.error();
+      push(`Need ${fragCost} gold`, "#ff4d5e");
+      return;
+    }
+    sfx.buy();
+    mutate((s) => {
+      s.gold -= fragCost;
+      s.frags[picked.id] = (s.frags[picked.id] || 0) + fragQty;
+    });
+    push(`+${fragQty} ${picked.name} fragments`, RARITY[picked.rarity].color);
+  };
+
+  const buyTokens = (tokens: number, gems: number) => {
+    if (save.gems < gems) {
+      sfx.error();
+      push("Not enough gems", "#ff4d5e");
+      return;
+    }
+    sfx.token();
+    mutate((s) => {
+      s.gems -= gems;
+      s.tokens += tokens;
+    });
+    push(`+${tokens} Magic Tokens`, "#ff4fd8");
   };
 
   const collect = () => {
@@ -88,11 +130,15 @@ export default function Shop({
     setOpening(null);
   };
 
+  const legendaries = TOWERS.filter((t) => t.rarity === "legendary");
+
   return (
     <div className="mx-auto flex h-full max-w-4xl flex-col gap-5 overflow-y-auto scroll-thin pr-1">
       <div>
         <div className="font-disp text-2xl text-[#ffcf4d]">Shop</div>
-        <p className="text-sm font-semibold text-[var(--dim)]">Open chests for fragments & gold. Fragments unlock and upgrade towers.</p>
+        <p className="text-sm font-semibold text-[var(--dim)]">
+          Open chests for random rewards, trade gold for the fragments you actually need, or burn gems on Magic Tokens.
+        </p>
       </div>
 
       <div>
@@ -124,55 +170,126 @@ export default function Shop({
         </div>
       </div>
 
+      {/* FRAGMENT EXCHANGE */}
       <div>
-        <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">GEMS & GOLD</div>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {[
-            { n: "Pouch of Gold", amt: "1,500", p: "200" },
-            { n: "Gold Hoard", amt: "10,000", p: "1,200" },
-            { n: "Gem Cluster", amt: "50", p: "400" },
-            { n: "Vault Pass", amt: "10,000 + 100", p: "1,000" },
-          ].map((p) => (
-            <div key={p.n} className="panel relative flex flex-col items-center overflow-hidden p-4 opacity-80">
-              <div className="flex items-center gap-2">
-                {p.amt.includes("50") || p.n === "Vault Pass" ? <GemIcon size={30} /> : <CoinIcon size={30} />}
-              </div>
-              <div className="font-disp mt-1 text-base text-[var(--txt)]">{p.n}</div>
-              <div className="text-sm font-bold text-[var(--dim)]">{p.amt}</div>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">FRAGMENT EXCHANGE</div>
+          <div className="flex items-center gap-1">
+            {[1, 5].map((q) => (
               <button
-                className="btn mt-3 w-full py-2 text-sm"
-                onClick={() => { sfx.error(); push("Store integration coming soon", "#ff4d5e"); }}
+                key={q}
+                className={`toggle ${fragQty === q ? "on" : ""}`}
+                onClick={() => {
+                  sfx.click();
+                  setFragQty(q as 1 | 5);
+                }}
               >
-                ${p.p}
+                ×{q}
               </button>
-              <span className="pointer-events-none absolute right-2 top-2 rotate-12 rounded border border-[var(--line2)] px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-[var(--dim)]">
-                PLACEHOLDER
-              </span>
+            ))}
+          </div>
+        </div>
+        <div className="panel p-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+            {TOWERS.map((t) => {
+              const on = t.id === fragPick;
+              const rc = RARITY[t.rarity];
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    sfx.click();
+                    setFragPick(t.id);
+                  }}
+                  className="flex items-center gap-2 rounded-lg border px-2 py-1.5 text-left transition"
+                  style={{
+                    borderColor: on ? rc.color : "var(--line)",
+                    background: on ? rc.color + "22" : "rgba(8,5,26,0.4)",
+                  }}
+                >
+                  <TowerIcon def={t} size={30} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[12px] font-bold" style={{ color: rc.color }}>{t.name}</div>
+                    <div className="text-[10px] font-bold text-[var(--dim)]">
+                      <span className="text-[#ffcf4d]">{FRAG_PRICE[t.rarity]}</span>g · have {save.frags[t.id] || 0}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <TowerIcon def={picked} size={40} />
+              <div>
+                <div className="font-disp text-base" style={{ color: RARITY[picked.rarity].color }}>
+                  {picked.name} × {fragQty}
+                </div>
+                <div className="text-[11px] font-bold text-[var(--dim)]">
+                  {FRAG_PRICE[picked.rarity]} gold each · unlocks at {picked.unlockFrags} fragments
+                </div>
+              </div>
             </div>
-          ))}
+            <button
+              className={`btn px-5 py-2 text-[13px] ${save.gold >= fragCost ? "btn-gold" : ""}`}
+              disabled={save.gold < fragCost}
+              onClick={buyFrags}
+            >
+              <span className="inline-flex items-center gap-1.5"><CoinIcon size={14} /> {fragCost}</span>
+            </button>
+          </div>
         </div>
       </div>
 
+      {/* TOKEN EXCHANGE */}
       <div>
-        <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">LEGENDARY TOWERS</div>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {TOWERS.filter((t) => t.rarity === "legendary").map((t) => (
-            <div key={t.id} className="panel relative flex flex-col items-center p-4 opacity-80">
-              <TowerIcon def={t} size={72} locked />
-              <div className="font-disp mt-1 text-base text-[#ffb324]">{t.name}</div>
-              <p className="mt-1 line-clamp-3 text-center text-xs font-semibold text-[var(--dim)]">{t.desc}</p>
-              <button
-                className="btn mt-3 w-full py-2 text-sm"
-                onClick={() => { sfx.error(); push("Legendary tower sales coming soon", "#ff4d5e"); }}
-              >
-                Coming Soon
-              </button>
-              <span className="pointer-events-none absolute right-2 top-2 rotate-12 rounded border border-[var(--line2)] px-1.5 py-0.5 text-[10px] font-bold tracking-widest text-[var(--dim)]">
-                PLACEHOLDER
-              </span>
+        <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">MAGIC TOKEN EXCHANGE</div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {TOKEN_PACKS.map((p) => {
+            const afford = save.gems >= p.gems;
+            return (
+              <div key={p.tokens} className="panel flex items-center justify-between gap-3 p-4">
+                <div className="flex items-center gap-2">
+                  <TokenIcon size={30} />
+                  <div>
+                    <div className="font-disp text-lg text-[#ff4fd8]">×{p.tokens}</div>
+                    <div className="text-[11px] font-bold text-[var(--dim)]">Magic Tokens</div>
+                  </div>
+                </div>
+                <button
+                  className={`btn flex items-center gap-1.5 px-4 py-2 text-[13px] ${afford ? "btn-cyan" : ""}`}
+                  disabled={!afford}
+                  onClick={() => buyTokens(p.tokens, p.gems)}
+                >
+                  <GemIcon size={14} /> {p.gems}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-1.5 text-[11px] font-semibold text-[var(--dim)]">
+          Tokens fuel awakenings in the Towers tab. Earn gems in Battle, Party and Endless runs.
+        </p>
+      </div>
+
+      {/* LEGENDARY VAULT */}
+      <div>
+        <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">LEGENDARY VAULT</div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {legendaries.map((t) => (
+            <div key={t.id} className="panel flex flex-col items-center p-3" style={{ borderColor: RARITY.legendary.color + "55" }}>
+              <TowerIcon def={t} size={64} locked={(save.levels[t.id] || 0) === 0} />
+              <div className="font-disp mt-1 text-center text-[14px] text-[#ffb324]">{t.name}</div>
+              <p className="mt-1 line-clamp-3 text-center text-[11px] font-semibold text-[var(--dim)]">{t.desc}</p>
+              <div className="mt-2 text-[11px] font-bold text-[var(--dim)]">
+                {(save.levels[t.id] || 0) > 0 ? `OWNED · Lv ${save.levels[t.id]}` : `Needs ${t.unlockFrags} frags (${save.frags[t.id] || 0})`}
+              </div>
             </div>
           ))}
         </div>
+        <p className="mt-1.5 text-[11px] font-semibold text-[var(--dim)]">
+          Buy legendary fragments above, or crack Legendary Chests for a chance at one.
+        </p>
       </div>
       <div className="h-2 shrink-0" />
 

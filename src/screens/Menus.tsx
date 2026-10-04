@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { todayStr, clearSave, defaultSave } from "../game/save";
-import { sfx } from "../game/audio";
+import { todayStr, clearSave, defaultSave, importSave, persistSave } from "../game/save";
+import { sfx, setVolume } from "../game/audio";
 import { Emblem, HeroIcon, Modal, TowerIcon } from "../components/ui";
 import { TOWERS, BATTLE_ROUNDS, PARTY_ROUNDS, HEROES, HERO_BY_ID } from "../game/data";
 
@@ -377,6 +377,8 @@ export function SettingsModal({
   const [confirmReset, setConfirmReset] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
   const diagnostics = () => {
     const w = window as unknown as { __magictdBootErrors?: string[]; __magictdLastError?: string };
     return [
@@ -391,23 +393,54 @@ export function SettingsModal({
       `last render error: ${w.__magictdLastError || "none"}`,
     ].join("\n");
   };
+  const TOGGLES: [string, keyof SaveData & string, string][] = [
+    ["Battle SFX", "sfx", "Sound effects during battle and menus"],
+    ["Rich FX", "fx", "Extra particles, smoke and hit effects"],
+    ["Damage Numbers", "dmgNums", "Floating damage values over every hit"],
+    ["Screen Shake", "shakeFx", "Impact shake on explosions and hero skills"],
+    ["Battlefield Guides", "guides", "Grid, buildable-cell and range circles"],
+    ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves"],
+    ["Reduced Motion", "reducedMotion", "Calms looping menu animations"],
+    ["Performance HUD", "perf", "FPS and live entity counter in battle"],
+  ];
   return (
-    <Modal onClose={onClose} w={440}>
+    <Modal onClose={onClose} w={470}>
       <div className="font-disp text-2xl text-[#ffcf4d]">Settings</div>
-      <div className="mt-4 space-y-3">
-        {([
-          ["Battle SFX", "sfx", "Sound effects during battle and menus"],
-          ["Rich FX", "fx", "Extra particles and screen shake"],
-        ] as const).map(([label, key, d]) => (
+
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">AUDIO</div>
+      <div className="row-card mt-1.5">
+        <div>
+          <div className="font-bold">Master Volume</div>
+          <div className="text-xs font-semibold text-[var(--dim)]">{Math.round(save.vol * 100)}%</div>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={100}
+          value={Math.round(save.vol * 100)}
+          onChange={(e) => {
+            const v = Number(e.target.value) / 100;
+            mutate((s) => { s.vol = v; });
+            setVolume(v);
+          }}
+          className="w-[150px] shrink-0 accent-[#35e0ff]"
+          aria-label="Master Volume"
+        />
+      </div>
+
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
+      <div className="mt-1.5 space-y-3">
+        {TOGGLES.map(([label, key, d]) => (
           <div key={key} className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
             <div>
               <div className="font-bold">{label}</div>
               <div className="text-xs font-semibold text-[var(--dim)]">{d}</div>
             </div>
             <button
-              className="btn px-4 py-1.5 text-sm"
+              className={`toggle ${save[key] ? "on" : ""}`}
+              aria-pressed={!!save[key]}
               onClick={() => {
-                mutate((s) => { s[key] = !s[key]; });
+                mutate((s) => { s[key] = !s[key] as never; });
                 sfx.click();
               }}
             >
@@ -415,6 +448,71 @@ export function SettingsModal({
             </button>
           </div>
         ))}
+      </div>
+
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">SAVE DATA</div>
+      <div className="mt-1.5 space-y-3">
+        <div className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+          <div>
+            <div className="font-bold">Backup</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Copy your progress as text, or paste one back in</div>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <button
+              className="btn px-3 py-1.5 text-sm"
+              onClick={() => {
+                const text = JSON.stringify(save);
+                navigator.clipboard?.writeText(text).catch(() => {});
+                setCopied(true);
+                sfx.click();
+                setTimeout(() => setCopied(false), 1500);
+              }}
+            >
+              {copied ? "Copied" : "Export"}
+            </button>
+            <button
+              className="btn px-3 py-1.5 text-sm"
+              onClick={() => {
+                sfx.click();
+                setImportOpen((v) => !v);
+              }}
+            >
+              {importOpen ? "Hide" : "Import"}
+            </button>
+          </div>
+        </div>
+        {importOpen && (
+          <div className="rounded-lg border border-[var(--line)] bg-black/30 p-3">
+            <textarea
+              className="scroll-thin h-24 w-full resize-none rounded-md border border-[var(--line)] bg-black/50 p-2 text-[11px] leading-snug text-[var(--txt)] outline-none"
+              placeholder="Paste an exported save here..."
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+            />
+            <button
+              className="btn btn-cyan mt-2 w-full py-1.5 text-sm"
+              disabled={!importText.trim()}
+              onClick={() => {
+                try {
+                  const next = importSave(importText);
+                  persistSave(next);
+                  mutate((s) => {
+                    Object.assign(s, next);
+                  });
+                  setVolume(next.vol);
+                  setImportOpen(false);
+                  setImportText("");
+                  sfx.gem();
+                  window.dispatchEvent(new CustomEvent("magictd-imported"));
+                } catch {
+                  sfx.error();
+                }
+              }}
+            >
+              Restore Progress
+            </button>
+          </div>
+        )}
         <div className="flex items-center justify-between rounded-lg border border-[#ff4d5e55] bg-black/30 px-4 py-3">
           <div>
             <div className="font-bold text-[#ff4d5e]">Reset Progress</div>

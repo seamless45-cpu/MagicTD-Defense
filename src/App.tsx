@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { loadSave, persistSave, type SaveData } from "./game/save";
-import { sfx, setSfx, initAudio } from "./game/audio";
+import { sfx, setSfx, setVolume, initAudio } from "./game/audio";
 import { CurrencyBar, Emblem, Toasts, useToasts } from "./components/ui";
 import { LoadingScreen, Home, Specials, Guild, SettingsModal, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
@@ -97,7 +97,8 @@ export default function App() {
 
   useEffect(() => {
     setSfx(save.sfx);
-  }, [save.sfx]);
+    setVolume(save.vol);
+  }, [save.sfx, save.vol]);
 
   // the static splash in index.html is only there until the app has painted
   useEffect(() => {
@@ -148,7 +149,7 @@ export default function App() {
 
   if (screen === "battle" || screen === "party" || screen === "endless") {
     return (
-      <div className="h-full">
+      <div className={`h-full ${save.reducedMotion ? "calm" : ""}`}>
         <Battle
           key={screen + save.hero}
           mode={MODES[screen].mode}
@@ -161,7 +162,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-bg flex h-full flex-col">
+    <div className={`app-bg flex h-full flex-col ${save.reducedMotion ? "calm" : ""}`}>
       <Toasts toasts={toasts} />
       {/* top bar — wraps on narrow screens so the settings button is never clipped */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-3">

@@ -15,6 +15,20 @@ export interface SaveData {
   runs: number;
   sfx: boolean;
   fx: boolean;
+  /** 0..1 master volume */
+  vol: number;
+  /** floating damage numbers */
+  dmgNums: boolean;
+  /** camera shake on explosions */
+  shakeFx: boolean;
+  /** grid + range guides on the battlefield */
+  guides: boolean;
+  /** skip the countdown between waves */
+  fastWaves: boolean;
+  /** calmer animations (fewer particles, no pulsing glow) */
+  reducedMotion: boolean;
+  /** fps + entity counter overlay */
+  perf: boolean;
   lastDaily: string;
   lastSeen: number;
 }
@@ -37,9 +51,27 @@ export function defaultSave(): SaveData {
     runs: 0,
     sfx: true,
     fx: true,
+    vol: 0.7,
+    dmgNums: true,
+    shakeFx: true,
+    guides: true,
+    fastWaves: false,
+    reducedMotion: false,
+    perf: false,
     lastDaily: "",
     lastSeen: 0,
   };
+}
+
+/** merge an exported save blob back into a playable save */
+export function importSave(raw: string): SaveData {
+  const parsed = JSON.parse(raw) as Partial<SaveData>;
+  const s: SaveData = { ...defaultSave(), ...parsed };
+  s.levels = s.levels && Object.keys(s.levels).length ? s.levels : defaultSave().levels;
+  s.lineup = (Array.isArray(s.lineup) ? s.lineup : []).filter((id) => s.levels[id]);
+  if (!HERO_BY_ID[s.hero]) s.hero = "nova";
+  s.vol = Math.min(1, Math.max(0, Number.isFinite(s.vol) ? s.vol : 0.7));
+  return s;
 }
 
 export function loadSave(): SaveData {

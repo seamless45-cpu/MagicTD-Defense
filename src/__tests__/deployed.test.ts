@@ -56,6 +56,22 @@ describe("published build (index.html)", () => {
     expect(text).toContain("HERO");
     expect(text).toContain("Nova");
 
+    // the deployed bundle carries this update: the 12-tower arsenal, the run shop,
+    // party rally, the tower preview and the awakening ceremony
+    const markers = [
+      "Battle Shop",
+      "FRAGMENT EXCHANGE",
+      "Master Volume",
+      "Dragon's Maw",
+      "Sunforge",
+      "Missile Battery",
+      "Toxic Sprayer",
+      "RALLY",
+      "CONGRATULATIONS",
+    ];
+    const missing = markers.filter((m) => !html.includes(m));
+    expect(missing, `published bundle is missing: ${missing.join(", ")}`).toHaveLength(0);
+
     dom.window.close();
   }, 30000);
 });

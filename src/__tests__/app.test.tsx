@@ -138,6 +138,50 @@ describe("Settings", () => {
     noErrors();
   });
 
+  it("exposes the new gameplay and visual options", async () => {
+    await mountApp();
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => byText("div", "Settings"), "settings modal");
+
+    // every new toggle is present and persisted
+    for (const label of ["Damage Numbers", "Screen Shake", "Battlefield Guides", "Auto-Start Waves", "Reduced Motion", "Performance HUD"]) {
+      expect(document.body.textContent, label).toContain(label);
+    }
+    // the label sits in a wrapper div inside its option row — walk up to the row
+    const rowFor = (label: string) => {
+      const lab = all("div").find((d) => (d.textContent || "").trim() === label)!;
+      let el: HTMLElement | null = lab.parentElement;
+      while (el && !el.querySelector("button")) el = el.parentElement;
+      return el!;
+    };
+    expect(saved().dmgNums).toBe(true);
+    click(rowFor("Damage Numbers").querySelector("button")!);
+    await waitFor(() => saved().dmgNums === false, "damage numbers off");
+
+    click(rowFor("Auto-Start Waves").querySelector("button")!);
+    await waitFor(() => saved().fastWaves === true, "auto-start on");
+    click(rowFor("Performance HUD").querySelector("button")!);
+    await waitFor(() => saved().perf === true, "perf hud on");
+
+    // master volume slider
+    const slider = document.querySelector('input[type="range"]') as HTMLInputElement;
+    expect(slider).toBeTruthy();
+    // React tracks the value property, so drive the native setter like a real drag
+    const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    setValue.call(slider, "30");
+    slider.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => Math.abs(saved().vol - 0.3) < 0.001, "volume persisted");
+
+    // reduced motion class is applied to the shell
+    click(rowFor("Reduced Motion").querySelector("button")!);
+    await waitFor(() => saved().reducedMotion === true, "reduced motion on");
+    await waitFor(() => document.querySelector(".calm"), "calm class applied");
+
+    click(byText("button", "Close")!);
+    await waitFor(() => !byText("div", "Reset Progress"), "settings closed");
+    noErrors();
+  });
+
   it("persists a reset instead of restoring the old save", async () => {
     persistSave({ ...defaultSave(), gold: 9999, levels: { arrow: 5 }, lineup: ["arrow"] });
     await mountApp();
@@ -182,6 +226,45 @@ describe("Shop", () => {
     expect(saved().gold).toBeGreaterThan(goldBefore - 40);
     noErrors();
   });
+
+  it("trades gold for specific fragments in the exchange", async () => {
+    persistSave({ ...defaultSave(), gold: 1000, frags: {} });
+    await mountApp();
+    click(byText("button", "Shop")!);
+    await waitFor(() => byText("div", "FRAGMENT EXCHANGE"), "shop exchange");
+
+    const arrowPick = all("button").find((b) => (b.textContent || "").includes("Arrow"))!;
+    click(arrowPick);
+    const panel = byText("div", "FRAGMENT EXCHANGE")!.parentElement!;
+    const buy = Array.from(panel.querySelectorAll("button")).find((b) => (b.textContent || "").trim() === "120")!;
+    expect(buy, "fragment buy button").toBeTruthy();
+    const goldBefore = saved().gold;
+    click(buy);
+    await waitFor(() => (saved().frags.arrow || 0) === 1, "arrow fragment bought");
+    expect(saved().gold).toBe(goldBefore - 120);
+
+    // x5 buys five at once
+    click(all("button").find((b) => (b.textContent || "").trim() === "×5")!);
+    await sleep(60);
+    const buy5 = Array.from(panel.querySelectorAll("button")).find((b) => (b.textContent || "").trim() === "600")!;
+    click(buy5);
+    await waitFor(() => (saved().frags.arrow || 0) === 6, "five more fragments bought");
+    noErrors();
+  });
+
+  it("exchanges gems for magic tokens", async () => {
+    persistSave({ ...defaultSave(), gems: 4 });
+    await mountApp();
+    click(byText("button", "Shop")!);
+    await waitFor(() => byText("div", "MAGIC TOKEN EXCHANGE"), "token exchange");
+
+    const pack = all("button").find((b) => (b.textContent || "").replace(/\s/g, "") === "4")!;
+    expect(pack, "5-token pack").toBeTruthy();
+    click(pack);
+    await waitFor(() => saved().tokens === 5, "tokens banked");
+    expect(saved().gems).toBe(0);
+    noErrors();
+  });
 });
 
 describe("Heroes", () => {
@@ -203,19 +286,45 @@ describe("Heroes", () => {
 });
 
 describe("Towers", () => {
-  it("upgrades a tower with gold + fragments and toggles the lineup", async () => {
+  it("previews a tower and upgrades it from the preview panel", async () => {
+    persistSave({
+      ...defaultSave(),
+      gold: 5000,
+      frags: { ...defaultSave().frags, arrow: 9 },
+    });
     await mountApp();
     click(byText("button", "Towers")!);
     await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
 
-    const card = () => all(".panel").find((p) => (p.textContent || "").includes("Arrow") && (p.textContent || "").includes("Upgrade"))!;
-    const before = saved();
-    expect(before.levels.arrow).toBe(1);
+    const card = () => all(".panel").find((p) => (p.textContent || "").includes("Arrow") && (p.textContent || "").includes("Preview"))!;
+    expect(card().textContent).toContain("Lv 1/15");
 
-    click(byText("button", "Upgrade")!);
+    const before = saved();
+    click(byText("button", "Preview & Upgrade")!);
+    const pv = await waitFor(
+      () => document.querySelector('[data-testid="tower-preview"]') as HTMLElement,
+      "tower preview panel"
+    );
+    // name on top, description below it, stats with upgrade deltas, ascent section
+    expect(pv.textContent).toContain("Arrow");
+    expect(pv.textContent).toContain("Fires an arrow at the enemy");
+    expect(pv.textContent).toContain("Damage");
+    expect(pv.textContent).toContain("+2"); // the next level buys +2 damage
+    expect(pv.textContent).toContain("ASCENT");
+
+    const upgrade = Array.from(pv.querySelectorAll("button")).find((b) => /Upgrade/.test(b.textContent || ""))!;
+    click(upgrade);
     await waitFor(() => saved().levels.arrow === 2, "arrow upgraded to level 2");
     expect(saved().gold).toBe(before.gold - 50);
     expect(saved().frags.arrow).toBe(before.frags.arrow - 1);
+    // the preview re-renders with the new level
+    await waitFor(
+      () => (document.querySelector('[data-testid="tower-preview"]') as HTMLElement).textContent?.includes("Lv 2/15"),
+      "preview shows the new level"
+    );
+
+    click(byText("button", "Close")!);
+    await waitFor(() => !document.querySelector('[data-testid="tower-preview"]'), "preview closed");
     expect(card().textContent).toContain("Lv 2/15");
 
     click(byText("button", "In Lineup — Remove")!);
@@ -258,11 +367,61 @@ describe("Towers", () => {
     click(byText("button", "Towers")!);
     await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
 
-    const unlockBtn = byText("button", "Unlock ·")!;
-    expect(unlockBtn).toBeTruthy();
-    click(unlockBtn);
+    const lockCard = all(".panel").find(
+      (p) => (p.textContent || "").includes("Lightning Princess") && (p.textContent || "").includes("LOCKED")
+    )!;
+    expect(lockCard).toBeTruthy();
+    click(Array.from(lockCard.querySelectorAll("button")).find((b) => /Preview/.test(b.textContent || ""))!);
+
+    const pv = await waitFor(
+      () => document.querySelector('[data-testid="tower-preview"]') as HTMLElement,
+      "locked tower preview"
+    );
+    expect(pv.textContent).toContain("LOCKED");
+    click(Array.from(pv.querySelectorAll("button")).find((b) => (b.textContent || "").trim() === "Unlock")!);
     await waitFor(() => /not enough|need/i.test(document.body.textContent || ""), "denial toast");
     expect(saved().levels.hellstorm).toBeUndefined();
+    noErrors();
+  });
+});
+
+describe("Awakenings", () => {
+  it("plays a congratulations ceremony when a tower awakens", async () => {
+    persistSave({
+      ...defaultSave(),
+      gold: 5000,
+      tokens: 99,
+      levels: { ...defaultSave().levels, lightning: 13 },
+      lineup: ["arrow", "cannon", "ice"],
+    });
+    await mountApp();
+    click(byText("button", "Towers")!);
+    await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
+
+    const card = all(".panel").find((p) => (p.textContent || "").includes("Lightning Princess"))!;
+    click(Array.from(card.querySelectorAll("button")).find((b) => /Preview/.test(b.textContent || ""))!);
+    const pv = await waitFor(
+      () => document.querySelector('[data-testid="tower-preview"]') as HTMLElement,
+      "preview panel"
+    );
+    expect(pv.textContent).toContain("Lightning Princess");
+    // the preview lists the awakening paths for exotic towers
+    expect(pv.textContent).toContain("Superbolt");
+    const awakenBtn = Array.from(pv.querySelectorAll("button")).find((b) => /Tier I\b/.test(b.textContent || ""));
+    expect(awakenBtn, "awaken button").toBeTruthy();
+    click(awakenBtn!);
+
+    const cer = await waitFor(
+      () => document.querySelector('[data-testid="ceremony"]') as HTMLElement,
+      "awakening ceremony"
+    );
+    expect(cer.textContent).toContain("CONGRATULATIONS");
+    expect(cer.textContent).toContain("TIER I");
+    expect(cer.textContent).toContain("Lightning Princess");
+    expect(saved().awn.lightning?.[0]).toBe(1);
+
+    click(byText("button", "Continue")!);
+    await waitFor(() => !document.querySelector('[data-testid="ceremony"]'), "ceremony dismissed");
     noErrors();
   });
 });
@@ -283,7 +442,7 @@ describe("Specials", () => {
 });
 
 describe("Battle", () => {
-  it("mounts the engine, deploys a tower, spawns a wave and can be abandoned", async () => {
+  it("mounts the engine, spawns towers instantly, spawns a wave and can be abandoned", async () => {
     await mountApp();
     startMode("Battle");
 
@@ -295,18 +454,19 @@ describe("Battle", () => {
     await waitFor(() => canvasStats.calls > startCalls + 50, "render loop drawing frames");
     expect(document.body.textContent).toContain("ROUND 1/12");
 
-    // drag the first lineup tower onto an empty build cell (c=1,r=0 -> 320,155)
+    // three lineup towers are already on the grid, shown on their HUD slots
     const summon = byText("button", "SUMMON")!;
     const slot0 = summon.parentElement!.children[0] as HTMLElement;
-    expect(slot0.querySelector("svg"), "lineup slot holds a tower icon").toBeTruthy();
     expect(slot0.textContent).toContain("Lv1");
-    pointer("pointerdown", slot0);
-    pointer("pointermove", window, 320, 155);
-    pointer("pointerup", window, 320, 155);
-    await waitFor(
-      () => (byText("button", "SUMMON")!.parentElement!.children[0] as HTMLElement).querySelector('[class*="3dff8e"]'),
-      "tower placed on the grid"
-    );
+    await waitFor(() => slot0.querySelector('[class*="3dff8e"]'), "tower auto-deployed onto the grid");
+
+    // SUMMON spawns a tower straight into a random free cell - no dragging
+    const spNow = () =>
+      Number((document.querySelector('[data-testid="sp-chip"]')?.textContent || "").replace(/[^\d]/g, ""));
+    const spBefore = spNow();
+    click(summon);
+    await waitFor(() => spNow() < spBefore, "summon spent SP");
+    await waitFor(() => (document.body.textContent || "").includes("deployed!"), "summon toast");
 
     // wave 1 begins ~7s after deploy phase starts
     const enemiesOut = await waitFor(() => {
@@ -322,15 +482,58 @@ describe("Battle", () => {
     noErrors();
   });
 
-  it("boots party mode with teammates and 15 rounds", async () => {
+  it("boots the reworked party mode with perks, synergies, rally and 15 rounds", async () => {
     await mountApp();
     startMode("Party");
     await waitFor(() => byText("button", "SUMMON"), "party battle HUD");
     expect(document.body.textContent).toContain("ROUND 1/15");
     expect(document.body.textContent).toContain("PARTY MODE");
+    // each teammate now states the perk the whole squad gets
     expect(document.body.textContent).toContain("Kael");
+    expect(document.body.textContent).toContain("+12% tower damage");
+    expect(document.body.textContent).toContain("+8% crit chance");
+    expect(document.body.textContent).toContain("+6 lives");
+    expect(document.body.textContent).toContain("SYNERGY");
+
+    // the rally meter starts empty and refuses to fire early
+    const rally = document.querySelector('[data-testid="rally"]') as HTMLElement;
+    expect(rally, "rally button").toBeTruthy();
+    expect(rally.textContent).toContain("0%");
+    click(rally);
+    await waitFor(() => /rally meter is not full/i.test(document.body.textContent || ""), "rally denial toast");
 
     await waitFor(() => canvasStats.calls > 50, "party render loop drawing");
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  });
+
+  it("buys upgrades from the in-battle shop with run gold", async () => {
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+
+    const spNow = () =>
+      Number((document.querySelector('[data-testid="sp-chip"]')?.textContent || "").replace(/[^\d]/g, ""));
+    const spBefore = spNow();
+
+    click(document.querySelector('[data-testid="battle-shop"]') as HTMLElement);
+    const shop = await waitFor(
+      () => document.querySelector('[data-testid="run-shop"]') as HTMLElement,
+      "run shop modal"
+    );
+    expect(shop.textContent).toContain("Mana Battery");
+    expect(shop.textContent).toContain("Meteor Strike");
+
+    // Mana Battery: 60 gold -> +150 SP
+    const buyBtn = Array.from(shop.querySelectorAll("button")).find((b) => (b.textContent || "").includes("60"))!;
+    expect(buyBtn, "mana battery price button").toBeTruthy();
+    click(buyBtn);
+    await waitFor(() => spNow() >= spBefore + 150, "SP banked from the shop");
+    expect(document.querySelector('[data-testid="run-shop"]')).toBeTruthy();
+
+    click(byText("button", "Back to battle")!);
+    await waitFor(() => !document.querySelector('[data-testid="run-shop"]'), "shop closed");
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
     noErrors();

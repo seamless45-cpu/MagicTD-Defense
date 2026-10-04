@@ -17,6 +17,18 @@ import {
   POINT_DMG_STEP,
   ASC_DMG_MUL,
   towerDamage,
+  towerStatRows,
+  RUN_SHOP,
+  runShopCost,
+  TEAMMATES,
+  PARTY_PERK,
+  perkMult,
+  RALLY_GAIN,
+  RALLY_TIME,
+  RALLY_ASPD,
+  RALLY_DMG,
+  RALLY_BLAST,
+  SYNERGY_DMG,
   HEROES,
   HERO_BY_ID,
 } from "../game/data";
@@ -25,6 +37,7 @@ import {
   loadSave,
   persistSave,
   clearSave,
+  importSave,
   unlockedTowers,
   randFrag,
   addFrag,
@@ -92,6 +105,98 @@ describe("tower data", () => {
     expect(TOWER_BY_ID.void.pctHp).toBeGreaterThan(0);
     expect(TOWER_BY_ID.plasma.pierce).toBeGreaterThan(0);
     expect(TOWER_BY_ID.plasma.exotic).toBe(true);
+  });
+
+  it("ships the 12-tower arsenal across every rarity", () => {
+    const newIds = [
+      "sling", "flame", "spike", "boomer", "toxin", // normal
+      "axe", "frost", "mortar", // decent
+      "laser", "missile", // epic
+      "dragon", "sun", // legendary
+    ];
+    expect(newIds).toHaveLength(12);
+    for (const id of newIds) {
+      const def = TOWER_BY_ID[id];
+      expect(def, id).toBeDefined();
+      expect(def.name.length).toBeGreaterThan(2);
+      expect(def.desc.length).toBeGreaterThan(10);
+      expect(def.unlockFrags).toBeGreaterThan(0);
+      expect(def.rate).toBeGreaterThan(0);
+      expect(def.art, `${id} art family`).toBeTruthy();
+    }
+    const byRarity = (r: string) => newIds.filter((id) => TOWER_BY_ID[id].rarity === r);
+    expect(byRarity("normal")).toHaveLength(5);
+    expect(byRarity("decent")).toHaveLength(3);
+    expect(byRarity("epic")).toHaveLength(2);
+    expect(byRarity("legendary")).toHaveLength(2);
+    // the roster grew from 15 to 27 towers
+    expect(TOWERS).toHaveLength(27);
+    // mechanics actually differ between them
+    expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.mortar.splash).toBeGreaterThan(TOWER_BY_ID.spike.splash!);
+    expect(TOWER_BY_ID.laser.chain).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.missile.multi).toBeGreaterThan(1);
+    expect(TOWER_BY_ID.frost.slowAura).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.sun.target).toBe("all");
+    expect(TOWER_BY_ID.dragon.killStack).toBeGreaterThan(0);
+  });
+
+  it("describes each tower's next upgrade as a +X / -Y delta", () => {
+    const arrow = towerStatRows(TOWER_BY_ID.arrow, 1);
+    const dmg = arrow.find((r) => r.label === "Damage")!;
+    expect(dmg.value).toBe("50");
+    expect(dmg.next).toBe("52");
+    expect(dmg.delta).toBe("+2");
+    expect(dmg.better).toBe("up");
+
+    // faster firing is a negative delta on the shot interval
+    const rate = arrow.find((r) => r.label === "Shot Interval")!;
+    expect(rate.value).toBe("0.50s");
+    expect(rate.delta?.startsWith("-")).toBe(true);
+    expect(rate.better).toBe("down");
+
+    // maxed stats say so instead of promising a fake upgrade
+    const maxed = towerStatRows(TOWER_BY_ID.lightning, MAX_MENU_LEVEL).find((r) => r.label === "Damage")!;
+    expect(maxed.maxed).toBe(true);
+    expect(maxed.delta).toBeUndefined();
+
+    for (const t of TOWERS) {
+      const rows = towerStatRows(t, 3);
+      expect(rows.length, t.id).toBeGreaterThan(2);
+      for (const r of rows) {
+        expect(r.label.length).toBeGreaterThan(0);
+        expect(r.value.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("prices the run shop so repeat buys get more expensive", () => {
+    expect(RUN_SHOP.length).toBeGreaterThanOrEqual(6);
+    for (const item of RUN_SHOP) {
+      expect(item.max).toBeGreaterThan(0);
+      expect(item.cost).toBeGreaterThan(0);
+      expect(runShopCost(item, 0)).toBe(item.cost);
+      if (item.step) expect(runShopCost(item, 2)).toBeGreaterThan(runShopCost(item, 1));
+    }
+    expect(RUN_SHOP.map((i) => i.id)).toContain("meteor");
+  });
+
+  it("gives party mode a perk per teammate and a rally meter", () => {
+    expect(TEAMMATES).toHaveLength(3);
+    for (const m of TEAMMATES) {
+      expect(m.perk.length).toBeGreaterThan(4);
+      expect(PARTY_PERK[m.perkId]).toBeGreaterThan(0);
+    }
+    expect(perkMult(TEAMMATES, "life")).toBe(PARTY_PERK.life);
+    expect(RALLY_GAIN).toBeGreaterThan(0);
+    expect(RALLY_TIME).toBeGreaterThan(0);
+    expect(RALLY_ASPD).toBeGreaterThan(0);
+    expect(RALLY_DMG).toBeGreaterThan(0);
+    expect(RALLY_BLAST).toBeGreaterThan(0);
+    expect(SYNERGY_DMG).toBeGreaterThan(0);
+    // no duplicate perk ids, or a perk would double up silently
+    expect(new Set(TEAMMATES.map((m) => m.perkId)).size).toBe(TEAMMATES.length);
   });
 
   it("gives every hero a cooldown, colour and unique ability", () => {
@@ -198,6 +303,33 @@ describe("save file", () => {
     expect(s.frags.arrow).toBe(5);
     addFrag(s, "not-a-tower", 3);
     expect(s.frags["not-a-tower"]).toBeUndefined();
+  });
+
+  it("ships the new settings with sane defaults and migrates old saves", () => {
+    const s = defaultSave();
+    expect(s.vol).toBeGreaterThan(0);
+    expect(s.dmgNums).toBe(true);
+    expect(s.shakeFx).toBe(true);
+    expect(s.guides).toBe(true);
+    expect(s.fastWaves).toBe(false);
+    expect(s.reducedMotion).toBe(false);
+    expect(s.perf).toBe(false);
+    // a save written before the settings existed still loads
+    localStorage.setItem("magictd_save_v1", JSON.stringify({ gold: 777, levels: { arrow: 4 }, lineup: ["arrow"] }));
+    const back = loadSave();
+    expect(back.gold).toBe(777);
+    expect(back.vol).toBe(defaultSave().vol);
+    expect(back.guides).toBe(true);
+  });
+
+  it("imports an exported save blob and heals broken fields", () => {
+    const blob = JSON.stringify({ ...defaultSave(), gold: 4242, hero: "nope", lineup: ["arrow", "ghost"], vol: 5 });
+    const s = importSave(blob);
+    expect(s.gold).toBe(4242);
+    expect(s.hero).toBe("nova");
+    expect(s.lineup).toEqual(["arrow"]);
+    expect(s.vol).toBe(1);
+    expect(() => importSave("{not json")).toThrow();
   });
 
   it("todayStr is an iso date", () => {

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TowerDef } from "../game/data";
-import { RARITY } from "../game/data";
+import { RARITY, towerArt } from "../game/data";
 
 export function CoinIcon({ size = 18 }: { size?: number }) {
   return (
@@ -65,6 +65,7 @@ export function TowerIcon({
   locked?: boolean;
 }) {
   const c = RARITY[def.rarity].color;
+  const a = def.accent || c;
   const inner = (id: string) => {
     switch (id) {
       case "arrow":
@@ -199,6 +200,55 @@ export function TowerIcon({
             <circle cx="40" cy="14" r="8" fill="none" stroke={c} strokeWidth="1.4" opacity="0.6" />
           </g>
         );
+      // ---------- new art families (12-tower arsenal) ----------
+      case "sling":
+        return (
+          <g>
+            <path d="M24 40V22" stroke={a} strokeWidth="4" strokeLinecap="round" />
+            <path d="M11 14 24 24l13-10" stroke={a} strokeWidth="3.6" strokeLinecap="round" fill="none" />
+            <path d="M11 14v-4M37 14v-4" stroke={a} strokeWidth="3" strokeLinecap="round" />
+            <circle cx="24" cy="26" r="5" fill={a} opacity="0.85" />
+            <path d="M9 10 15 6M39 10 33 6" stroke="#fff2b0" strokeWidth="2" strokeLinecap="round" />
+          </g>
+        );
+      case "flame":
+        return (
+          <g>
+            <rect x="8" y="26" width="20" height="14" rx="4" fill="#2b1f66" stroke={a} strokeWidth="2.5" />
+            <path d="M27 30 42 22v22z" fill={a} opacity="0.35" />
+            <path d="M30 24c2 6 9 8 9 14a7 7 0 0 1-14 0c0-4 3-6 5-14z" fill={a} stroke="#8a3000" strokeWidth="1.4" />
+            <circle cx="14" cy="33" r="3.4" fill={a} />
+          </g>
+        );
+      case "spike":
+        return (
+          <g>
+            <path d="M10 36h28l-4-10H14z" fill="#2b1f66" stroke={a} strokeWidth="2.4" />
+            {[14, 20, 26, 32].map((x) => (
+              <path key={x} d={`M${x} 26 l4-16 l4 16z`} fill={a} stroke="#0b1030" strokeWidth="1.2" />
+            ))}
+            <path d="M6 40h36" stroke={a} strokeWidth="3" strokeLinecap="round" />
+          </g>
+        );
+      case "tube":
+        return (
+          <g>
+            <rect x="6" y="28" width="24" height="13" rx="4" fill="#2b1f66" stroke={a} strokeWidth="2.4" />
+            <path d="M24 30 42 12" stroke={a} strokeWidth="10" strokeLinecap="round" />
+            <path d="M24 30 42 12" stroke="#0b1030" strokeWidth="4" strokeLinecap="round" />
+            <circle cx="42" cy="12" r="5" fill={a} />
+            <circle cx="15" cy="34" r="3.4" fill={a} />
+          </g>
+        );
+      case "beam":
+        return (
+          <g>
+            <rect x="14" y="30" width="20" height="12" rx="4" fill="#2b1f66" stroke={a} strokeWidth="2.4" />
+            <circle cx="24" cy="24" r="10" fill="none" stroke={a} strokeWidth="3" />
+            <circle cx="24" cy="24" r="5" fill={a} />
+            <path d="M24 4v8M8 24h6M40 24h-6M12 12l5 5M36 12l-5 5" stroke={a} strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        );
       default:
         return <circle cx="24" cy="24" r="14" fill={c} />;
     }
@@ -211,7 +261,7 @@ export function TowerIcon({
       style={locked ? { filter: "grayscale(1) brightness(0.5)" } : undefined}
     >
       <rect x="2" y="2" width="44" height="44" rx="10" fill="rgba(8,5,26,0.6)" stroke={c} strokeWidth="2" />
-      {inner(def.id)}
+      {inner(towerArt(def))}
     </svg>
   );
 }
@@ -321,6 +371,143 @@ export function Toasts({ toasts }: { toasts: { id: number; msg: string; color?: 
           {t.msg}
         </div>
       ))}
+    </div>
+  );
+}
+
+export interface CeremonyData {
+  kind: "awaken" | "unlock" | "level";
+  headline: string;
+  sub: string;
+  tier?: string;
+  color: string;
+  desc?: string;
+  tower: TowerDef;
+}
+
+/**
+ * Full-screen celebration shown when a tower awakens (or is unlocked).
+ * Rings expand, runes spin, confetti rains and the tower lands with a slam.
+ */
+export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () => void }) {
+  const confetti = useMemo(
+    () =>
+      Array.from({ length: 48 }, (_, i) => ({
+        id: i,
+        left: Math.random() * 100,
+        top: 40 + Math.random() * 20,
+        dx: (Math.random() - 0.5) * 420,
+        dy: -120 - Math.random() * 420,
+        rot: `${Math.round((Math.random() - 0.5) * 900)}deg`,
+        color: [data.color, "#ffcf4d", "#35e0ff", "#ff4fd8", "#ffffff"][i % 5],
+        size: 5 + Math.random() * 8,
+        delay: Math.random() * 0.7,
+        round: i % 3 === 0,
+      })),
+    [data.color]
+  );
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "Enter" || e.key === " ") onClose();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  const title = data.kind === "awaken" ? "CONGRATULATIONS!" : data.kind === "unlock" ? "TOWER UNLOCKED!" : "TOWER ASCENDED!";
+
+  return (
+    <div
+      className="fixed inset-0 z-[98] flex items-center justify-center overflow-hidden bg-black/85"
+      style={{ animation: "cerBackdrop 0.35s ease both" }}
+      onPointerDown={onClose}
+      data-testid="ceremony"
+    >
+      {/* expanding rings + spinning runes */}
+      <div className="pointer-events-none absolute inset-0">
+        {[0, 0.35, 0.7, 1.05].map((d, i) => (
+          <div
+            key={i}
+            className="cer-ring absolute left-1/2 top-1/2 rounded-full"
+            style={{
+              width: 220,
+              height: 220,
+              border: `3px solid ${data.color}`,
+              boxShadow: `0 0 40px ${data.color}`,
+              animationDelay: `${d}s`,
+            }}
+          />
+        ))}
+        <div
+          className="cer-rune absolute left-1/2 top-1/2 rounded-full"
+          style={{ width: 340, height: 340, border: `2px dashed ${data.color}aa` }}
+        />
+        <div
+          className="cer-rune absolute left-1/2 top-1/2 rounded-full"
+          style={{ width: 440, height: 440, border: `1px solid ${data.color}55`, animationDirection: "reverse" }}
+        />
+        {confetti.map((c) => (
+          <span
+            key={c.id}
+            className="cer-confetti absolute"
+            style={
+              {
+                left: `${c.left}%`,
+                top: `${c.top}%`,
+                width: c.size,
+                height: c.size * (c.round ? 1 : 1.6),
+                background: c.color,
+                borderRadius: c.round ? "50%" : 2,
+                animationDelay: `${c.delay}s`,
+                boxShadow: `0 0 10px ${c.color}`,
+                "--cx": `${c.dx}px`,
+                "--cr": c.rot,
+                "--cy": `${c.dy}px`,
+              } as React.CSSProperties
+            }
+          />
+        ))}
+      </div>
+
+      <div className="relative flex flex-col items-center px-6 text-center">
+        <div
+          className="cer-banner font-disp text-2xl tracking-widest sm:text-4xl"
+          style={{ color: data.color, textShadow: `0 0 28px ${data.color}` }}
+        >
+          {title}
+        </div>
+        <div className="cer-tower mt-6" style={{ color: data.color }}>
+          <TowerIcon def={data.tower} size={168} />
+        </div>
+        <div className="cer-banner mt-5" style={{ animationDelay: "0.55s" }}>
+          <div className="font-disp text-3xl" style={{ color: data.color }}>
+            {data.headline}
+          </div>
+          <div className="mt-1 text-sm font-bold tracking-[0.3em] text-[var(--txt)]">{data.sub}</div>
+          {data.tier && (
+            <div
+              className="font-disp mt-3 inline-block rounded-lg border px-5 py-1 text-xl"
+              style={{ borderColor: data.color, color: data.color }}
+            >
+              {data.tier}
+            </div>
+          )}
+          {data.desc && (
+            <p className="mx-auto mt-3 max-w-md text-[13px] font-semibold leading-snug text-[var(--dim)]">
+              {data.desc}
+            </p>
+          )}
+        </div>
+        <button
+          className="btn btn-gold cer-banner mt-7 px-10 py-2.5 text-base"
+          style={{ animationDelay: "0.8s" }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={onClose}
+        >
+          Continue
+        </button>
+      </div>
     </div>
   );
 }
