@@ -13,14 +13,30 @@ npm run dev      # http://localhost:5173
 Other scripts:
 
 ```bash
-npm run build      # bundles everything into a single self-contained dist/index.html
+npm run build      # bundles the game and updates the committed deploy artifact
 npm run preview    # serve the production build
-npm test           # vitest + jsdom smoke suite (25 tests)
+npm test           # vitest + jsdom suite (27 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
-The production build is one HTML file (~300 kB, no external JS/CSS chunks) thanks to
-`vite-plugin-singlefile`, so it can be opened straight from disk or dropped on any static host.
+The production build is a single self-contained HTML file (~310 kB, no external JS/CSS chunks)
+thanks to `vite-plugin-singlefile`, so it can be opened straight from disk or dropped on any
+static host.
+
+### Two entry HTML files (important)
+
+| File | Role |
+| --- | --- |
+| `app.html` | **Source entry.** The Vite dev/build template. Edit this one. |
+| `index.html` | **Generated deploy artifact** — committed on purpose. Do not edit. |
+
+GitHub Pages is configured to serve this branch's root, so the playable build has to live at
+`./index.html`. `npm run build` runs `vite build` and then `scripts/sync-pages.mjs`, which copies
+the built file to both `dist/index.html` and the repo-root `index.html`. The dev server still
+serves the app at `/` (it rewrites `/` to `app.html`).
+
+**After changing game code, run `npm run build` and commit `index.html`**, otherwise the
+published site keeps serving the previous version.
 
 ## How to play
 
@@ -72,6 +88,7 @@ and chat; Magic Tokens awarded at round 10).
 src/
   App.tsx              screen router + save state
   components/ui.tsx    icons, currency bar, toasts, modal
+  components/ErrorBoundary.tsx  crash panel (never leave a blank page)
   game/data.ts         tower/enemy definitions, wave and cost formulas
   game/save.ts         localStorage save schema
   game/audio.ts        WebAudio synth SFX (no audio files)
@@ -79,7 +96,10 @@ src/
   screens/Menus.tsx    loading, home, specials, guild, settings
   screens/Shop.tsx     chests and reward rolls
   screens/Towers.tsx   lineup management, upgrades, awakenings
-  __tests__/           vitest smoke suite (jsdom canvas stub)
+  __tests__/           vitest suite: data, app integration, deployed artifact
+app.html               Vite entry (edit this)
+index.html             generated build served by GitHub Pages (do not edit)
+scripts/sync-pages.mjs publishes dist/app.html to the repo root
 ```
 
 ## Tests
@@ -87,5 +107,13 @@ src/
 `npm test` boots the real app in jsdom with a stubbed 2D canvas and plays through it:
 loading → every tab, settings toggles + reset persistence, buying/opening/collecting a chest,
 upgrading and re-lineuping towers (tap and drag-and-drop), the daily rite, and a battle run that
-deploys a tower from the lineup, waits for wave 1 to spawn and abandons. The suite also guards the
-save-file helpers and wave/cost formulas.
+deploys a tower from the lineup, waits for wave 1 to spawn and abandons. It also runs party mode,
+guards the save-file helpers and wave/cost formulas, and executes the committed `index.html`
+artifact end-to-end so a broken or missing build cannot reach the published site.
+
+## Deployment
+
+GitHub Pages serves this branch's root (`https://seamless45-cpu.github.io/MagicTD-Defense/`).
+Because the game is a single self-contained file, publishing is just: `npm run build` and commit
+`index.html`. The boot guard in the HTML means that if the published file is ever wrong (for
+example the dev template gets served), the page explains the failure instead of going blank.

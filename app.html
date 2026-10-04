@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>MagicTD Defense</title>
+    <!-- Base styles are inline so the page is themed even if the app's JS/CSS never runs. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #07051a;
+        color: #eae6ff;
+        font-family: "Rajdhani", system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background:
+          radial-gradient(1000px 500px at 15% -10%, rgba(84, 42, 190, 0.35), transparent 60%),
+          linear-gradient(180deg, #100a2e, #07051a 70%);
+        z-index: 1;
+      }
+      #boot-splash .bolt {
+        font-size: 46px;
+        line-height: 1;
+        filter: drop-shadow(0 0 14px rgba(255, 179, 36, 0.8));
+      }
+      #boot-splash .name {
+        font-size: 30px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        color: #ffb324;
+      }
+      #boot-splash .sub {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.4em;
+        color: #35e0ff;
+        margin-top: -12px;
+      }
+      #boot-splash .bar {
+        width: 260px;
+        height: 6px;
+        border-radius: 999px;
+        background: rgba(74, 58, 150, 0.5);
+        overflow: hidden;
+      }
+      #boot-splash .bar i {
+        display: block;
+        width: 40%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #35e0ff, #ff4fd8, #ffb324);
+        animation: bootSlide 1.1s ease-in-out infinite;
+      }
+      @keyframes bootSlide {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(360%);
+        }
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Non-blocking font load: if the font CDN is slow or blocked the page still paints. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bungee&family=Rajdhani:wght@500;600;700&display=swap"
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M18 2 6 18h7l-2 12L26 13h-8l3-11z' fill='%23ffb324'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <!-- Visible until the app mounts; also the worst-case fallback if JS never runs. -->
+    <div id="boot-splash">
+      <div class="bolt">⚡</div>
+      <div class="name">MagicTD</div>
+      <div class="sub">DEFENSE</div>
+      <div class="bar"><i></i></div>
+    </div>
+    <div id="root"></div>
+    <noscript>
+      <div style="font-weight: 600; color: #eae6ff; padding: 24px">MagicTD Defense needs JavaScript enabled.</div>
+    </noscript>
+    <!--
+      Boot guard: the app paints its own CSS from JS, so a failed script would otherwise
+      leave a blank white page with no explanation. This surfaces the reason instead.
+    -->
+    <script>
+      (function () {
+        var errors = [];
+        window.__magictdBootErrors = errors;
+        var splash = document.getElementById("boot-splash");
+        function report(msg) {
+          if (msg && errors.indexOf(msg) === -1) errors.push(msg);
+        }
+        function fill() {
+          var root = document.getElementById("root");
+          if (!root || root.childElementCount > 0) return;
+          var rows = errors
+            .map(function (e) {
+              return '<li style="margin:2px 0">' + String(e).replace(/[<>&]/g, "") + "</li>";
+            })
+            .join("");
+          root.innerHTML =
+            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px">' +
+            '<div style="max-width:640px">' +
+            '<div style="font-size:22px;font-weight:700;color:#ffb324;margin-bottom:8px">MagicTD could not start</div>' +
+            '<p style="margin:0 0 10px;color:#9d93d6">The game&rsquo;s script did not run. Details:</p>' +
+            '<ul style="margin:0;padding-left:18px;color:#ff8f9a">' +
+            (rows || "<li>No error was reported &mdash; the script file may have been blocked or failed to load.</li>") +
+            "</ul>" +
+            '<p style="margin:12px 0 0;color:#9d93d6">Check the browser console / network tab, then reload.</p>' +
+            "</div></div>";
+          if (splash) splash.style.display = "none";
+        }
+        window.addEventListener(
+          "error",
+          function (e) {
+            var t = e && e.target;
+            if (t && t !== window && (t.src || t.href)) report("Failed to load: " + (t.src || t.href));
+            else report((e && e.message) || "Unknown error");
+            fill();
+          },
+          true
+        );
+        window.addEventListener("unhandledrejection", function (e) {
+          report("Unhandled rejection: " + ((e.reason && e.reason.message) || e.reason));
+          fill();
+        });
+        setTimeout(fill, 6000);
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -8,14 +8,18 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// https://vite.dev/config/
 /**
- * Dev-only request logger. When a browser reports a blank page we can check the server
- * log to see exactly which requests it made (and whether the module graph was fetched).
+ * Dev-only extras:
+ *  - serve the Vite entry (`app.html`) at "/" so the familiar URL keeps working
+ *  - log every request so a blank page in a proxied preview can be traced server-side
+ *
+ * `app.html` is the source/dev entry. The repo-root `index.html` is a *generated*
+ * build artifact, committed because GitHub Pages serves this branch's root directly.
+ * Run `npm run build` to regenerate it.
  */
-function requestLogger(): Plugin {
+function devExtras(): Plugin {
   return {
-    name: "magictd-request-logger",
+    name: "magictd-dev-extras",
     apply: "serve",
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
@@ -30,15 +34,27 @@ function requestLogger(): Plugin {
         });
         next();
       });
+      // "/" -> the real entry file
+      server.middlewares.use((req, _res, next) => {
+        const url = req.url || "/";
+        if (url === "/" || url.startsWith("/?")) req.url = "/app.html" + url.slice(1);
+        next();
+      });
     },
   };
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), viteSingleFile(), requestLogger()],
+  plugins: [react(), tailwindcss(), viteSingleFile(), devExtras()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
+    },
+  },
+  build: {
+    // entry is app.html; scripts/sync-pages.mjs copies the result to index.html
+    rollupOptions: {
+      input: path.resolve(__dirname, "app.html"),
     },
   },
   server: {
