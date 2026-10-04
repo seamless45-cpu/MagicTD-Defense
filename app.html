@@ -15,6 +15,7 @@
         color: #eae6ff;
         font-family: "Rajdhani", system-ui, -apple-system, "Segoe UI", sans-serif;
       }
+      /* The static splash mirrors the in-app loading screen so the hand-off is invisible. */
       #boot-splash {
         position: fixed;
         inset: 0;
@@ -22,51 +23,136 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 18px;
+        gap: 14px;
         background:
           radial-gradient(1000px 500px at 15% -10%, rgba(84, 42, 190, 0.35), transparent 60%),
+          radial-gradient(900px 500px at 90% 110%, rgba(255, 79, 216, 0.14), transparent 60%),
+          radial-gradient(700px 400px at 70% 0%, rgba(53, 224, 255, 0.1), transparent 55%),
           linear-gradient(180deg, #100a2e, #07051a 70%);
         z-index: 1;
       }
-      #boot-splash .bolt {
-        font-size: 46px;
-        line-height: 1;
-        filter: drop-shadow(0 0 14px rgba(255, 179, 36, 0.8));
+      #boot-splash .stage {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 168px;
+        height: 168px;
+      }
+      #boot-splash .ring {
+        position: absolute;
+        border-radius: 999px;
+      }
+      #boot-splash .ring.outer {
+        inset: 0;
+        border: 2px dashed rgba(53, 224, 255, 0.32);
+        animation: bootSpin 18s linear infinite;
+      }
+      #boot-splash .ring.inner {
+        inset: 15px;
+        border: 1px solid transparent;
+        border-top-color: rgba(255, 207, 77, 0.9);
+        border-right-color: rgba(255, 79, 216, 0.55);
+        animation: bootSpin 7.5s linear infinite reverse;
+      }
+      #boot-splash .emblem {
+        animation: bootFloat 2.6s ease-in-out infinite;
+        filter: drop-shadow(0 0 16px rgba(255, 179, 36, 0.55));
       }
       #boot-splash .name {
-        font-size: 30px;
+        font-size: 38px;
         font-weight: 700;
-        letter-spacing: 0.06em;
+        letter-spacing: 0.03em;
+        line-height: 1;
         color: #ffb324;
+        text-shadow: 0 0 34px rgba(255, 179, 36, 0.5);
       }
       #boot-splash .sub {
-        font-size: 13px;
+        font-size: 15px;
         font-weight: 700;
-        letter-spacing: 0.4em;
+        letter-spacing: 0.45em;
         color: #35e0ff;
-        margin-top: -12px;
+        margin-top: -6px;
       }
-      #boot-splash .bar {
-        width: 260px;
-        height: 6px;
+      #boot-splash .segs {
+        display: flex;
+        gap: 6px;
+        width: 300px;
+        max-width: 74vw;
+        margin-top: 4px;
+      }
+      #boot-splash .segs i {
+        flex: 1;
+        height: 10px;
         border-radius: 999px;
-        background: rgba(74, 58, 150, 0.5);
+        border: 1px solid #322767;
+        background: rgba(8, 5, 26, 0.85);
         overflow: hidden;
       }
-      #boot-splash .bar i {
+      #boot-splash .segs i::after {
+        content: "";
         display: block;
-        width: 40%;
+        width: 30%;
         height: 100%;
         border-radius: 999px;
         background: linear-gradient(90deg, #35e0ff, #ff4fd8, #ffb324);
-        animation: bootSlide 1.1s ease-in-out infinite;
+        animation: bootSlide 1.3s ease-in-out infinite;
+      }
+      #boot-splash .segs i:nth-child(2)::after {
+        animation-delay: 0.12s;
+      }
+      #boot-splash .segs i:nth-child(3)::after {
+        animation-delay: 0.24s;
+      }
+      #boot-splash .segs i:nth-child(4)::after {
+        animation-delay: 0.36s;
+      }
+      #boot-splash .segs i:nth-child(5)::after {
+        animation-delay: 0.48s;
+      }
+      #boot-splash .status {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        width: 300px;
+        max-width: 74vw;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.3em;
+        color: #9d93d6;
+      }
+      #boot-splash .status b {
+        color: #ffcf4d;
       }
       @keyframes bootSlide {
         0% {
           transform: translateX(-110%);
         }
         100% {
-          transform: translateX(360%);
+          transform: translateX(340%);
+        }
+      }
+      @keyframes bootSpin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes bootFloat {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-8px);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash .ring,
+        #boot-splash .emblem,
+        #boot-splash .segs i::after {
+          animation: none;
+        }
+        #boot-splash .segs i::after {
+          width: 100%;
         }
       }
     </style>
@@ -87,10 +173,19 @@
   <body>
     <!-- Visible until the app mounts; also the worst-case fallback if JS never runs. -->
     <div id="boot-splash">
-      <div class="bolt">⚡</div>
+      <div class="stage">
+        <div class="ring outer"></div>
+        <div class="ring inner"></div>
+        <svg class="emblem" viewBox="0 0 100 100" width="104" height="104" aria-hidden="true">
+          <path d="M50 6 88 26v34L50 94 12 60V26z" fill="none" stroke="#ffb324" stroke-width="3" opacity="0.7" />
+          <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="#ffb324" />
+          <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="none" stroke="#fff2b0" stroke-width="1.5" opacity="0.6" />
+        </svg>
+      </div>
       <div class="name">MagicTD</div>
       <div class="sub">DEFENSE</div>
-      <div class="bar"><i></i></div>
+      <div class="segs" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="status"><span>LOADING</span><b>···</b></div>
     </div>
     <div id="root"></div>
     <noscript>

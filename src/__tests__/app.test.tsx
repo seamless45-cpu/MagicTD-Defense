@@ -36,7 +36,7 @@ const fragTotal = (s: SaveData) => Object.values(s.frags || {}).reduce((a, b) =>
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
 
-async function mountApp() {
+function mountRaw() {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -46,6 +46,10 @@ async function mountApp() {
       <App />
     </StrictMode>
   );
+}
+
+async function mountApp() {
+  mountRaw();
   await waitFor(() => byText("div", "Command Center"), "home screen (loading screen finished)");
 }
 
@@ -120,6 +124,43 @@ describe("MagicTD app shell", () => {
 
     click(byText("button", "Close")!);
     await waitFor(() => !byText("div", "Reset Progress"), "settings closed");
+    noErrors();
+  });
+});
+
+describe("Loading screen", () => {
+  it("runs a staged boot sequence with progress, a tip and a skip control", async () => {
+    mountRaw();
+    await waitFor(() => document.querySelector(".load-root"), "loading screen");
+
+    // five stages, five bar segments, one ring pair and a progressbar
+    await waitFor(() => document.querySelectorAll(".load-step").length === 5, "five load stages");
+    expect(document.querySelectorAll(".load-seg")).toHaveLength(5);
+    expect(document.querySelectorAll(".load-ring")).toHaveLength(2);
+    expect(document.querySelectorAll(".load-spark").length).toBeGreaterThan(0);
+    expect(document.body.textContent).toContain("TIP ·");
+    expect(document.body.textContent).toContain("MagicTD");
+
+    // progress really advances and stages complete as it does
+    const pct = () => Number(document.querySelector("[role=progressbar]")!.getAttribute("aria-valuenow"));
+    await waitFor(() => pct() > 0, "progress moving");
+    await waitFor(() => document.querySelectorAll(".load-step.done").length >= 1, "first stage completed");
+    expect(pct()).toBeLessThanOrEqual(100);
+
+    // skipping cuts straight to the game
+    click(byText("button", "SKIP")!);
+    await waitFor(() => byText("div", "Command Center"), "home screen after skipping the intro");
+    noErrors();
+  });
+
+  it("replays the boot sequence on demand from settings", async () => {
+    await mountApp();
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => byText("div", "Loading Screen"), "settings modal");
+
+    click(byText("button", "Replay")!);
+    await waitFor(() => document.querySelector(".load-root"), "loading screen replayed");
+    await waitFor(() => byText("div", "Command Center"), "back to the home screen");
     noErrors();
   });
 });

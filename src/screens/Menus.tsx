@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
 import {
   todayStr,
@@ -26,54 +26,151 @@ import {
 } from "../game/data";
 
 const LOAD_STEPS = [
-  "Charging mana lattice...",
-  "Forging towers...",
-  "Binding lightning...",
-  "Calibrating hero skills...",
-  "Summoning enemies...",
+  "Charging the mana lattice",
+  "Raising towers on the grid",
+  "Briefing the heroes",
+  "Chalking the enemy path",
+  "Opening the rift",
 ];
 
+/** Rotating one-liners under the checklist — they double as a mini tutorial. */
+const LOAD_TIPS = [
+  "Gold levels a tower up; fragments push it through ascension.",
+  "Endless waves scale enemy health ×1.57 every single round.",
+  "Chilled enemies take 25% more damage from every source.",
+  "Hero levels add power and shave seconds off the cooldown.",
+  "Zoom the arena with the widget in the bottom-left corner.",
+  "Tap any tower in the Towers tab for its full stat sheet.",
+  "Bosses arrive from round 16 — twice as nasty, twice the loot.",
+];
+
+const LOAD_TIME = 2400;
+
 export function LoadingScreen({ onDone }: { onDone: () => void }) {
-  const [pct, setPct] = useState(0);
-  const [step, setStep] = useState(0);
+  const [p, setP] = useState(0);
+  const [ready, setReady] = useState(false);
+  const [tip, setTip] = useState(0);
+  const doneRef = useRef(false);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
+  const finish = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    setP(1);
+    setReady(true);
+  }, []);
+
+  // progress bar (tap / skip jumps straight to the end)
   useEffect(() => {
     let raf = 0;
     const t0 = performance.now();
-    const dur = 2300;
     const tick = (t: number) => {
-      const p = Math.min(1, (t - t0) / dur);
-      setPct(Math.round(p * 100));
-      setStep(Math.min(LOAD_STEPS.length - 1, Math.floor(p * LOAD_STEPS.length)));
-      if (p < 1) raf = requestAnimationFrame(tick);
-      else setTimeout(onDone, 300);
+      if (doneRef.current) return;
+      const raw = Math.min(1, (t - t0) / LOAD_TIME);
+      setP(raw);
+      if (raw < 1) raf = requestAnimationFrame(tick);
+      else finish();
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [onDone]);
+  }, [finish]);
+
+  // short "READY" beat, then hand off to the game
+  useEffect(() => {
+    if (!ready) return;
+    const t = setTimeout(() => onDoneRef.current(), 520);
+    return () => clearTimeout(t);
+  }, [ready]);
+
+  useEffect(() => {
+    const t = setInterval(() => setTip((i) => (i + 1) % LOAD_TIPS.length), 1500);
+    return () => clearInterval(t);
+  }, []);
+
+  const stage = ready ? LOAD_STEPS.length : p * LOAD_STEPS.length;
+  const pct = Math.round((ready ? 1 : p) * 100);
+
   return (
-    <div className="app-bg flex h-full flex-col items-center justify-center gap-8">
-      <div style={{ animation: "floaty 2.4s ease-in-out infinite" }}>
-        <Emblem size={130} />
-      </div>
-      <div className="font-disp text-5xl tracking-wide text-[#ffb324]" style={{ textShadow: "0 0 30px rgba(255,179,36,.5)" }}>
-        MagicTD
-      </div>
-      <div className="-mt-4 font-disp text-xl tracking-[0.4em] text-[#35e0ff]">DEFENSE</div>
-      <div className="w-[340px]">
-        <div className="h-4 overflow-hidden rounded-full border border-[var(--line2)] bg-black/50">
-          <div
-            className="h-full rounded-full"
-            style={{
-              width: `${pct}%`,
-              background: "linear-gradient(90deg,#35e0ff,#ff4fd8,#ffb324)",
-              boxShadow: "0 0 14px rgba(53,224,255,.7)",
-              transition: "width 80ms linear",
-            }}
-          />
+    <div className="app-bg load-root h-full w-full" onClick={finish}>
+      <div className="load-orb" style={{ width: 240, height: 240, left: "6%", top: "10%", background: "radial-gradient(circle, rgba(53,224,255,.3), transparent 70%)" }} />
+      <div className="load-orb" style={{ width: 320, height: 320, right: "2%", top: "2%", background: "radial-gradient(circle, rgba(255,79,216,.22), transparent 70%)", animationDelay: "1.4s" }} />
+      <div className="load-orb" style={{ width: 280, height: 280, left: "28%", bottom: "-8%", background: "radial-gradient(circle, rgba(255,179,36,.2), transparent 70%)", animationDelay: "2.3s" }} />
+
+      <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[440px] flex-col items-center justify-center gap-5 px-5 py-8">
+        <div className="load-emblem relative grid h-[186px] w-[186px] shrink-0 place-items-center">
+          <div className="load-ring outer" />
+          <div className="load-ring inner" />
+          <span className="load-spark" style={{ top: 4, left: "50%" }} />
+          <span className="load-spark" style={{ bottom: 8, left: "16%", animationDelay: ".7s" }} />
+          <span className="load-spark" style={{ bottom: 16, right: "10%", animationDelay: "1.5s" }} />
+          <div style={{ animation: "floaty 2.6s ease-in-out infinite" }}>
+            <Emblem size={118} />
+          </div>
         </div>
-        <div className="mt-3 flex justify-between text-sm font-semibold tracking-widest text-[var(--dim)]">
-          <span>{LOAD_STEPS[step]}</span>
-          <span>{pct}%</span>
+
+        <div className="text-center leading-none">
+          <div className="font-disp text-[40px] tracking-wide text-[#ffb324]" style={{ textShadow: "0 0 34px rgba(255,179,36,.5)" }}>
+            MagicTD
+          </div>
+          <div className="mt-1.5 font-disp text-lg tracking-[0.45em] text-[#35e0ff]">DEFENSE</div>
+          <div className="load-divider mx-auto mt-3 h-[3px] w-[170px] rounded-full" />
+        </div>
+
+        <div className="panel panel-flat w-full p-4">
+          <div className="flex items-center justify-between text-[11px] font-bold tracking-[0.3em]">
+            <span className={ready ? "text-[var(--green)]" : "text-[var(--dim)]"}>{ready ? "READY" : "LOADING"}</span>
+            <span className="text-[#ffcf4d]" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {pct}%
+            </span>
+          </div>
+
+          <div
+            className="mt-2.5 flex gap-1.5"
+            role="progressbar"
+            aria-label="Loading progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={pct}
+          >
+            {LOAD_STEPS.map((_, i) => (
+              <div key={i} className={`load-seg flex-1 ${ready ? "ready" : ""}`}>
+                <i style={{ width: `${Math.max(0, Math.min(1, stage - i)) * 100}%` }} />
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-3.5 space-y-1.5">
+            {LOAD_STEPS.map((label, i) => {
+              const isDone = ready || stage >= i + 1;
+              const isActive = !isDone && Math.floor(stage) === i;
+              return (
+                <div key={label} className={`load-step ${isDone ? "done" : isActive ? "active" : ""}`}>
+                  <span className="load-mark">{isDone ? "✓" : i + 1}</span>
+                  <span className="truncate">{label}</span>
+                  {isActive && <span className="load-dots ml-auto">···</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div key={tip} className="load-tip w-full px-1 text-center text-[11px] font-semibold leading-snug text-[var(--dim)]">
+          <span className="text-[#ffcf4d]">TIP · </span>
+          {LOAD_TIPS[tip]}
+        </div>
+
+        <div className="flex w-full items-center justify-between gap-3">
+          <span className="pill-dark text-[10px] tracking-[0.18em]">BUILD 1.0 · SINGLE FILE</span>
+          <button
+            className={`btn px-4 py-1.5 text-xs ${ready ? "btn-gold" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              finish();
+            }}
+          >
+            {ready ? "ENTERING…" : "SKIP ▸"}
+          </button>
         </div>
       </div>
     </div>
@@ -605,6 +702,22 @@ export function SettingsModal({
             }}
           >
             {confirmReset ? "Confirm?" : "Reset"}
+          </button>
+        </div>
+        <div className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+          <div>
+            <div className="font-bold">Loading Screen</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Play the boot sequence again</div>
+          </div>
+          <button
+            className="btn px-4 py-1.5 text-sm"
+            onClick={() => {
+              sfx.click();
+              window.dispatchEvent(new CustomEvent("magictd-intro"));
+              onClose();
+            }}
+          >
+            Replay
           </button>
         </div>
         <div className="rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">

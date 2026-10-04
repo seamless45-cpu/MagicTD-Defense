@@ -127,6 +127,13 @@ export default function App() {
     return () => window.removeEventListener("magictd-reset", h);
   }, []);
 
+  // "Replay" in settings: run the loading screen again
+  useEffect(() => {
+    const h = () => setScreen("loading");
+    window.addEventListener("magictd-intro", h);
+    return () => window.removeEventListener("magictd-intro", h);
+  }, []);
+
   const mutate = useCallback((fn: (s: SaveData) => void) => {
     setSave((prev) => {
       const next: SaveData = JSON.parse(JSON.stringify(prev));
