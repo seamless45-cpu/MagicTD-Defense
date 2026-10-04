@@ -85,8 +85,9 @@ describe("MagicTD app shell", () => {
     await mountApp();
     expect(document.body.textContent).toContain("Command Center");
     expect(byText("button", "Battle")).toBeTruthy();
-    expect(byText("button", "Party")).toBeTruthy();
     expect(byText("button", "Endless")).toBeTruthy();
+    // party mode was retired
+    expect(byText("button", "Party")).toBeUndefined();
 
     click(byText("button", "Shop")!);
     await waitFor(() => byText("div", "CHESTS"), "shop screen");
@@ -97,7 +98,7 @@ describe("MagicTD app shell", () => {
     expect(document.body.textContent).toContain("Ascent All");
 
     click(byText("button", "Specials")!);
-    await waitFor(() => byText("div", "Daily Rite"), "specials screen");
+    await waitFor(() => byText("div", "Season 3"), "specials screen");
 
     click(byText("button", "Guild")!);
     await waitFor(() => byText("div", "Guild Hall"), "guild screen");
@@ -129,9 +130,9 @@ describe("Settings", () => {
     click(byText("button", "Towers")!);
     await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
 
-    click(byText("button", "In Lineup — Remove")!);
+    click(byText("button", "Remove from lineup")!);
     await waitFor(() => !saved().lineup.includes("arrow"), "arrow removed");
-    click(byText("button", "Add to Lineup")!);
+    click(byText("button", "Add to lineup")!);
     await waitFor(() => saved().lineup.includes("arrow"), "arrow re-added");
 
     await waitFor(() => all(".toast").length >= 2, "two toasts visible together");
@@ -296,8 +297,10 @@ describe("Towers", () => {
     click(byText("button", "Towers")!);
     await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
 
-    const card = () => all(".panel").find((p) => (p.textContent || "").includes("Arrow") && (p.textContent || "").includes("Preview"))!;
-    expect(card().textContent).toContain("Lv 1/15");
+    const card = () =>
+      all(".tile").find((p) => (p.textContent || "").includes("Arrow") && (p.textContent || "").includes("Preview"))!;
+    // the level badge in the card corner shows the menu level
+    expect(card().querySelector(".badge-num")!.textContent).toBe("1");
 
     const before = saved();
     click(byText("button", "Preview & Upgrade")!);
@@ -325,11 +328,15 @@ describe("Towers", () => {
 
     click(byText("button", "Close")!);
     await waitFor(() => !document.querySelector('[data-testid="tower-preview"]'), "preview closed");
-    expect(card().textContent).toContain("Lv 2/15");
+    expect(card().querySelector(".badge-num")!.textContent).toBe("2");
 
-    click(byText("button", "In Lineup — Remove")!);
+    click(byText("button", "Remove from lineup")!);
     await waitFor(() => !saved().lineup.includes("arrow"), "arrow removed from lineup");
-    expect(byText("button", "Add to Lineup")).toBeTruthy();
+    expect(byText("button", "Add to lineup")).toBeTruthy();
+    // fragments are shown as a gem pill under each card (9 owned, 1 spent on the upgrade)
+    const fragPill = card().querySelector(".pill-dark")!;
+    expect(fragPill.textContent).toContain("8");
+    expect(fragPill.textContent).toContain("1 next"); // level 2 costs 1 fragment
 
     noErrors();
   });
@@ -353,7 +360,7 @@ describe("Towers", () => {
         ({ left, top: 0, right: left + 90, bottom: 70, width: 90, height: 70, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
     });
 
-    const card = all(".panel").find((p) => (p.textContent || "").includes("Gatling"))!;
+    const card = all(".tile").find((p) => (p.textContent || "").includes("Gatling"))!;
     pointer("pointerdown", card, 20, 400);
     pointer("pointermove", window, 345, 35); // centre of slot 2
     pointer("pointerup", window, 345, 35);
@@ -367,10 +374,10 @@ describe("Towers", () => {
     click(byText("button", "Towers")!);
     await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
 
-    const lockCard = all(".panel").find(
-      (p) => (p.textContent || "").includes("Lightning Princess") && (p.textContent || "").includes("LOCKED")
+    const lockCard = all(".tile").find(
+      (p) => (p.textContent || "").includes("Lightning Princess") && (p.textContent || "").includes("Unlock with")
     )!;
-    expect(lockCard).toBeTruthy();
+    expect(lockCard, "locked Lightning Princess card").toBeTruthy();
     click(Array.from(lockCard.querySelectorAll("button")).find((b) => /Preview/.test(b.textContent || ""))!);
 
     const pv = await waitFor(
@@ -398,7 +405,7 @@ describe("Awakenings", () => {
     click(byText("button", "Towers")!);
     await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
 
-    const card = all(".panel").find((p) => (p.textContent || "").includes("Lightning Princess"))!;
+    const card = all(".tile").find((p) => (p.textContent || "").includes("Lightning Princess"))!;
     click(Array.from(card.querySelectorAll("button")).find((b) => /Preview/.test(b.textContent || ""))!);
     const pv = await waitFor(
       () => document.querySelector('[data-testid="tower-preview"]') as HTMLElement,
@@ -426,17 +433,56 @@ describe("Awakenings", () => {
   });
 });
 
-describe("Specials", () => {
-  it("claims the daily rite exactly once per day", async () => {
+describe("Daily rewards", () => {
+  it("claims the daily streak once per day and banks the reward", async () => {
     await mountApp();
-    click(byText("button", "Specials")!);
-    await waitFor(() => byText("div", "Daily Rite"), "specials screen");
+    const panel = await waitFor(() => document.querySelector('[data-testid="daily-rewards"]') as HTMLElement, "daily panel");
+    expect(panel.textContent).toContain("Daily Rewards");
+    // the first day is highlighted as the one being claimed
+    expect(panel.querySelectorAll(".day-tile")).toHaveLength(7);
+    expect(panel.querySelector(".day-tile.next")).toBeTruthy();
 
     const goldBefore = saved().gold;
-    click(byText("button", "Claim")!);
-    await waitFor(() => saved().gold === goldBefore + 60, "daily gold banked");
-    expect(saved().lastDaily).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    await waitFor(() => byText("button", "Claimed")?.hasAttribute("disabled") === true, "claim button disabled");
+    click(document.querySelector('[data-testid="daily-claim"]') as HTMLElement);
+    await waitFor(() => saved().lastDaily !== "", "daily claimed");
+    await waitFor(() => saved().gold > goldBefore, "daily gold banked");
+    expect(saved().dailyStreak).toBe(1);
+
+    const btn = document.querySelector('[data-testid="daily-claim"]') as HTMLButtonElement;
+    await waitFor(() => btn.hasAttribute("disabled"), "claim button locked for the day");
+    click(btn);
+    await sleep(60);
+    expect(saved().gold).toBe(goldBefore + 75); // no double dip
+    noErrors();
+  });
+});
+
+describe("Heroes", () => {
+  it("upgrades the equipped hero with gold", async () => {
+    persistSave({ ...defaultSave(), gold: 5000 });
+    await mountApp();
+    const card = await waitFor(() => document.querySelector('[data-testid="hero-card"]') as HTMLElement, "hero card");
+    expect(card.textContent).toContain("Nova");
+    expect(card.textContent).toContain("power");
+    expect(card.textContent).toContain("cooldown");
+
+    const btn = document.querySelector('[data-testid="hero-upgrade"]') as HTMLButtonElement;
+    expect(btn.textContent).toContain("UPGRADE");
+    const goldBefore = saved().gold;
+    click(btn);
+    await waitFor(() => (saved().heroLv.nova || 1) === 2, "nova levelled up");
+    expect(saved().gold).toBeLessThan(goldBefore);
+    await waitFor(() => (document.querySelector('[data-testid="hero-card"]') as HTMLElement).textContent!.includes("Lv 2"), "card shows the new level");
+    noErrors();
+  });
+
+  it("offers the Thunder God hero with a 20s cooldown", async () => {
+    await mountApp();
+    const card = document.querySelector('[data-testid="hero-card"]') as HTMLElement;
+    expect(card.textContent).toContain("Thunder God");
+    expect(card.textContent).toContain("20s");
+    click(Array.from(card.querySelectorAll("button")).find((b) => (b.textContent || "").includes("Thunder God"))!);
+    await waitFor(() => saved().hero === "thunder", "thunder god equipped");
     noErrors();
   });
 });
@@ -452,21 +498,25 @@ describe("Battle", () => {
     expect(canvas.height).toBe(580);
     const startCalls = canvasStats.calls;
     await waitFor(() => canvasStats.calls > startCalls + 50, "render loop drawing frames");
-    expect(document.body.textContent).toContain("ROUND 1/12");
+    expect(document.body.textContent).toContain("ROUND");
+    expect(document.body.textContent).toContain("1/12");
 
     // three lineup towers are already on the grid, shown on their HUD slots
     const summon = byText("button", "SUMMON")!;
     const slot0 = summon.parentElement!.children[0] as HTMLElement;
-    expect(slot0.textContent).toContain("Lv1");
+    expect(slot0.querySelector(".badge-num")!.textContent).toBe("1");
     await waitFor(() => slot0.querySelector('[class*="3dff8e"]'), "tower auto-deployed onto the grid");
+    const tilesOnField = () => all("[data-slot]").filter((el) => el.textContent && !el.textContent.includes("EMPTY")).length;
+    const fieldBefore = tilesOnField();
 
-    // SUMMON spawns a tower straight into a random free cell - no dragging
+    // SUMMON drops a tower straight onto a random free cell - no dragging
     const spNow = () =>
       Number((document.querySelector('[data-testid="sp-chip"]')?.textContent || "").replace(/[^\d]/g, ""));
     const spBefore = spNow();
     click(summon);
     await waitFor(() => spNow() < spBefore, "summon spent SP");
     await waitFor(() => (document.body.textContent || "").includes("deployed!"), "summon toast");
+    await waitFor(() => tilesOnField() >= fieldBefore, "the new tower holds a slot");
 
     // wave 1 begins ~7s after deploy phase starts
     const enemiesOut = await waitFor(() => {
@@ -482,27 +532,20 @@ describe("Battle", () => {
     noErrors();
   });
 
-  it("boots the reworked party mode with perks, synergies, rally and 15 rounds", async () => {
+  it("zooms the arena in and out", async () => {
     await mountApp();
-    startMode("Party");
-    await waitFor(() => byText("button", "SUMMON"), "party battle HUD");
-    expect(document.body.textContent).toContain("ROUND 1/15");
-    expect(document.body.textContent).toContain("PARTY MODE");
-    // each teammate now states the perk the whole squad gets
-    expect(document.body.textContent).toContain("Kael");
-    expect(document.body.textContent).toContain("+12% tower damage");
-    expect(document.body.textContent).toContain("+8% crit chance");
-    expect(document.body.textContent).toContain("+6 lives");
-    expect(document.body.textContent).toContain("SYNERGY");
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+    const zoom = await waitFor(() => document.querySelector('[data-testid="zoom"]') as HTMLElement, "zoom control");
+    const before = Number(zoom.textContent!.replace(/[^\d]/g, ""));
+    expect(before).toBeGreaterThanOrEqual(100);
 
-    // the rally meter starts empty and refuses to fire early
-    const rally = document.querySelector('[data-testid="rally"]') as HTMLElement;
-    expect(rally, "rally button").toBeTruthy();
-    expect(rally.textContent).toContain("0%");
-    click(rally);
-    await waitFor(() => /rally meter is not full/i.test(document.body.textContent || ""), "rally denial toast");
+    click(document.querySelector('[aria-label="Zoom in"]') as HTMLElement);
+    await waitFor(() => Number(document.querySelector('[data-testid="zoom"]')!.textContent!.replace(/[^\d]/g, "")) > before, "zoomed in");
+    await waitFor(() => saved().zoom > 1, "zoom persisted");
+    click(document.querySelector('[aria-label="Zoom out"]') as HTMLElement);
+    await waitFor(() => Number(document.querySelector('[data-testid="zoom"]')!.textContent!.replace(/[^\d]/g, "")) === before, "zoomed back out");
 
-    await waitFor(() => canvasStats.calls > 50, "party render loop drawing");
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
     noErrors();
@@ -543,8 +586,9 @@ describe("Battle", () => {
     await mountApp();
     startMode("Endless");
     await waitFor(() => byText("button", "SUMMON"), "endless battle HUD");
-    expect(document.body.textContent).toContain("WAVE 1 · ENDLESS");
-    expect(document.body.textContent).not.toContain("ROUND 1/12");
+    expect(document.body.textContent).toContain("WAVE 1");
+    expect(document.body.textContent).toContain("ENDLESS");
+    expect(document.body.textContent).not.toContain("1/12");
 
     await waitFor(() => canvasStats.calls > 50, "endless render loop drawing");
     click(byText("button", "Abandon")!);

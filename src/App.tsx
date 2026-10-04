@@ -7,11 +7,10 @@ import Shop from "./screens/Shop";
 import Towers from "./screens/Towers";
 import Battle from "./screens/Battle";
 
-type Screen = "loading" | "home" | "shop" | "towers" | "specials" | "guild" | "battle" | "party" | "endless";
+type Screen = "loading" | "home" | "shop" | "towers" | "specials" | "guild" | "battle" | "endless";
 
 const MODES = {
   battle: { mode: "battle" as const, title: "BATTLE", rounds: "12 rounds" },
-  party: { mode: "party" as const, title: "PARTY", rounds: "15 rounds" },
   endless: { mode: "endless" as const, title: "ENDLESS", rounds: "no limit" },
 };
 
@@ -147,7 +146,7 @@ export default function App() {
     );
   }
 
-  if (screen === "battle" || screen === "party" || screen === "endless") {
+  if (screen === "battle" || screen === "endless") {
     return (
       <div className={`h-full ${save.reducedMotion ? "calm" : ""}`}>
         <Battle
@@ -199,13 +198,12 @@ export default function App() {
             mutate={mutate}
             push={push}
             onBattle={() => setScreen("battle")}
-            onParty={() => setScreen("party")}
             onEndless={() => setScreen("endless")}
           />
         )}
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}
         {screen === "towers" && <Towers save={save} mutate={mutate} push={push} />}
-        {screen === "specials" && <Specials save={save} mutate={mutate} push={push} />}
+        {screen === "specials" && <Specials />}
         {screen === "guild" && <Guild push={push} />}
       </div>
 

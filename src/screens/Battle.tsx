@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SaveData } from "../game/save";
+import { clampZoom, heroLevel } from "../game/save";
 import { sfx } from "../game/audio";
 import {
   TOWERS,
@@ -9,7 +10,6 @@ import {
   roundHp,
   HP_GROWTH,
   waveComp,
-  PARTY_ROUNDS,
   BATTLE_ROUNDS,
   MAX_BATTLE_LEVEL,
   MAX_POINTS,
@@ -19,22 +19,16 @@ import {
   towerDamage,
   SP_BASE_COST,
   SP_COST_STEP,
-  TEAMMATES,
-  CHAT_LINES,
   HERO_BY_ID,
+  HERO_MAX_LEVEL,
+  heroCooldown,
+  heroPower,
   OVERDRIVE_ASPD,
   OVERDRIVE_DMG,
   OVERDRIVE_TIME,
   SLOW_VULN,
   RUN_SHOP,
   runShopCost,
-  PARTY_PERK,
-  RALLY_GAIN,
-  RALLY_TIME,
-  RALLY_ASPD,
-  RALLY_DMG,
-  RALLY_BLAST,
-  SYNERGY_DMG,
   towerArt,
   type TowerDef,
   type GameMode,
@@ -211,13 +205,10 @@ interface G {
   odT: number;
   /** gold banked this run — spendable in the battle shop, paid out at the end */
   gold: number;
-  /** party rally meter (0..1) and the time left on an active rally */
-  rally: number;
-  rallyT: number;
-  /** countdown to the next teammate tower upgrade */
-  mateUpT: number;
-  /** party teammate perks folded into every shot */
-  perks: { dmg: number; crit: number };
+  /** hero level at the moment the run started (ability power / cooldown) */
+  heroLv: number;
+  /** shop-bought damage bonus for this run (+% as a fraction) */
+  dmgBonus: number;
   /** extra attack speed bought in the run shop */
   bonusAspd: number;
   /** what has been bought in the run shop this battle */
@@ -239,8 +230,6 @@ interface G {
   kills: number;
   shake: number;
   redFlash: number;
-  mateT: number;
-  chatT: number;
   tokensAwarded: boolean;
   final: null | { won: boolean; gold: number; gems: number; tokens: number; frags: { id: string; n: number }[]; rounds: number };
 }
@@ -279,26 +268,20 @@ function newGame(mode: GameMode, save: SaveData): G {
       owner: "you",
       atkMul: 1,
     }));
-  const perks = {
-    dmg: mode === "party" ? TEAMMATES.reduce((a, m) => (m.perkId === "dmg" ? a + PARTY_PERK.dmg : a), 0) : 0,
-    crit: mode === "party" ? TEAMMATES.reduce((a, m) => (m.perkId === "crit" ? a + PARTY_PERK.crit : a), 0) : 0,
-  };
   const g: G = {
     mode,
     heroId: HERO_BY_ID[save.hero] ? save.hero : "nova",
+    heroLv: heroLevel(save, HERO_BY_ID[save.hero] ? save.hero : "nova"),
+    dmgBonus: 0,
     t: 0,
     phase: "deploy",
     phaseT: mode === "endless" ? 6 : 7,
     round: 1,
     // endless has no final wave; maxRounds is only used for display
-    maxRounds: mode === "party" ? PARTY_ROUNDS : mode === "battle" ? BATTLE_ROUNDS : 0,
-    lives: (mode === "endless" ? 15 : 20) + (mode === "party" ? PARTY_PERK.life : 0),
+    maxRounds: mode === "battle" ? BATTLE_ROUNDS : 0,
+    lives: mode === "endless" ? 15 : 20,
     // small field-kit budget so the run shop is useful from wave 1
     gold: 120,
-    rally: 0,
-    rallyT: 0,
-    mateUpT: 8,
-    perks,
     bonusAspd: 0,
     shopBought: {},
     fps: 60,
@@ -318,8 +301,6 @@ function newGame(mode: GameMode, save: SaveData): G {
     kills: 0,
     shake: 0,
     redFlash: 0,
-    mateT: 6,
-    chatT: 10,
     tokensAwarded: false,
     final: null,
   };
@@ -385,7 +366,6 @@ function boltPts(b: Bolt, out: { x: number; y: number }[]) {
 const heroRef: { current: () => void } = { current: () => {} };
 const summonRef: { current: () => void } = { current: () => {} };
 const ascendRef: { current: (uid: number) => void } = { current: () => {} };
-const rallyRef: { current: () => void } = { current: () => {} };
 const shopRef: { current: (item: RunShopItem) => void } = { current: () => {} };
 
 // ---------- component ----------
@@ -413,6 +393,8 @@ export default function Battle({
   const [ascentDrag, setAscentDrag] = useState<{ x: number; y: number } | null>(null);
   const [ascentHover, setAscentHover] = useState(-1);
   const [shopOpen, setShopOpen] = useState(false);
+  /** arena zoom: 1 = fitted to the panel, up to 2 = twice as big (scroll to pan) */
+  const [zoom, setZoom] = useState(() => clampZoom(save.zoom));
   const [pulses, setPulses] = useState<{ id: number; x: number; y: number; dx: number; dy: number }[]>([]);
   const [slotFlash, setSlotFlash] = useState<number>(-1);
   const slotRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -440,6 +422,26 @@ export default function Battle({
   const toastRef = useRef(push);
   toastRef.current = push;
 
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const fitRef = useRef<() => void>(() => {});
+  const changeZoom = useCallback(
+    (next: number) => {
+      const z = clampZoom(next);
+      setZoom(z);
+      zoomRef.current = z;
+      fitRef.current();
+      mutate((s) => {
+        s.zoom = z;
+      });
+      sfx.click();
+    },
+    [mutate]
+  );
+  useEffect(() => {
+    fitRef.current();
+  }, [zoom]);
+
   // ---------- engine ----------
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -448,10 +450,11 @@ export default function Battle({
     const fit = () => {
       const rw = wrap.clientWidth || 1;
       const rh = wrap.clientHeight || 1;
-      const s = Math.max(0.1, Math.min(rw / W, rh / H));
+      const s = Math.max(0.1, Math.min(rw / W, rh / H) * zoomRef.current);
       canvas.style.width = `${Math.floor(W * s)}px`;
       canvas.style.height = `${Math.floor(H * s)}px`;
     };
+    fitRef.current = fit;
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(wrap);
@@ -499,7 +502,7 @@ export default function Battle({
       const rounds = won ? g.maxRounds : Math.max(0, g.round - 1);
       const frags: { id: string; n: number }[] = [];
       // endless runs pay out on how deep you got
-      const nf = mode === "endless" ? Math.min(12, 1 + Math.floor(rounds / 3)) : won ? (mode === "party" ? 4 : 3) : 1;
+      const nf = mode === "endless" ? Math.min(12, 1 + Math.floor(rounds / 3)) : won ? 3 : 1;
       for (let i = 0; i < nf; i++) {
         const id = TOWERS[Math.floor(Math.random() * TOWERS.length)].id;
         const e2 = frags.find((f) => f.id === id);
@@ -511,17 +514,17 @@ export default function Battle({
       const endlessTokens = Math.floor(rounds / 6);
       // whatever is left in the run wallet is paid out on top of the clear bonus
       const wallet = Math.floor(g.gold);
-      const partyBonus = mode === "party" && won ? 3 : 0;
+
       g.final = {
         won,
         gold:
           (mode === "endless"
             ? endlessGold
             : won
-              ? (mode === "party" ? 250 : 150) + 30 * g.maxRounds
+              ? 150 + 30 * g.maxRounds
               : 30 + 10 * rounds) + wallet,
-        gems: mode === "endless" ? endlessGems : won ? (mode === "party" ? 4 : 2) : 0,
-        tokens: mode === "endless" ? endlessTokens : won && mode === "party" ? 2 + partyBonus : 0,
+        gems: mode === "endless" ? endlessGems : won ? 2 : 0,
+        tokens: mode === "endless" ? endlessTokens : 0,
         frags,
         rounds,
       };
@@ -534,7 +537,6 @@ export default function Battle({
       g.kills++;
       g.sp += e.spv;
       g.gold += e.gold;
-      if (g.mode === "party" && g.rally < 1) g.rally = Math.min(1, g.rally + RALLY_GAIN);
       const p = pathPos(e.d);
       burst(p.x, p.y, ENEMY_TYPES[e.type].color, 14, 200);
       ring(p.x, p.y, ENEMY_TYPES[e.type].color, 26);
@@ -544,8 +546,7 @@ export default function Battle({
       if (e.dead) return;
       let crit = opt.alwaysCrit ?? false;
       if (!crit) {
-        // base 10% crit plus the party crit perk (Mira)
-        const cc = 0.1 + g.perks.crit;
+        const cc = 0.1;
         crit = Math.random() < cc;
       }
       // note: tower/aura multipliers are already folded into `raw` by the caller
@@ -633,24 +634,8 @@ export default function Battle({
       g.shake = fxShake(2);
     };
 
-    /** party synergy: standing next to a teammate's tower hits 20% harder */
-    const synergy = (t: BT) => {
-      if (g.mode !== "party" || !t.cell) return 0;
-      const near = g.towers.some(
-        (o) =>
-          o.uid !== t.uid &&
-          o.owner !== "you" &&
-          o.cell &&
-          Math.abs(o.cell.c - t.cell!.c) + Math.abs(o.cell.r - t.cell!.r) === 1
-      );
-      return near ? SYNERGY_DMG : 0;
-    };
-
-    /** every global multiplier a shot picks up */
-    const globalMul = (t: BT) =>
-      (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1) *
-      (g.rallyT > 0 ? 1 + RALLY_DMG : 1) *
-      (1 + g.perks.dmg + synergy(t));
+    /** every global multiplier a shot picks up (overdrive + shop damage) */
+    const globalMul = () => (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1) * (1 + g.dmgBonus);
 
     /** kill-stack towers (Dragon's Maw) build damage with every kill they land */
     const killStackMul = (t: BT) => {
@@ -660,17 +645,17 @@ export default function Battle({
       return 1 + Math.min(cap, t.streak) * t.def.killStack;
     };
 
-    /** damage growth from battle levels, points, auras and the party buffs */
+    /** damage growth from battle levels, points, auras and the global buffs */
     const towerPower = (t: BT) =>
       Math.pow(ASC_DMG_MUL, Math.max(0, t.bLv - 1)) *
       (1 + POINT_DMG_STEP * t.points) *
       t.atkMul *
-      globalMul(t) *
+      globalMul() *
       killStackMul(t);
 
     /** Solar flare (Sunforge): hits every enemy on the field at once. */
     const solarFlare = (t: BT) => {
-      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * killStackMul(t) * globalMul(t);
+      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * killStackMul(t) * globalMul();
       const p = cellCenter(t.cell!.c, t.cell!.r);
       const tier1 = saveRef.current.awn["sun"]?.[0] || 0;
       const tier2 = saveRef.current.awn["sun"]?.[1] || 0;
@@ -700,7 +685,7 @@ export default function Battle({
       const ep = pathPos(target.d);
       t.angle = Math.atan2(ep.y - p.y, ep.x - p.x);
       t.flash = 0.12;
-      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul(t) * killStackMul(t);
+      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul() * killStackMul(t);
       const upg = t.menuLv - 1;
       const asc = t.bLv - 1;
       const push = (proj: Partial<Proj>, at: { x: number; y: number } = ep, onto: Enemy = target) => {
@@ -991,16 +976,15 @@ export default function Battle({
       const tier2 = saveRef.current.awn["hellstorm"]?.[1] || 0;
       if (nd.id === "hellstorm" && tier2 > 0) {
         const beams = nd.awk2!.mult[tier2 - 1];
-        const partyMul = mode === "party" ? nd.awk2!.mult2![tier2 - 1] : 1;
         const targets = g.enemies.filter((e) => !e.dead).sort((x, y) => y.d - x.d).slice(0, beams);
         const now = performance.now();
         targets.forEach((e, i) => {
           const ep = pathPos(e.d);
           if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#ff7a3d", Math.max(1.5, 3.5 - i * 0.05), 0.4, now));
-          dealDamage(e, 800 * partyMul * towerPower(b), { alwaysCrit: mode === "party" ? Math.random() < 0.35 : false, tw: b, color: "#ff7a3d" });
+          dealDamage(e, 800 * towerPower(b), { tw: b, color: "#ff7a3d" });
         });
         sfx.explosion();
-        g.shake = 14;
+        g.shake = fxShake(14);
         addText(p.x, p.y - 64, "DEAFENING BLAZE", "#ff7a3d", 16, true);
       }
     };
@@ -1024,7 +1008,7 @@ export default function Battle({
       sfx.buy();
       switch (item.id) {
         case "dmg":
-          g.perks.dmg += 0.15;
+          g.dmgBonus += 0.15;
           break;
         case "aspd":
           g.bonusAspd = (g.bonusAspd || 0) + 0.12;
@@ -1080,15 +1064,17 @@ export default function Battle({
     const hero = () => {
       if (g.heroCd > 0 || g.final) return;
       const hero = HERO_BY_ID[g.heroId] || HERO_BY_ID.nova;
-      g.heroCd = hero.cd;
+      const lv = g.heroLv;
+      const power = heroPower(lv);
+      g.heroCd = heroCooldown(hero.cd, lv);
       sfx.hero();
-      g.shake = 16;
+      g.shake = fxShake(9);
       const now = performance.now();
       const kind: HeroKind = hero.kind;
 
       if (kind === "overdrive") {
         // no damage: supercharge every tower for a while
-        g.odT = OVERDRIVE_TIME;
+        g.odT = OVERDRIVE_TIME * power;
         for (const t of g.towers) {
           if (!t.cell) continue;
           const p = cellCenter(t.cell.c, t.cell.r);
@@ -1100,9 +1086,10 @@ export default function Battle({
       }
 
       if (kind === "freeze") {
+        const dur = 4 * power;
         g.enemies.forEach((e) => {
           if (e.dead) return;
-          e.frozen = Math.max(e.frozen, 4);
+          e.frozen = Math.max(e.frozen, dur);
           e.slow = Math.max(e.slow, 0.5);
           e.slowT = Math.max(e.slowT, 8);
           const p = pathPos(e.d);
@@ -1114,7 +1101,38 @@ export default function Battle({
         return;
       }
 
-      const dmg = (kind === "burn" ? 200 : 250) + 60 * g.round;
+      if (kind === "thunder") {
+        // bolts walk the lane: a strike every ~70px of path, chaining nearby enemies
+        const bolts = 5 + Math.round(lv * 1.4);
+        const dmg = (170 + 45 * g.round) * power;
+        for (let i = 0; i < bolts; i++) {
+          const d = ((i + 0.5) / bolts) * PATH_LEN;
+          const p = pathPos(d);
+          const hit: typeof g.enemies = [];
+          for (const e of g.enemies) {
+            if (e.dead) continue;
+            const ep = pathPos(e.d);
+            if (Math.hypot(ep.x - p.x, ep.y - p.y) <= 96) hit.push(e);
+          }
+          for (const e of hit) {
+            e.stun = Math.max(e.stun, 0.45);
+            dealDamage(e, dmg, { alwaysCrit: true, color: hero.color });
+          }
+          // arcs between everything this bolt caught
+          for (let k = 1; k < hit.length; k++) {
+            const a = pathPos(hit[k - 1].d);
+            const b = pathPos(hit[k].d);
+            if (g.bolts.length < 36) g.bolts.push(randBolt(a.x, a.y, b.x, b.y, "#fff6a8", 1.6, 0.28, now));
+          }
+          if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, -40, p.x, p.y, hero.color, 5, 0.4, now + i * 10));
+          ring(p.x, p.y, hero.color, 54);
+          burst(p.x, p.y, "#fff6a8", 8, 150);
+        }
+        addText(W / 2, H / 2 - 60, "THUNDER GOD!", hero.color, 26, true);
+        return;
+      }
+
+      const dmg = (kind === "burn" ? 200 : 250) * power + 60 * g.round;
       g.enemies.forEach((e) => {
         if (e.dead) return;
         const p = pathPos(e.d);
@@ -1122,7 +1140,7 @@ export default function Battle({
           dealDamage(e, dmg, { color: hero.color });
           if (!e.dead) {
             e.burnDps = Math.max(e.burnDps, dmg * 0.35);
-            e.burnT = Math.max(e.burnT, 8);
+            e.burnT = Math.max(e.burnT, 8 * power);
           }
         } else {
           e.stun = Math.max(e.stun, 1.2);
@@ -1203,32 +1221,6 @@ export default function Battle({
     };
     summonRef.current = summon;
 
-    /** Party Rally: spend the meter to buff the whole squad and blast the field */
-    const rally = () => {
-      if (g.mode !== "party") return;
-      if (g.rally < 1) {
-        sfx.error();
-        toastRef.current("Rally meter is not full yet", "#ff4d5e");
-        return;
-      }
-      g.rally = 0;
-      g.rallyT = RALLY_TIME;
-      sfx.rally();
-      ring(W / 2, H / 2, "#ff4fd8", 520);
-      g.shake = fxShake(7);
-      addText(W / 2, H / 2 - 70, "PARTY RALLY!", "#ff4fd8", 30, true);
-      g.enemies.forEach((e) => {
-        if (e.dead) return;
-        const p = pathPos(e.d);
-        ring(p.x, p.y, "#ff9be9", 40);
-        dealDamage(e, e.max * RALLY_BLAST, { tw: undefined, color: "#ff4fd8" });
-      });
-      g.towers.forEach((t) => {
-        if (t.cell) ring(cellCenter(t.cell.c, t.cell.r).x, cellCenter(t.cell.c, t.cell.r).y, "#ff4fd8", 52);
-      });
-      toastRef.current(`Rally! +${Math.round(RALLY_ASPD * 100)}% rate, +${Math.round(RALLY_DMG * 100)}% damage for ${RALLY_TIME}s`, "#ff4fd8");
-    };
-    rallyRef.current = rally;
 
     const ascend = (uid: number) => {
       const t = g.towers.find((x) => x.uid === uid);
@@ -1248,27 +1240,6 @@ export default function Battle({
       toastRef.current(`${t.def.name} ascended to Lv ${t.bLv}`, "#35e0ff");
     };
     ascendRef.current = ascend;
-
-    const mateDeploy = () => {
-      const empty: { c: number; r: number }[] = [];
-      for (let c = 1; c <= 5; c++)
-        for (let r = 0; r <= 2; r++)
-          if (!isPathCell(c, r) && !g.towers.some((t) => t.cell && t.cell.c === c && t.cell.r === r)) empty.push({ c, r });
-      if (empty.length < 2) return;
-      const cell = empty[Math.floor(Math.random() * empty.length)];
-      const unlocked = Object.keys(saveRef.current.levels).filter((id) => saveRef.current.levels[id] > 0);
-      const pool = unlocked.length ? unlocked : TOWERS.map((t) => t.id);
-      const id = pool[Math.floor(Math.random() * pool.length)];
-      const m = TEAMMATES[Math.floor(Math.random() * TEAMMATES.length)];
-      g.towers.push({
-        uid: uidC++, def: TOWER_BY_ID[id], menuLv: saveRef.current.levels[id] || 3, bLv: 1 + (Math.random() < 0.5 ? 1 : 0),
-        points: 2 + Math.floor(Math.random() * 3), cell, cd: 0.5, shots: 0, angle: 0, rapidT: 0, rapidCool: 5, streak: 0, flash: 0, lineupIdx: -1, owner: m.name, atkMul: 1,
-      });
-      const p = cellCenter(cell.c, cell.r);
-      ring(p.x, p.y, m.color, 44);
-      sfx.place();
-      toastRef.current(`${m.name} deployed ${TOWER_BY_ID[id].name}`, m.color);
-    };
 
     const updateFx = (dt: number) => {
       const now = performance.now();
@@ -1297,7 +1268,6 @@ export default function Battle({
       g.redFlash = Math.max(0, g.redFlash - dt * 2);
       g.heroCd = Math.max(0, g.heroCd - dt);
       g.odT = Math.max(0, g.odT - dt);
-      g.rallyT = Math.max(0, g.rallyT - dt);
 
       if (g.final) {
         updateFx(dt);
@@ -1344,12 +1314,6 @@ export default function Battle({
               mutateRef.current((s) => { s.tokens += 1; });
               sfx.token();
               toastRef.current(`Endless wave ${g.round}: +1 Magic Token`, "#ff4fd8");
-            }
-            if (mode === "party" && g.round === 10 && !g.tokensAwarded) {
-              g.tokensAwarded = true;
-              mutateRef.current((s) => { s.tokens += 3; });
-              sfx.token();
-              toastRef.current("Party round 10 complete: +3 Magic Tokens", "#ff4fd8");
             }
           }
         }
@@ -1454,7 +1418,6 @@ export default function Battle({
         rate /= 1 + POINT_STEP * t.points;
         rate /= 1 + g.bonusAspd; // run-shop attack speed
         if (g.odT > 0) rate /= 1 + OVERDRIVE_ASPD; // Overdrive hero buff
-        if (g.rallyT > 0) rate /= 1 + RALLY_ASPD; // Party Rally
         if (t.def.rapid && t.rapidT > 0) rate *= 0.32;
         t.cd -= dt;
         if (t.cd <= 0) {
@@ -1529,37 +1492,7 @@ export default function Battle({
 
       updateFx(dt);
 
-      if (mode === "party") {
-        g.mateT -= dt;
-        if (g.mateT <= 0) {
-          g.mateT = 9 + Math.random() * 5;
-          mateDeploy();
-        }
-        // teammates upgrade their own towers as the raid goes on
-        g.mateUpT -= dt;
-        if (g.mateUpT <= 0) {
-          g.mateUpT = 7 + Math.random() * 6;
-          const mine = g.towers.filter((t) => t.owner !== "you" && (t.bLv < MAX_BATTLE_LEVEL || t.points < MAX_POINTS));
-          if (mine.length) {
-            const t = mine[Math.floor(Math.random() * mine.length)];
-            if (t.bLv < MAX_BATTLE_LEVEL && (t.points >= MAX_POINTS || Math.random() < 0.5)) t.bLv++;
-            else t.points = Math.min(MAX_POINTS, t.points + 1);
-            if (t.cell) {
-              const p = cellCenter(t.cell.c, t.cell.r);
-              ring(p.x, p.y, t.owner, 30);
-              burst(p.x, p.y, t.owner, 6, 70);
-            }
-          }
-        }
-        g.chatT -= dt;
-        if (g.chatT <= 0) {
-          g.chatT = 13 + Math.random() * 8;
-          const m = TEAMMATES[Math.floor(Math.random() * TEAMMATES.length)];
-          toastRef.current(`${m.name}: ${CHAT_LINES[Math.floor(Math.random() * CHAT_LINES.length)]}`, m.color);
-        }
-      }
-
-      // performance HUD
+// performance HUD
       g.frames++;
       g.fpsT += dt;
       if (g.fpsT >= 0.5) {
@@ -2712,7 +2645,7 @@ export default function Battle({
     const t = gRef.current?.towers.find((x) => x.uid === uid);
     return t && t.lineupIdx >= 0 ? t.lineupIdx : -1;
   };
-  const maxRounds = mode === "party" ? PARTY_ROUNDS : BATTLE_ROUNDS;
+  const maxRounds = BATTLE_ROUNDS;
 
   const collect = () => {
     if (!g?.final) return;
@@ -2768,22 +2701,23 @@ export default function Battle({
                 ref={(el) => {
                   slotRefs.current[i] = el;
                 }}
-                className="relative flex h-[54px] w-[74px] flex-col items-center justify-center rounded-lg border"
+                className="tile relative flex h-[58px] w-[78px] flex-col items-center justify-center"
                 style={{
-                  background: "rgba(8,5,26,0.7)",
-                  borderColor: t ? RARITY[t.def.rarity].color : "var(--line)",
-                  opacity: t ? 1 : 0.4,
+                  borderColor: t ? RARITY[t.def.rarity].color : "#3a2c74",
+                  opacity: t ? 1 : 0.45,
                 }}
               >
                 {t ? (
                   <>
+                    <span className="badge-num absolute -left-1.5 -top-1.5" style={{ borderColor: RARITY[t.def.rarity].color }}>
+                      {t.bLv}
+                    </span>
                     <div key={`s${i}-${t.points}`} style={slotFlash === i ? { animation: "slotPulse 0.4s ease" } : undefined}>
-                      <TowerIcon def={t.def} size={34} />
+                      <TowerIcon def={t.def} size={32} />
                     </div>
                     <div className="flex items-center gap-1 text-[10px] font-bold leading-none">
-                      <span style={{ color: RARITY[t.def.rarity].color }}>Lv{t.bLv}</span>
-                      <span className="rounded px-1" style={{ background: "rgba(0,0,0,0.5)", color: ptColor(t.points) }}>
-                        {t.points >= MAX_POINTS ? "MAX" : t.points}
+                      <span style={{ color: ptColor(t.points) }}>
+                        {t.points >= MAX_POINTS ? "MAX PTS" : `${t.points} pts`}
                       </span>
                     </div>
                     {t.cell ? <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border border-black bg-[#3dff8e]" /> : null}
@@ -2795,7 +2729,7 @@ export default function Battle({
             );
           })}
           <button
-            className="btn btn-cyan ml-1 h-[54px] shrink-0 px-3 text-[12px] leading-tight"
+            className="cta-banner ml-1 h-[54px] shrink-0 px-3 text-[12px] leading-tight"
             disabled={g ? g.sp < cost : true}
             onClick={() => summonRef.current()}
           >
@@ -2806,40 +2740,57 @@ export default function Battle({
         </div>
         {g && (
           <div className="flex items-center gap-2 text-[15px] font-bold">
-            <span data-testid="sp-chip" className="chip text-[#35e0ff]">
-              SP {Math.floor(g.sp)}
+            <span data-testid="sp-chip" className="pill-dark text-[11px] text-[#7fe9ff]" style={{ borderColor: "#1f6f8c" }}>
+              <span className="num">{Math.floor(g.sp)}</span> SP
             </span>
-            <span className="chip text-[#ffcf4d]">
-              <CoinIcon size={15} /> {Math.floor(g.gold)}
+            <span className="pill-dark text-[11px] text-[#ffcf4d]" style={{ borderColor: "#8a6a1a" }}>
+              <CoinIcon size={17} />
+              <span className="num">{Math.floor(g.gold)}</span>
             </span>
-            <span className={`chip ${g.lives <= 5 ? "text-[#ff4d5e]" : "text-[#ff8f9a]"}`}>
-              <svg width="15" height="15" viewBox="0 0 20 20">
+            <span
+              className="pill-dark text-[11px]"
+              style={{ borderColor: g.lives <= 5 ? "#8a0f1e" : "#5c2532", color: g.lives <= 5 ? "#ff4d5e" : "#ff8f9a" }}
+            >
+              <svg width="17" height="17" viewBox="0 0 20 20">
                 <path d="M10 17S2 11.5 2 6.6C2 4 4 2.5 6 2.5c1.6 0 3 .8 4 2.2 1-1.4 2.4-2.2 4-2.2 2 0 4 1.5 4 4.1C18 11.5 10 17 10 17z" fill="#ff4d5e" />
               </svg>
-              {g.lives}
+              <span className="num" style={{ color: g.lives <= 5 ? "#ff4d5e" : "#fff" }}>{g.lives}</span>
             </span>
             {mode === "endless" ? (
-              <span className="chip border-[#ff9be9]/50 text-[#ff9be9]">WAVE {g.round} · ENDLESS</span>
+              <span className="pill-dark text-[11px] text-[#ff9be9]" style={{ borderColor: "#7a2f6a" }}>
+                <span className="num">WAVE {g.round}</span> ENDLESS
+              </span>
             ) : (
-              <span className="chip">
-                ROUND {Math.min(g.round, maxRounds)}/{maxRounds}
+              <span className="pill-dark text-[11px] text-[#ffcf4d]" style={{ borderColor: "#8a6a1a" }}>
+                <span className="num">
+                  {Math.min(g.round, maxRounds)}/{maxRounds}
+                </span>{" "}
+                ROUND
               </span>
             )}
-            <span className="chip text-[var(--dim)]">{g.enemies.length + g.spawnQ.length} left</span>
-            {g.odT > 0 && <span className="chip text-[#3dff8e]">OVERDRIVE {g.odT.toFixed(0)}s</span>}
+            <span className="pill-dark text-[11px] text-[var(--dim)]">
+              <span className="num">{g.enemies.length + g.spawnQ.length}</span> left
+            </span>
+            {g.odT > 0 && (
+              <span className="pill-dark text-[11px] text-[#8effc4]" style={{ borderColor: "#1f7a4a" }}>
+                OVERDRIVE <span className="num">{g.odT.toFixed(0)}s</span>
+              </span>
+            )}
           </div>
         )}
       </div>
 
       {/* CANVAS */}
       <div className="relative min-h-0 flex-1">
-        <canvas
-          ref={canvasRef}
-          width={W}
-          height={H}
-          className="mx-auto block"
-          style={{ touchAction: "none", cursor: "grab" }}
-        />
+        <div className="scroll-thin h-full w-full overflow-auto">
+          <canvas
+            ref={canvasRef}
+            width={W}
+            height={H}
+            className="mx-auto block"
+            style={{ touchAction: "none", cursor: "grab" }}
+          />
+        </div>
         {g && (g.phase === "deploy" || g.phase === "inter") && (
           <div className="pointer-events-none absolute left-1/2 top-[8%] -translate-x-1/2 text-center">
             <div className="font-disp text-4xl text-[#ffcf4d]" style={{ textShadow: "0 0 26px rgba(255,179,36,.7)" }}>
@@ -2867,41 +2818,27 @@ export default function Battle({
           <button
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => heroRef.current()}
-            className="absolute right-4 top-1/2 z-20 flex h-[118px] w-[118px] -translate-y-1/2 flex-col items-center justify-center rounded-full transition-transform active:scale-95"
+            data-testid="hero-card-battle"
+            className="frame-gold anim-pop absolute right-3 top-1/2 z-20 flex w-[124px] -translate-y-1/2 flex-col items-center gap-0.5 px-2 py-2 transition-transform active:scale-95"
             style={{
-              background: heroReady ? "radial-gradient(circle at 35% 30%, #ff9be9, #ff4fd8 55%, #7a0f63)" : "radial-gradient(circle, #3a2a4a, #1d1230)",
-              border: heroReady ? "3px solid #ffb8ef" : "3px solid #4a3a5a",
-              boxShadow: heroReady ? "0 0 34px rgba(255,79,216,.55)" : "none",
-              animation: heroReady ? "pulseGlow 1.6s ease-in-out infinite" : undefined,
-              color: heroReady ? "#2c0022" : "#8a7a9a",
+              borderColor: heroReady ? heroDef.color : "#4a3a5a",
+              boxShadow: heroReady ? `0 0 26px ${heroDef.color}77, 0 4px 0 #8a5200` : "0 4px 0 #1a1230",
+              opacity: heroReady ? 1 : 0.82,
             }}
           >
-            <HeroIcon kind={heroDef.kind} size={40} color={heroReady ? "#2c0022" : "#8a7a9a"} />
-            <span className="font-disp mt-1 text-[11px] leading-tight">{heroDef.name.toUpperCase()}</span>
+            <span className={`badge-num absolute -left-2 -top-2 ${heroLevel(save, heroDef.id) > 1 ? "" : "dim"}`}>
+              {heroLevel(save, heroDef.id) >= HERO_MAX_LEVEL ? "MAX" : `Lv ${heroLevel(save, heroDef.id)}`}
+            </span>
+            <HeroIcon kind={heroDef.kind} size={52} color={heroReady ? heroDef.color : "#8a7a9a"} />
+            <span className="font-disp mt-0.5 text-center text-[11px] leading-tight" style={{ color: heroReady ? heroDef.color : "#8a7a9a" }}>
+              {heroDef.name.toUpperCase()}
+            </span>
             {!heroReady ? (
-              <span className="text-lg font-bold leading-tight">{Math.ceil(g.heroCd)}s</span>
+              <span className="text-[15px] font-bold leading-tight text-[var(--dim)]">{Math.ceil(g.heroCd)}s</span>
             ) : (
-              <span className="text-[10px] font-bold leading-tight">READY</span>
+              <span className="text-[11px] font-bold leading-tight text-[#3dff8e]">READY — TAP</span>
             )}
           </button>
-        )}
-        {mode === "party" && (
-          <div className="absolute bottom-2 left-3 flex flex-col gap-1">
-            {TEAMMATES.map((m) => (
-              <div key={m.name} className="chip" style={{ borderColor: m.color + "66" }}>
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: m.color, boxShadow: `0 0 8px ${m.color}` }} />
-                <span className="text-[12px]" style={{ color: m.color }}>{m.name}</span>
-                <span className="text-[10px] text-[var(--dim)]">{m.tag}</span>
-                <span className="text-[10px] font-bold" style={{ color: m.color }}>{m.perk}</span>
-              </div>
-            ))}
-            {g && (
-              <div className="chip border-[#3dff8e66] text-[11px] text-[#8effc4]">
-                SYNERGY +{Math.round(SYNERGY_DMG * 100)}% · towers next to a teammate hit harder
-                {g.rallyT > 0 ? ` · RALLY ${g.rallyT.toFixed(0)}s` : ""}
-              </div>
-            )}
-          </div>
         )}
         <button
           className="btn absolute right-3 top-2 px-3 py-1 text-[11px]"
@@ -2912,6 +2849,30 @@ export default function Battle({
         >
           Abandon
         </button>
+
+      {/* arena zoom */}
+      <div className="pointer-events-none absolute bottom-3 left-3 z-20 flex items-center gap-1.5">
+        <div className="pointer-events-auto flex items-center gap-1 rounded-xl border-2 border-[#f5b73d88] bg-[#1a1236f2] px-1.5 py-1 shadow-[0_4px_0_#0d0827]">
+          <button
+            className="grid h-7 w-7 place-items-center rounded-lg bg-black/40 text-[17px] font-bold leading-none text-[var(--txt)] transition hover:bg-black/70"
+            onClick={() => changeZoom(zoom - 0.1)}
+            aria-label="Zoom out"
+          >
+            −
+          </button>
+          <span className="min-w-[46px] text-center text-[12px] font-bold text-[#ffcf4d]" data-testid="zoom">
+            ZOOM {Math.round(zoom * 100)}%
+          </span>
+          <button
+            className="grid h-7 w-7 place-items-center rounded-lg bg-black/40 text-[17px] font-bold leading-none text-[var(--txt)] transition hover:bg-black/70"
+            onClick={() => changeZoom(zoom + 0.1)}
+            aria-label="Zoom in"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
       </div>
 
       {/* BOTTOM BAR — tower slots + the ASCENT token you drop into a slot */}
@@ -2924,44 +2885,19 @@ export default function Battle({
               sfx.click();
               setShopOpen(true);
             }}
-            className="panel flex w-[86px] shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 px-2 py-1.5"
-            style={{ borderColor: "rgba(61,255,142,0.45)" }}
+            className="tile tile-hover flex w-[86px] shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 px-2 py-1.5"
+            style={{ borderColor: "#1f7a4a" }}
           >
-            <span className="text-[17px] leading-none">🛒</span>
+            <span className="text-[19px] leading-none">🛒</span>
             <span className="font-disp text-[11px] leading-none text-[#8effc4]">SHOP</span>
             <span className="text-[10px] font-bold leading-none text-[var(--dim)]">🪙 {Math.floor(g.gold)}</span>
           </button>
-
-          {/* party rally meter */}
-          {mode === "party" && (
-            <button
-              data-testid="rally"
-              onClick={() => rallyRef.current()}
-              className="panel relative flex w-[86px] shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 overflow-hidden px-2 py-1.5"
-              style={{
-                borderColor: g.rally >= 1 || g.rallyT > 0 ? "#ff4fd8" : "rgba(255,79,216,0.35)",
-                boxShadow: g.rally >= 1 ? "0 0 18px rgba(255,79,216,0.5)" : undefined,
-              }}
-            >
-              <span
-                className="pointer-events-none absolute bottom-0 left-0 w-full"
-                style={{
-                  height: `${(g.rallyT > 0 ? 1 : g.rally) * 100}%`,
-                  background: "linear-gradient(180deg, rgba(255,79,216,0.45), rgba(255,79,216,0.12))",
-                }}
-              />
-              <span className="relative font-disp text-[11px] leading-none text-[#ff9be9]">RALLY</span>
-              <span className="relative text-[10px] font-bold leading-none text-[var(--dim)]">
-                {g.rallyT > 0 ? `${g.rallyT.toFixed(0)}s ON` : g.rally >= 1 ? "TAP!" : `${Math.floor(g.rally * 100)}%`}
-              </span>
-            </button>
-          )}
 
           {/* ascent token */}
           <div
             data-testid="ascent-token"
             onPointerDown={startAscentDrag}
-            className="panel relative flex w-[104px] shrink-0 cursor-grab flex-col items-center justify-center gap-0.5 px-2 py-1.5 select-none"
+            className="tile relative flex w-[104px] shrink-0 cursor-grab flex-col items-center justify-center gap-0.5 px-2 py-1.5 select-none"
             style={{
               borderColor: ascentArmed ? "#ffcf4d" : "rgba(255,207,77,0.45)",
               background: ascentArmed
@@ -2993,7 +2929,7 @@ export default function Battle({
                 }}
                 data-slot={i}
                 onClick={t && (ascentArmed || ascentHover === i) ? () => ascendTower(t.uid) : undefined}
-                className="panel flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 transition-colors"
+                className="tile flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 transition-colors"
                 style={{
                   opacity: t ? 1 : 0.45,
                   borderColor: hot ? "#ffcf4d" : undefined,
@@ -3132,11 +3068,6 @@ export default function Battle({
               Collect Rewards
             </button>
           </div>
-        </div>
-      )}
-      {mode === "party" && !g?.final && (
-        <div className="pointer-events-none absolute left-1/2 top-14 -translate-x-1/2 rounded-lg border border-[#ff4fd866] bg-black/60 px-3 py-1 text-[11px] font-bold tracking-widest text-[#ff9be9]">
-          PARTY MODE · TEAM CO-OP · MAGIC TOKENS AT ROUND 10
         </div>
       )}
     </div>

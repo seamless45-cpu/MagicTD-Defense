@@ -11,7 +11,6 @@ import {
   MAX_MENU_LEVEL,
   MAX_BATTLE_LEVEL,
   BATTLE_ROUNDS,
-  PARTY_ROUNDS,
   ENEMY_TYPES,
   HP_GROWTH,
   POINT_DMG_STEP,
@@ -20,15 +19,12 @@ import {
   towerStatRows,
   RUN_SHOP,
   runShopCost,
-  TEAMMATES,
-  PARTY_PERK,
-  perkMult,
-  RALLY_GAIN,
-  RALLY_TIME,
-  RALLY_ASPD,
-  RALLY_DMG,
-  RALLY_BLAST,
-  SYNERGY_DMG,
+  DAILY_REWARDS,
+  HERO_MAX_LEVEL,
+  heroCooldown,
+  heroPower,
+  heroUpgradeCost,
+  type GameMode,
   HEROES,
   HERO_BY_ID,
 } from "../game/data";
@@ -42,6 +38,14 @@ import {
   randFrag,
   addFrag,
   todayStr,
+  yesterdayStr,
+  nextDailyStreak,
+  claimDailyReward,
+  heroLevel,
+  upgradeHero,
+  clampZoom,
+  ZOOM_MAX,
+  ZOOM_MIN,
 } from "../game/save";
 
 describe("tower data", () => {
@@ -182,21 +186,72 @@ describe("tower data", () => {
     expect(RUN_SHOP.map((i) => i.id)).toContain("meteor");
   });
 
-  it("gives party mode a perk per teammate and a rally meter", () => {
-    expect(TEAMMATES).toHaveLength(3);
-    for (const m of TEAMMATES) {
-      expect(m.perk.length).toBeGreaterThan(4);
-      expect(PARTY_PERK[m.perkId]).toBeGreaterThan(0);
-    }
-    expect(perkMult(TEAMMATES, "life")).toBe(PARTY_PERK.life);
-    expect(RALLY_GAIN).toBeGreaterThan(0);
-    expect(RALLY_TIME).toBeGreaterThan(0);
-    expect(RALLY_ASPD).toBeGreaterThan(0);
-    expect(RALLY_DMG).toBeGreaterThan(0);
-    expect(RALLY_BLAST).toBeGreaterThan(0);
-    expect(SYNERGY_DMG).toBeGreaterThan(0);
-    // no duplicate perk ids, or a perk would double up silently
-    expect(new Set(TEAMMATES.map((m) => m.perkId)).size).toBe(TEAMMATES.length);
+  it("keeps party mode out of the game modes", () => {
+    const modes: GameMode[] = ["battle", "endless"];
+    expect(modes).not.toContain("party" as GameMode);
+    expect(BATTLE_ROUNDS).toBe(12);
+  });
+
+  it("levels heroes up: cost, power and cooldown all move together", () => {
+    expect(HERO_MAX_LEVEL).toBeGreaterThanOrEqual(5);
+    expect(heroUpgradeCost(1)).toBeGreaterThan(0);
+    expect(heroUpgradeCost(5)).toBeGreaterThan(heroUpgradeCost(1));
+    expect(heroPower(1)).toBe(1);
+    expect(heroPower(3)).toBeGreaterThan(heroPower(2));
+    const cd = HERO_BY_ID.nova.cd;
+    expect(heroCooldown(cd, 1)).toBe(cd);
+    expect(heroCooldown(cd, 6)).toBeLessThan(cd);
+    expect(heroCooldown(cd, 99)).toBeGreaterThanOrEqual(cd * 0.6);
+
+    const s = defaultSave();
+    s.gold = 100000;
+    expect(heroLevel(s, "nova")).toBe(1);
+    for (let i = 0; i < HERO_MAX_LEVEL - 1; i++) expect(upgradeHero(s, "nova")).toBe(true);
+    expect(heroLevel(s, "nova")).toBe(HERO_MAX_LEVEL);
+    expect(upgradeHero(s, "nova")).toBe(false); // maxed
+    const poor = defaultSave();
+    expect(poor.gold).toBeLessThan(heroUpgradeCost(1));
+    expect(upgradeHero(poor, "nova")).toBe(false);
+  });
+
+  it("ships the thunder god hero with a 20s cooldown", () => {
+    const t = HERO_BY_ID.thunder;
+    expect(t).toBeDefined();
+    expect(t.name).toBe("Thunder God");
+    expect(t.cd).toBe(20);
+    expect(t.kind).toBe("thunder");
+  });
+
+  it("runs a seven day daily streak that pays out and then locks", () => {
+    expect(DAILY_REWARDS).toHaveLength(7);
+    const s = defaultSave();
+    expect(s.dailyStreak).toBe(0);
+    expect(nextDailyStreak(s)).toBe(1);
+
+    const first = claimDailyReward(s)!;
+    expect(first.day).toBe(1);
+    expect(s.gold).toBe(100 + DAILY_REWARDS[0].gold!);
+    expect(s.lastDaily).toBe(todayStr());
+    expect(nextDailyStreak(s)).toBe(1); // already claimed today
+    expect(claimDailyReward(s)).toBeNull();
+
+    // yesterday's claim keeps the streak alive
+    s.lastDaily = yesterdayStr();
+    expect(nextDailyStreak(s)).toBe(2);
+    // a gap resets it
+    s.lastDaily = "2000-01-01";
+    expect(nextDailyStreak(s)).toBe(1);
+    // the streak caps at day 7
+    s.lastDaily = yesterdayStr();
+    s.dailyStreak = 7;
+    expect(nextDailyStreak(s)).toBe(1);
+  });
+
+  it("clamps the arena zoom into its allowed range", () => {
+    expect(clampZoom(1)).toBe(1);
+    expect(clampZoom(9)).toBe(ZOOM_MAX);
+    expect(clampZoom(0.1)).toBe(ZOOM_MIN);
+    expect(clampZoom(Number.NaN)).toBeGreaterThanOrEqual(ZOOM_MIN);
   });
 
   it("gives every hero a cooldown, colour and unique ability", () => {
@@ -227,7 +282,7 @@ describe("tower data", () => {
   });
 
   it("builds waves that only use known enemy types and grow", () => {
-    for (let round = 1; round <= PARTY_ROUNDS; round++) {
+    for (let round = 1; round <= BATTLE_ROUNDS + 8; round++) {
       const w = waveComp(round);
       expect(w.length).toBeGreaterThan(6);
       for (const t of w) {
@@ -241,8 +296,8 @@ describe("tower data", () => {
     expect(waveComp(8)).toContain(4);
   });
 
-  it("only spawns boss rounds for the configured round counts", () => {
-    expect(BATTLE_ROUNDS).toBeLessThanOrEqual(PARTY_ROUNDS);
+  it("keeps the battle gauntlet at 12 rounds", () => {
+    expect(BATTLE_ROUNDS).toBe(12);
   });
 });
 

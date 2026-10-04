@@ -1,9 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { todayStr, clearSave, defaultSave, importSave, persistSave } from "../game/save";
+import {
+  todayStr,
+  clearSave,
+  defaultSave,
+  importSave,
+  persistSave,
+  claimDailyReward,
+  heroLevel,
+  nextDailyStreak,
+  upgradeHero,
+} from "../game/save";
 import { sfx, setVolume } from "../game/audio";
-import { Emblem, HeroIcon, Modal, TowerIcon } from "../components/ui";
-import { TOWERS, BATTLE_ROUNDS, PARTY_ROUNDS, HEROES, HERO_BY_ID } from "../game/data";
+import { CoinIcon, Emblem, GemIcon, HeroIcon, Modal, TokenIcon, TowerIcon } from "../components/ui";
+import {
+  TOWERS,
+  BATTLE_ROUNDS,
+  DAILY_REWARDS,
+  HEROES,
+  HERO_BY_ID,
+  HERO_MAX_LEVEL,
+  heroCooldown,
+  heroPower,
+  heroUpgradeCost,
+} from "../game/data";
 
 const LOAD_STEPS = [
   "Charging mana lattice...",
@@ -64,78 +84,113 @@ export function Home({
   save,
   mutate,
   onBattle,
-  onParty,
   onEndless,
   push,
 }: {
   save: SaveData;
   mutate: (fn: (s: SaveData) => void) => void;
   onBattle: () => void;
-  onParty: () => void;
   onEndless: () => void;
   push: (m: string, c?: string) => void;
 }) {
   const hero = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
-  return (
-    <div className="scroll-thin relative flex h-full flex-col items-center gap-5 overflow-y-auto py-1 pr-1">
-      <div
-        className="pointer-events-none absolute left-[6%] top-[8%] h-40 w-40 rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(53,224,255,.25), transparent 70%)", animation: "orbDrift 7s ease-in-out infinite" }}
-      />
-      <div
-        className="pointer-events-none absolute bottom-[14%] right-[8%] h-52 w-52 rounded-full"
-        style={{ background: "radial-gradient(circle, rgba(255,79,216,.2), transparent 70%)", animation: "orbDrift 9s ease-in-out infinite reverse" }}
-      />
+  const lv = heroLevel(save, hero.id);
+  const cost = heroUpgradeCost(lv);
+  const heroMaxed = lv >= HERO_MAX_LEVEL;
+  const canClaim = save.lastDaily !== todayStr();
+  const day = nextDailyStreak(save);
 
-      <div className="anim-slideup relative text-center">
+  const doUpgrade = () => {
+    if (heroMaxed) {
+      sfx.error();
+      return push(`${hero.name} is already max level`, "#ff4d5e");
+    }
+    const ok = mutate((s) => {
+      upgradeHero(s, hero.id);
+    });
+    if (save.gold < cost) {
+      sfx.error();
+      return push(`Need ${cost} gold to upgrade ${hero.name}`, "#ff4d5e");
+    }
+    sfx.buy();
+    push(`${hero.name} reached Lv ${lv + 1}`, hero.color);
+    return ok;
+  };
+
+  const claim = () => {
+    const got = claimDailyReward(save);
+    if (!got) {
+      sfx.error();
+      return push("Already claimed today — come back tomorrow", "#ff4d5e");
+    }
+    mutate((s) => {
+      claimDailyReward(s);
+    });
+    sfx.chest();
+    push(`Day ${got.day}: ${got.label}`, got.color);
+  };
+
+  return (
+    <div className="scroll-thin relative flex h-full flex-col gap-3 overflow-y-auto py-1 pr-1">
+      <div className="anim-slideup text-center">
         <div className="font-disp text-3xl tracking-wide text-[#ffb324]" style={{ textShadow: "0 0 24px rgba(255,179,36,.55)" }}>
           Command Center
         </div>
-        <div className="mt-0.5 text-[13px] font-semibold tracking-[0.3em] text-[var(--dim)]">
-          ENEMIES GROW +57% STRONGER EVERY WAVE · PICK YOUR HERO · HOLD THE LINE
+        <div className="mt-0.5 text-[12px] font-semibold tracking-[0.28em] text-[var(--dim)]">
+          ENEMIES GROW +57% STRONGER EVERY WAVE · HOLD THE LINE
         </div>
       </div>
 
-      {/* mode cards */}
-      <div className="relative grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-3">
-        <ModeCard
-          accent="#ffcf4d"
-          title="Battle"
-          sub={`Solo defense · ${BATTLE_ROUNDS} rounds`}
-          body="Fixed 12-wave gauntlet. Win it to bank gold, gems and fragments."
-          onClick={onBattle}
-          delay="0ms"
-        />
-        <ModeCard
-          accent="#35e0ff"
-          title="Party"
-          sub={`Co-op · ${PARTY_ROUNDS} rounds`}
-          body="AI teammates deploy their own towers. Magic Tokens at round 10."
-          onClick={onParty}
-          delay="60ms"
-        />
-        <ModeCard
-          accent="#ff4fd8"
-          title="Endless"
-          sub="No wave limit · score attack"
-          body="Survive as long as you can. Rewards scale with how deep you get."
-          onClick={onEndless}
-          delay="120ms"
-          badge={`BEST ${save.bestEndless}`}
-        />
-      </div>
-
-      {/* hero picker */}
-      <div className="panel relative w-full max-w-4xl p-3">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <div className="text-[12px] font-bold tracking-[0.25em] text-[#ffcf4d]">HERO</div>
-          <div className="text-[11px] font-semibold text-[var(--dim)]">
-            {hero.name} · {hero.desc}
+      {/* HERO CARD — portrait, level and the upgrade button */}
+      <div className="tile tile-gold anim-pop relative p-3" data-testid="hero-card">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="frame-gold relative grid h-[104px] w-[104px] shrink-0 place-items-center">
+            <HeroIcon kind={hero.kind} size={66} color={hero.color} />
+            <span className="badge-num absolute -left-2 -top-2">{lv >= HERO_MAX_LEVEL ? "MAX" : `Lv ${lv}`}</span>
           </div>
+          <div className="min-w-[210px] flex-1">
+            <div className="text-[11px] font-bold tracking-[0.28em] text-[#ffcf4d]">HERO</div>
+            <div className="font-disp text-2xl leading-none" style={{ color: hero.color }}>
+              {hero.name}
+            </div>
+            <p className="mt-1 text-[12.5px] font-semibold leading-snug text-[var(--dim)]">{hero.desc}</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <span className="pill-dark text-[11px] text-[var(--dim)]">
+                <span className="num" style={{ color: "#3dff8e" }}>
+                  {Math.round(heroPower(lv) * 100)}%
+                </span>
+                power
+              </span>
+              <span className="pill-dark text-[11px] text-[var(--dim)]">
+                <span className="num" style={{ color: "#35e0ff" }}>
+                  {heroCooldown(hero.cd, lv).toFixed(0)}s
+                </span>
+                cooldown
+              </span>
+              <span className="text-[11px] font-bold text-[#8effc4]">{hero.scaling}</span>
+            </div>
+          </div>
+          <button
+            className="cta-banner shrink-0 px-5 py-3 text-[15px]"
+            data-testid="hero-upgrade"
+            disabled={heroMaxed || save.gold < cost}
+            onClick={doUpgrade}
+          >
+            {heroMaxed ? (
+              "MAX LEVEL"
+            ) : (
+              <span className="inline-flex items-center gap-2">
+                UPGRADE <CoinIcon size={17} /> {cost}
+              </span>
+            )}
+          </button>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+
+        {/* hero switcher */}
+        <div className="mt-3 flex gap-2 overflow-x-auto scroll-thin pb-1">
           {HEROES.map((h) => {
             const on = h.id === hero.id;
+            const hl = heroLevel(save, h.id);
             return (
               <button
                 key={h.id}
@@ -146,35 +201,88 @@ export function Home({
                   });
                   push(`${h.name} equipped`, h.color);
                 }}
-                className="flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition"
+                className="tile tile-hover relative flex w-[132px] shrink-0 flex-col items-center gap-1 p-2"
                 style={{
-                  borderColor: on ? h.color : "var(--line)",
-                  background: on ? h.color + "22" : "rgba(8,5,26,0.45)",
-                  boxShadow: on ? `0 0 16px ${h.color}55` : undefined,
+                  borderColor: on ? h.color : undefined,
+                  boxShadow: on ? `0 0 16px ${h.color}66, 0 4px 0 #0b0722` : undefined,
                 }}
               >
-                <HeroIcon kind={h.kind} size={34} color={h.color} />
-                <div className="min-w-0 leading-tight">
-                  <div className="truncate text-[13px] font-bold" style={{ color: h.color }}>
-                    {h.name}
-                  </div>
-                  <div className="text-[10px] font-bold text-[var(--dim)]">{on ? "EQUIPPED" : `${h.cd}s cooldown`}</div>
-                </div>
+                <span className={`badge-num absolute -left-1.5 -top-1.5 ${hl > 1 ? "" : "dim"}`}>{hl}</span>
+                <HeroIcon kind={h.kind} size={44} color={h.color} />
+                <span className="truncate text-[12px] font-bold" style={{ color: h.color }}>
+                  {h.name}
+                </span>
+                <span className="text-[10px] font-bold text-[var(--dim)]">
+                  {on ? "EQUIPPED" : `${heroCooldown(h.cd, hl).toFixed(0)}s · ${h.kind}`}
+                </span>
               </button>
             );
           })}
         </div>
       </div>
 
-      <div className="anim-slideup relative flex flex-wrap items-center justify-center gap-3 text-sm font-bold tracking-wider text-[var(--dim)]" style={{ animationDelay: "160ms" }}>
-        <span className="chip">BEST ROUND · {save.best}</span>
-        <span className="chip">ENDLESS · {save.bestEndless}</span>
-        <span className="chip">VICTORIES · {save.wins}</span>
-        <span className="chip">RUNS · {save.runs}</span>
+      {/* MODES */}
+      <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+        <ModeCard
+          accent="#ffcf4d"
+          title="Battle"
+          sub={`Solo defense · ${BATTLE_ROUNDS} rounds`}
+          body="Fixed 12-wave gauntlet. Win it to bank gold, gems and fragments."
+          onClick={onBattle}
+          delay="0ms"
+        />
+        <ModeCard
+          accent="#ff4fd8"
+          title="Endless"
+          sub="No wave limit · score attack"
+          body="Survive as long as you can. Every wave banks more, deeper runs pay more."
+          onClick={onEndless}
+          delay="60ms"
+          badge={`BEST ${save.bestEndless}`}
+        />
+      </div>
+
+      {/* DAILY REWARDS */}
+      <div className="tile relative p-3" data-testid="daily-rewards">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="font-disp text-xl text-[#ffcf4d]">Daily Rewards</div>
+            <div className="text-[12px] font-semibold text-[var(--dim)]">
+              Streak {save.dailyStreak}/7 · claiming today opens day {day}. Miss a day and the streak restarts.
+            </div>
+          </div>
+          <button className="cta-banner shrink-0 px-5 py-2.5 text-[14px]" data-testid="daily-claim" disabled={!canClaim} onClick={claim}>
+            {canClaim ? `CLAIM DAY ${day}` : "CLAIMED · TOMORROW"}
+          </button>
+        </div>
+        <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-7">
+          {DAILY_REWARDS.map((r, i) => {
+            const n = i + 1;
+            const done = n < day || (n === save.dailyStreak && !canClaim);
+            const next = n === day && canClaim;
+            return (
+              <div key={n} className={`day-tile relative flex flex-col items-center gap-1 p-2 ${next ? "next" : done ? "done" : ""}`}>
+                <span className={`badge-num ${next ? "" : "dim"}`}>{n}</span>
+                <div className="flex h-8 items-center gap-1">
+                  {r.gems ? <GemIcon size={22} /> : r.tokens ? <TokenIcon size={22} /> : r.frags ? <TowerIcon def={TOWERS[0]} size={24} /> : <CoinIcon size={22} />}
+                </div>
+                <span className="text-center text-[9.5px] font-bold leading-tight text-[var(--dim)]">{r.label}</span>
+                {done && <span className="absolute right-1 top-1 text-[12px] text-[#3dff8e]">✓</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="anim-slideup relative flex flex-wrap items-center justify-center gap-2 pb-1 text-[12px] font-bold tracking-wider text-[var(--dim)]" style={{ animationDelay: "120ms" }}>
+        <span className="pill-dark">BEST ROUND <span className="num">{save.best}</span></span>
+        <span className="pill-dark">ENDLESS <span className="num">{save.bestEndless}</span></span>
+        <span className="pill-dark">VICTORIES <span className="num">{save.wins}</span></span>
+        <span className="pill-dark">RUNS <span className="num">{save.runs}</span></span>
       </div>
       {save.lineup.length < 3 && (
         <button
-          className="btn relative text-sm"
+          className="btn relative mx-auto text-sm"
           onClick={() => {
             sfx.click();
             push("Add at least 3 towers to your lineup in the Towers tab", "#ffd23f");
@@ -210,47 +318,30 @@ function ModeCard({
         sfx.click();
         onClick();
       }}
-      className="panel anim-pop group relative overflow-hidden p-4 text-left transition-transform hover:-translate-y-0.5"
-      style={{ animationDelay: delay, borderColor: accent + "88" }}
+      className="tile tile-hover anim-pop group relative overflow-hidden p-4 text-left"
+      style={{ animationDelay: delay, borderColor: accent }}
+      data-mode={title}
     >
       <div
         className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full opacity-30 transition-opacity group-hover:opacity-60"
         style={{ background: `radial-gradient(circle, ${accent}, transparent 70%)` }}
       />
       {badge && (
-        <span
-          className="absolute right-2 top-2 rounded-md border px-1.5 py-0.5 text-[10px] font-bold tracking-wider"
-          style={{ borderColor: accent + "88", color: accent }}
-        >
+        <span className="badge-num absolute right-2 top-2" style={{ borderColor: accent }}>
           {badge}
         </span>
       )}
-      <div className="font-disp relative text-2xl leading-none" style={{ color: accent }}>
+      <div className="font-disp relative text-3xl leading-none" style={{ color: accent }}>
         {title}
       </div>
       <div className="relative mt-1 text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--dim)]">{sub}</div>
-      <p className="relative mt-2 text-[12px] font-semibold leading-snug text-[var(--txt)]/80">{body}</p>
-      <span
-        className="font-disp relative mt-3 inline-block rounded-lg px-4 py-1.5 text-[13px]"
-        style={{ background: accent, color: "#160e2e" }}
-      >
-        DEPLOY
-      </span>
+      <p className="relative mt-2 text-[12.5px] font-semibold leading-snug text-[var(--txt)]/85">{body}</p>
+      <span className="cta-banner relative mt-3 inline-block px-6 py-2 text-[14px]">DEPLOY</span>
     </button>
   );
 }
 
-export function Specials({
-  save,
-  mutate,
-  push,
-}: {
-  save: SaveData;
-  mutate: (fn: (s: SaveData) => void) => void;
-  push: (m: string, c?: string) => void;
-}) {
-  const canDaily = save.lastDaily !== todayStr();
-  const [claimed, setClaimed] = useState(!canDaily);
+export function Specials() {
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto scroll-thin pr-1">
       <div className="panel relative overflow-hidden p-5" style={{ borderColor: "#6b2fb0" }}>
@@ -263,30 +354,11 @@ export function Specials({
           <span className="btn mt-3 inline-block cursor-not-allowed px-4 py-1 text-xs opacity-50">Coming Soon</span>
         </div>
       </div>
-      <div className="panel p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-disp text-xl text-[#ffcf4d]">Daily Rite</div>
-            <p className="text-sm font-semibold text-[var(--dim)]">Claim 60 gold and a random tower fragment, once per day.</p>
-          </div>
-          <button
-            className="btn btn-gold px-5 py-2"
-            disabled={claimed}
-            onClick={() => {
-              const frag = TOWERS[Math.floor(Math.random() * TOWERS.length)].id;
-              mutate((s) => {
-                s.gold += 60;
-                s.frags[frag] = (s.frags[frag] || 0) + 1;
-                s.lastDaily = todayStr();
-              });
-              setClaimed(true);
-              sfx.coin();
-              push(`+60 gold · +1 ${TOWERS.find((t) => t.id === frag)?.name} fragment`, "#ffcf4d");
-            }}
-          >
-            {claimed ? "Claimed" : "Claim"}
-          </button>
-        </div>
+      <div className="tile p-5">
+        <div className="font-disp text-xl text-[#ffcf4d]">Daily Rewards moved home</div>
+        <p className="mt-1 text-sm font-semibold text-[var(--dim)]">
+          The 7-day streak calendar now lives on the Command Center — claim it there before you deploy.
+        </p>
       </div>
       <div className="grid grid-cols-2 gap-4">
         {[
@@ -315,16 +387,16 @@ const GUILDS = [
 export function Guild({ push }: { push: (m: string, c?: string) => void }) {
   const [joined, setJoined] = useState<string | null>(null);
   const lines = [
-    ["Kael", "Anyone up for a Party raid tonight?"],
+    ["Kael", "Anyone farming endless waves tonight?"],
     ["Mira", "Just hit Awakening II on my Lightning Princess."],
-    ["Torin", "Power Plant synergy is broken. In a good way."],
+    ["Torin", "Power Plant next to a Chrono Spire is broken. In a good way."],
   ] as const;
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto scroll-thin pr-1">
       <div className="panel p-5" style={{ borderColor: joined ? "#ffb32466" : undefined }}>
         <div className="font-disp text-2xl text-[#ffcf4d]">Guild Hall</div>
         <p className="text-sm font-semibold text-[var(--dim)]">
-          {joined ? `You are a member of ${joined}.` : "Join a guild to share war chests and rally for party raids."}
+          {joined ? `You are a member of ${joined}.` : "Join a guild to share war chests and compare endless records."}
         </p>
         <div className="mt-3 space-y-2">
           {GUILDS.map((g) => (

@@ -15,7 +15,7 @@ import {
   towerStatRows,
   type TowerDef,
 } from "../game/data";
-import { Ceremony, CoinIcon, TokenIcon, TowerIcon, type CeremonyData } from "../components/ui";
+import { Ceremony, CoinIcon, GemIcon, TokenIcon, TowerIcon, type CeremonyData } from "../components/ui";
 
 interface Drag {
   id: string;
@@ -251,10 +251,14 @@ export default function Towers({
   return (
     <div className="flex h-full flex-col gap-4">
       {/* LINEUP — visible on top */}
-      <div className="panel shrink-0 p-3" style={{ borderColor: "rgba(255,207,77,0.4)" }}>
-        <div className="mb-2 flex items-center justify-between">
-          <div className="text-sm font-bold tracking-[0.25em] text-[#ffcf4d]">BATTLE LINEUP · {save.lineup.length}/6</div>
-          <div className="text-xs font-semibold text-[var(--dim)]">Tap a tower to preview it · drag it onto a slot · battle summons use this lineup</div>
+      <div className="tile tile-gold shrink-0 p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="font-disp text-[15px] tracking-wide text-[#ffcf4d]">
+            BATTLE LINEUP <span className="text-[var(--txt)]">{save.lineup.length}/6</span>
+          </div>
+          <div className="text-[11px] font-semibold text-[var(--dim)]">
+            Tap a tower to preview · drag it onto a slot · summons pick from this lineup
+          </div>
         </div>
         <div className="flex gap-2">
           {Array.from({ length: 6 }).map((_, i) => {
@@ -266,19 +270,19 @@ export default function Towers({
                 ref={(el) => {
                   slotRefs.current[i] = el;
                 }}
-                className="slot-dash flex h-[74px] min-w-[84px] flex-1 items-center justify-center gap-1.5 px-2"
+                className="slot-dash relative flex h-[78px] min-w-[78px] flex-1 items-center justify-center px-1.5"
                 style={def ? { borderColor: RARITY[def.rarity].color, background: "rgba(8,5,26,0.5)" } : undefined}
               >
                 {def ? (
-                  <div className="flex items-center gap-1.5">
-                    <TowerIcon def={def} size={46} />
-                    <div className="leading-tight">
-                      <div className="max-w-[72px] truncate text-[13px] font-bold" style={{ color: RARITY[def.rarity].color }}>
+                  <>
+                    <span className="badge-num absolute -left-1.5 -top-1.5">{save.levels[def.id]}</span>
+                    <div className="flex flex-col items-center gap-0.5">
+                      <TowerIcon def={def} size={42} />
+                      <div className="max-w-[82px] truncate text-[11px] font-bold" style={{ color: RARITY[def.rarity].color }}>
                         {def.name}
                       </div>
-                      <div className="text-[11px] font-bold text-[var(--dim)]">Lv {save.levels[def.id]} · tap to remove</div>
                     </div>
-                  </div>
+                  </>
                 ) : (
                   <span className="text-[11px] font-bold tracking-widest text-[var(--line2)]">EMPTY</span>
                 )}
@@ -298,55 +302,68 @@ export default function Towers({
           const have = save.frags[def.id] || 0;
           const inLine = save.lineup.includes(def.id);
           const awoken = (save.awn[def.id]?.[0] || 0) + (save.awn[def.id]?.[1] || 0);
+          const maxed = lv >= MAX_MENU_LEVEL;
+          const canUp = !locked && !maxed && save.gold >= upgradeGoldCost(lv) && have >= fr;
           return (
             <div
               key={def.id}
               data-tower={def.id}
-              className={`panel anim-pop flex flex-col p-3 ${shakeCard === def.id ? "anim-shake" : ""}`}
-              style={{ animationDelay: `${i * 30}ms`, borderColor: rc.color + (locked ? "44" : "77"), cursor: "grab" }}
+              className={`tile tile-hover anim-pop relative flex flex-col p-2.5 ${shakeCard === def.id ? "anim-shake" : ""}`}
+              style={{
+                animationDelay: `${i * 25}ms`,
+                borderColor: locked ? "#4a3a96" : rc.color,
+                cursor: "grab",
+              }}
               onPointerDown={(e) => startDrag(def.id, e)}
             >
-              <div className="flex items-start gap-2">
-                <TowerIcon def={def} size={54} locked={locked} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[15px] font-bold" style={{ color: rc.color }}>{def.name}</div>
-                  <span
-                    className="mt-0.5 inline-block rounded px-1.5 py-px text-[10px] font-bold tracking-widest"
-                    style={{ background: rc.color + "22", color: rc.color, border: `1px solid ${rc.color}55` }}
-                  >
-                    {rc.name.toUpperCase()}
-                  </span>
-                  <div className="mt-1 text-[12px] font-bold text-[var(--dim)]">
-                    {locked ? <span className="text-[#ff4d5e]">LOCKED</span> : <>Lv {lv}/{MAX_MENU_LEVEL}</>}
-                  </div>
-                </div>
-                {awoken > 0 && (
-                  <span className="shrink-0 rounded border border-[#ff4fd8aa] px-1 text-[10px] font-bold text-[#ff9be9]">
-                    ✦{awoken}
-                  </span>
-                )}
-              </div>
-              <p className="mt-1.5 line-clamp-2 min-h-[28px] text-[11px] font-semibold leading-tight text-[var(--dim)]">
-                {locked ? `Unlock with ${def.unlockFrags} fragments (from chests).` : def.desc}
-              </p>
-              {!locked && (
-                <div className="mt-1 flex items-center justify-between text-[11px] font-bold">
-                  <span className="text-[var(--dim)]">Frags: <span className="text-[var(--txt)]">{have}</span>{lv < MAX_MENU_LEVEL ? ` / ${fr} next` : ""}</span>
-                  <span className="text-[var(--dim)]">Battle Lv 1–{MAX_BATTLE_LEVEL}</span>
-                </div>
+              <span className={`badge-num absolute -left-1.5 -top-1.5 ${locked ? "dim" : maxed ? "max" : ""}`}>
+                {locked ? "?" : maxed ? "MAX" : lv}
+              </span>
+              {awoken > 0 && (
+                <span className="badge-num absolute -right-1.5 -top-1.5" style={{ borderColor: "#ff4fd8", color: "#ff9be9" }}>
+                  ✦{awoken}
+                </span>
               )}
+              <div
+                className="mt-1 grid h-[70px] place-items-center rounded-xl bg-black/35"
+                style={{ border: `1px solid ${locked ? "#4a3a9655" : rc.color + "55"}` }}
+              >
+                <TowerIcon def={def} size={54} locked={locked} />
+              </div>
+              <div
+                className="mt-1.5 truncate text-center text-[13.5px] font-bold leading-tight"
+                style={{ color: locked ? "var(--dim)" : rc.color }}
+              >
+                {def.name}
+              </div>
+              <div className="text-center text-[9.5px] font-bold tracking-[0.18em]" style={{ color: rc.color }}>
+                {rc.name.toUpperCase()}
+              </div>
+              <p className="mt-1 line-clamp-2 min-h-[26px] text-center text-[10.5px] font-semibold leading-tight text-[var(--dim)]">
+                {locked ? `Unlock with ${def.unlockFrags} fragments` : def.desc}
+              </p>
 
-              <div className="mt-auto flex flex-col gap-1 pt-2" onPointerDown={(e) => e.stopPropagation()}>
-                <button className="btn w-full py-1.5 text-[12px]" onClick={() => openPreview(def.id)}>
-                  Preview &amp; Upgrade
+              <div className="mt-auto flex flex-col items-center gap-1.5 pt-1.5" onPointerDown={(e) => e.stopPropagation()}>
+                <span className="pill-dark text-[11px]" style={{ borderColor: locked ? "#4a3a96" : rc.color + "77" }}>
+                  <GemIcon size={15} />
+                  <span className="num">{have}</span>
+                  {!locked && !maxed && <span className="text-[10px] text-[var(--dim)]">/ {fr} next</span>}
+                </span>
+                <button
+                  className={`w-full rounded-lg px-2 py-1.5 text-[11.5px] font-bold uppercase tracking-wide transition ${
+                    canUp ? "cta-banner" : "btn"
+                  }`}
+                  onClick={() => openPreview(def.id)}
+                >
+                  {locked ? "Preview & Unlock" : maxed ? "Preview & Ascend" : "Preview & Upgrade"}
                 </button>
                 {!locked && (
                   <button
-                    className="btn w-full py-1 text-[11px]"
+                    className="btn w-full py-1 text-[10.5px]"
                     style={inLine ? { borderColor: "#ff4d5e88", color: "#ff8f9a" } : { borderColor: "#3dff8e55", color: "#8effc4" }}
                     onClick={() => toggleLineup(def.id)}
                   >
-                    {inLine ? "In Lineup — Remove" : "Add to Lineup"}
+                    {inLine ? "Remove from lineup" : "Add to lineup"}
                   </button>
                 )}
               </div>

@@ -147,7 +147,7 @@ export default function Shop({
           {CHESTS.map((c, i) => {
             const afford = c.gem === 1 ? save.gems >= c.cost : save.gold >= c.cost;
             return (
-              <div key={c.id} className="panel anim-pop flex flex-col items-center p-4" style={{ animationDelay: `${i * 60}ms`, borderColor: c.color + "66" }}>
+              <div key={c.id} className="tile tile-hover anim-pop flex flex-col items-center p-4" style={{ animationDelay: `${i * 60}ms`, borderColor: c.color + "66" }}>
                 <ChestSVG color={c.color} size={92} />
                 <div className="font-disp mt-1 text-base" style={{ color: c.color }}>{c.name}</div>
                 <div className="mt-0.5 h-4 text-xs font-bold text-[var(--dim)]">
@@ -189,7 +189,7 @@ export default function Shop({
             ))}
           </div>
         </div>
-        <div className="panel p-4">
+        <div className="tile p-4">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
             {TOWERS.map((t) => {
               const on = t.id === fragPick;
@@ -248,7 +248,7 @@ export default function Shop({
           {TOKEN_PACKS.map((p) => {
             const afford = save.gems >= p.gems;
             return (
-              <div key={p.tokens} className="panel flex items-center justify-between gap-3 p-4">
+              <div key={p.tokens} className="tile flex items-center justify-between gap-3 p-4">
                 <div className="flex items-center gap-2">
                   <TokenIcon size={30} />
                   <div>
@@ -268,7 +268,7 @@ export default function Shop({
           })}
         </div>
         <p className="mt-1.5 text-[11px] font-semibold text-[var(--dim)]">
-          Tokens fuel awakenings in the Towers tab. Earn gems in Battle, Party and Endless runs.
+          Tokens fuel awakenings in the Towers tab. Earn gems in Battle and Endless runs.
         </p>
       </div>
 
@@ -277,7 +277,7 @@ export default function Shop({
         <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">LEGENDARY VAULT</div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {legendaries.map((t) => (
-            <div key={t.id} className="panel flex flex-col items-center p-3" style={{ borderColor: RARITY.legendary.color + "55" }}>
+            <div key={t.id} className="tile tile-hover flex flex-col items-center p-3" style={{ borderColor: RARITY.legendary.color + "55" }}>
               <TowerIcon def={t} size={64} locked={(save.levels[t.id] || 0) === 0} />
               <div className="font-disp mt-1 text-center text-[14px] text-[#ffb324]">{t.name}</div>
               <p className="mt-1 line-clamp-3 text-center text-[11px] font-semibold text-[var(--dim)]">{t.desc}</p>

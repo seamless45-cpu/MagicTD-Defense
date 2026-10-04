@@ -38,7 +38,7 @@ export type TowerKind =
   | "dragon"
   | "sun";
 
-export type GameMode = "battle" | "party" | "endless";
+export type GameMode = "battle" | "endless";
 
 export interface AwkSpec {
   name: string;
@@ -203,7 +203,7 @@ export const TOWERS: TowerDef[] = [
     },
     awk2: {
       name: "Deafening Blaze",
-      desc: "When created by merging, fires blazing beams at enemies. Stronger in Party Mode.",
+      desc: "When created by merging, fires blazing beams at the strongest enemies on the field.",
       chance: [1, 1, 1, 1, 1],
       mult: [2, 4, 7, 10, 15],
       mult2: [1.2, 2.4, 3.6, 5.4, 7.2],
@@ -605,13 +605,12 @@ export function waveComp(round: number): number[] {
   return out;
 }
 
-export const PARTY_ROUNDS = 15;
 export const BATTLE_ROUNDS = 12;
 /** Endless never stops; this is only used for display before the first wave. */
 export const ENDLESS_ROUNDS = 0;
 
 // ---------- heroes ----------
-export type HeroKind = "nuke" | "freeze" | "burn" | "overdrive";
+export type HeroKind = "nuke" | "freeze" | "burn" | "overdrive" | "thunder";
 
 export interface HeroDef {
   id: string;
@@ -620,6 +619,8 @@ export interface HeroDef {
   cd: number;
   kind: HeroKind;
   desc: string;
+  /** shown in the hero card once the ability is levelled up */
+  scaling: string;
 }
 
 export const HEROES: HeroDef[] = [
@@ -630,6 +631,7 @@ export const HEROES: HeroDef[] = [
     cd: 25,
     kind: "nuke",
     desc: "Screen-wide detonation: heavy damage and a brief stun on every enemy.",
+    scaling: "+30% blast damage per level",
   },
   {
     id: "glacier",
@@ -638,6 +640,7 @@ export const HEROES: HeroDef[] = [
     cd: 30,
     kind: "freeze",
     desc: "Flash-freezes every enemy solid for 4s, then leaves them chilled and slowed.",
+    scaling: "+0.4s freeze per level",
   },
   {
     id: "ember",
@@ -646,6 +649,7 @@ export const HEROES: HeroDef[] = [
     cd: 30,
     kind: "burn",
     desc: "Ignites the whole field: heavy damage plus a long burning wound.",
+    scaling: "+30% burn damage per level",
   },
   {
     id: "overdrive",
@@ -654,12 +658,54 @@ export const HEROES: HeroDef[] = [
     cd: 35,
     kind: "overdrive",
     desc: "Supercharges every tower: +150% attack speed and +50% damage for 8s.",
+    scaling: "+1s overdrive per level",
+  },
+  {
+    id: "thunder",
+    name: "Thunder God",
+    color: "#ffe14d",
+    cd: 20,
+    kind: "thunder",
+    desc: "Calls lightning down along the lane: bolts walk the path, chaining between everything they touch.",
+    scaling: "+1 bolt and +25% damage per level",
   },
 ];
 
 export const HERO_BY_ID: Record<string, HeroDef> = Object.fromEntries(
   HEROES.map((h) => [h.id, h])
 );
+
+// ---------- hero levelling ----------
+export const HERO_MAX_LEVEL = 10;
+/** gold needed to take a hero from `lv` to `lv + 1` */
+export const heroUpgradeCost = (lv: number) => Math.round(120 * Math.pow(1.45, Math.max(0, lv - 1)));
+/** every level adds 30% ability power (damage, burn, freeze/overdrive duration) */
+export const heroPower = (lv: number) => 1 + 0.3 * (Math.max(1, lv) - 1);
+/** and shaves 3% off the cooldown, down to a floor of 60% */
+export const heroCooldown = (cd: number, lv: number) =>
+  cd * Math.max(0.6, 1 - 0.03 * (Math.max(1, lv) - 1));
+
+// ---------- daily rewards ----------
+export interface DailyReward {
+  gold?: number;
+  gems?: number;
+  tokens?: number;
+  frags?: number;
+  /** fragment rarity, used when frags are granted */
+  rarity?: Rarity;
+  label: string;
+}
+
+/** seven day streak; claim once per day and the streak keeps climbing */
+export const DAILY_REWARDS: DailyReward[] = [
+  { gold: 75, label: "75 gold" },
+  { frags: 2, rarity: "normal", label: "2 normal fragments" },
+  { gold: 160, gems: 1, label: "160 gold + 1 gem" },
+  { frags: 3, rarity: "decent", label: "3 decent fragments" },
+  { gold: 320, tokens: 1, label: "320 gold + 1 token" },
+  { gems: 3, frags: 2, rarity: "epic", label: "3 gems + 2 epic fragments" },
+  { gold: 900, gems: 6, tokens: 3, label: "Grand cache: 900 gold, 6 gems, 3 tokens" },
+];
 
 export const OVERDRIVE_TIME = 8;
 export const OVERDRIVE_ASPD = 1.5;
@@ -674,45 +720,3 @@ export const CHESTS = [
   { id: "legendary", name: "Legendary Chest", cost: 60, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12] },
 ] as const;
 
-// ---------- party mode ----------
-export type PerkId = "dmg" | "crit" | "life";
-
-export interface Teammate {
-  name: string;
-  color: string;
-  tag: string;
-  perkId: PerkId;
-  /** what this teammate gives the whole squad */
-  perk: string;
-}
-
-export const TEAMMATES: Teammate[] = [
-  { name: "Kael", color: "#35e0ff", tag: "Mage Slayer", perkId: "dmg", perk: "+12% tower damage" },
-  { name: "Mira", color: "#ff4fd8", tag: "Crit Queen", perkId: "crit", perk: "+8% crit chance" },
-  { name: "Torin", color: "#3dff8e", tag: "Bulwark", perkId: "life", perk: "+6 lives" },
-];
-
-export const PARTY_PERK: Record<PerkId, number> = { dmg: 0.12, crit: 0.08, life: 6 };
-
-/** Party Rally: kills charge the meter, then the whole squad goes berserk. */
-export const RALLY_GAIN = 0.07; // meter gained per kill
-export const RALLY_TIME = 10;
-export const RALLY_ASPD = 0.6; // +60% attack speed for everyone
-export const RALLY_DMG = 0.4; // +40% damage for everyone
-export const RALLY_BLAST = 0.12; // share of max hp the rally shockwave deals
-/** towers standing next to a teammate's tower hit harder */
-export const SYNERGY_DMG = 0.2;
-
-export const perkMult = (teammates: Teammate[], id: PerkId) =>
-  teammates.reduce((a, m) => (m.perkId === id ? a + PARTY_PERK[id] : a), 0);
-
-export const CHAT_LINES = [
-  "Save some SP for a summon!",
-  "Nice shot!",
-  "Merge when they match points!",
-  "Watch the boss this round!",
-  "My lineup is heating up!",
-  "That burst was clean.",
-  "Hold the corner cells.",
-  "Points pulse = faster firing. Use it!",
-];

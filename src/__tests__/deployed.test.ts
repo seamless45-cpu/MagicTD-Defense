@@ -51,7 +51,6 @@ describe("published build (index.html)", () => {
     expect(text).toContain("Command Center");
     // all three modes and the hero picker ship in the published build
     expect(text).toContain("Battle");
-    expect(text).toContain("Party");
     expect(text).toContain("Endless");
     expect(text).toContain("HERO");
     expect(text).toContain("Nova");
@@ -62,12 +61,14 @@ describe("published build (index.html)", () => {
       "Battle Shop",
       "FRAGMENT EXCHANGE",
       "Master Volume",
+      "Daily Rewards",
+      "Thunder God",
       "Dragon's Maw",
       "Sunforge",
       "Missile Battery",
       "Toxic Sprayer",
-      "RALLY",
       "CONGRATULATIONS",
+      "BATTLE LINEUP",
     ];
     const missing = markers.filter((m) => !html.includes(m));
     expect(missing, `published bundle is missing: ${missing.join(", ")}`).toHaveLength(0);

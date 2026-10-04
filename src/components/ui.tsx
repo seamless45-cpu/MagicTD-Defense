@@ -39,17 +39,17 @@ export function CurrencyBar({
 }) {
   return (
     <div className="flex items-center gap-2">
-      <div className="chip text-[15px] text-[#ffcf4d]">
-        <CoinIcon />
-        <span>{Math.floor(gold).toLocaleString()}</span>
+      <div className="pill-dark text-[11px] text-[#ffcf4d]" style={{ borderColor: "#8a6a1a" }} data-currency="gold">
+        <CoinIcon size={20} />
+        <span className="num">{Math.floor(gold).toLocaleString()}</span>
       </div>
-      <div className="chip text-[15px] text-[#35e0ff]">
-        <GemIcon />
-        <span>{Math.floor(gems).toLocaleString()}</span>
+      <div className="pill-dark text-[11px] text-[#35e0ff]" style={{ borderColor: "#1f6f8c" }} data-currency="gems">
+        <GemIcon size={20} />
+        <span className="num">{Math.floor(gems).toLocaleString()}</span>
       </div>
-      <div className="chip text-[15px] text-[#ff4fd8]">
-        <TokenIcon />
-        <span>{Math.floor(tokens).toLocaleString()}</span>
+      <div className="pill-dark text-[11px] text-[#ff4fd8]" style={{ borderColor: "#7a2f6a" }} data-currency="tokens">
+        <TokenIcon size={20} />
+        <span className="num">{Math.floor(tokens).toLocaleString()}</span>
       </div>
     </div>
   );
@@ -290,6 +290,16 @@ export function HeroIcon({
           <g>
             <path d="M24 5c3 10 13 12 13 24a13 13 0 0 1-26 0c0-7 4-9 5-15 2 4 5 5 8-9z" fill={color} stroke="#8a3000" strokeWidth="1.6" />
             <path d="M24 18c1.5 5 6 6 6 11a6 6 0 0 1-12 0c0-4 4-5 6-11z" fill="#fff2b0" />
+          </g>
+        );
+      case "thunder":
+        return (
+          <g>
+            <rect x="18" y="6" width="12" height="9" rx="3" fill="#6b5a2a" stroke={color} strokeWidth="2" />
+            <rect x="21" y="14" width="6" height="26" rx="3" fill="#4a3a1a" stroke={color} strokeWidth="2" />
+            <path d="M12 10 4 2M9 20H1M13 30H4" stroke={color} strokeWidth="2.6" strokeLinecap="round" />
+            <path d="M31 6l-5 9h5l-4 9" stroke="#fff6a8" strokeWidth="2.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M24 40v6M19 44h10" stroke={color} strokeWidth="2.4" strokeLinecap="round" />
           </g>
         );
       case "overdrive":

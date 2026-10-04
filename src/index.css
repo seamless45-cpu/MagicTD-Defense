@@ -461,3 +461,128 @@ body,
 .calm .calm-keep {
   animation: none !important;
 }
+
+/* ---------- chunky "card game" furniture (squad boards, hero cards, badges) ---------- */
+.tile {
+  position: relative;
+  background: linear-gradient(180deg, #241a52, #151038);
+  border: 2px solid #3a2c74;
+  border-radius: 16px;
+  box-shadow: 0 4px 0 #0b0722, 0 10px 24px rgba(0, 0, 0, 0.45);
+}
+.tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 40%);
+}
+.tile-gold {
+  border-color: #f5b73d;
+  background: linear-gradient(180deg, #3d2b13, #1d1236 65%);
+  box-shadow: 0 4px 0 #7a4a05, 0 10px 24px rgba(0, 0, 0, 0.5);
+}
+.tile-cyan {
+  border-color: #35e0ff;
+  box-shadow: 0 4px 0 #0a5f7d, 0 10px 24px rgba(0, 0, 0, 0.5);
+}
+.tile-hover {
+  transition: transform 0.1s ease, filter 0.12s ease;
+}
+.tile-hover:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.08);
+}
+.tile-hover:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 #0b0722;
+}
+
+.badge-num {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: #120c2c;
+  border: 2px solid #f5b73d;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  line-height: 1;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.8);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+}
+.badge-num.dim {
+  border-color: #4a3a96;
+  color: var(--dim);
+}
+.badge-num.max {
+  border-color: #ffcf4d;
+  color: #ffcf4d;
+  background: #2a1a05;
+}
+
+.pill-dark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(180deg, #1b1340, #0e0824);
+  border: 2px solid #3a2c74;
+  border-radius: 12px;
+  padding: 4px 12px 4px 8px;
+  font-weight: 700;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.pill-dark .num {
+  font-size: 16px;
+  color: #fff;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.8);
+}
+
+.frame-gold {
+  border: 3px solid #f5b73d;
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 22%, #52401c, #1b1136 72%);
+  box-shadow: 0 4px 0 #8a5200, 0 8px 18px rgba(0, 0, 0, 0.5);
+}
+
+.cta-banner {
+  font-family: "Bungee", cursive;
+  background: linear-gradient(180deg, #ffd76a, #f59f00);
+  border: 2px solid #a86a00;
+  color: #2c1a00;
+  border-radius: 14px;
+  box-shadow: 0 5px 0 #8a5200, 0 10px 22px rgba(255, 179, 36, 0.25);
+  transition: transform 0.1s ease, filter 0.12s ease;
+}
+.cta-banner:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+.cta-banner:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 2px 0 #8a5200;
+}
+.cta-banner:disabled {
+  filter: grayscale(0.7) brightness(0.7);
+  cursor: not-allowed;
+}
+
+.day-tile {
+  border: 2px solid #3a2c74;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #1d1544, #120c2c);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.5);
+  transition: transform 0.1s ease;
+}
+.day-tile.next {
+  border-color: #ffcf4d;
+  box-shadow: 0 0 0 1px #ffcf4d55, 0 0 18px rgba(255, 207, 77, 0.28), 0 3px 0 rgba(0, 0, 0, 0.5);
+  transform: translateY(-3px);
+}
+.day-tile.done {
+  border-color: #3dff8e;
+  background: linear-gradient(180deg, #10321f, #0c1c22);
+}
