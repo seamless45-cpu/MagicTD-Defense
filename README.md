@@ -45,7 +45,6 @@ Pick a mode from the **Command Center**:
 | Mode | Length | Notes |
 | --- | --- | --- |
 | **Battle** | 12 rounds | Solo gauntlet. Win it to bank gold, gems and fragments. |
-| **Party** | 15 rounds | AI teammates deploy their own towers and chat; Magic Tokens at round 10. |
 | **Endless** | no limit | Score attack: survive as long as possible. Rewards scale with your depth — gold grows quadratically, gems every 3 waves, a token every 5. |
 
 **Enemies get 57% stronger every wave** (×1.57 per wave, compounding), and both the wave banner
@@ -55,7 +54,9 @@ S-Speaker auras multiply on top.
 
 ### Heroes
 
-Equip one hero on the Command Center; its ability is the big purple button in battle.
+Equip one hero on the Command Center; its ability is the hero card in the top-right of the arena.
+Heroes level up to 10 with gold — each level adds 30% ability power and shaves 3% off the cooldown
+(floored at 60%).
 
 | Hero | Cooldown | Ability |
 | --- | --- | --- |
@@ -63,9 +64,14 @@ Equip one hero on the Command Center; its ability is the big purple button in ba
 | **Glacier** | 30s | Flash-freezes every enemy for 4s, then leaves them chilled and slowed. |
 | **Ember** | 30s | Ignites the field: burst damage plus a long burning wound. |
 | **Overdrive** | 35s | Supercharges every tower: +150% attack speed and +50% damage for 8s. |
+| **Thunder God** | 20s | Lightning bolts walk down the lane, chaining between everything they touch and stunning them. |
 
-- **Deploy:** drag a tower from the lineup row at the top onto a build cell. The path (left column,
-  right column, bottom row) is blocked. Seven build columns × three build rows.
+- **Summon:** tap **SUMMON** (top-left) to drop a random unlocked tower straight onto a free build
+  cell — no dragging. SP cost rises with every summon, and a full grid converts the summon into a
+  bonus point on a random tower. The path (left column, right column, bottom row) is blocked, so
+  there are 15 build cells.
+- **Arena zoom:** the − / % / + control sits in the bottom-left of the arena; zoom from fitted up to
+  2× and the view scrolls when it overflows. The setting is remembered.
 - **Merge:** drag a placed tower onto another tower with the **same point count** to fuse them into
   a random tower with +1 point (max 8). Higher points = faster firing and +30% damage per point.
 - **Points:** placed lineup towers pulse points to each other as they shoot (+1 point every 3rd
@@ -74,9 +80,13 @@ Equip one hero on the Command Center; its ability is the big purple button in ba
   the bottom bar into a tower's slot (or tap the token, then tap a slot) to buy a battle level
   (max 6, ×1.55 damage each). Dropping it on a tower on the grid works too.
 - **Summon:** spend SP for a random unlocked tower in an empty lineup slot. Cost rises each time.
-- **Battle SFX / Rich FX** toggles live in the settings gear (top right).
+- **Battle shop:** spend the gold you earn during a run (gold is a run currency, spent in the
+  shop and paid out at the end of the run).
+- **Battle SFX / Rich FX / Damage Numbers / Screen Shake / Battlefield Guides / Auto-Start Waves /
+  Reduced Motion / Performance HUD** all live in the settings gear (top right), along with master
+  volume and save export/import.
 - Enemies leak toward the portal on the right and cost lives (20); at 0 lives the run ends.
-  Winning a run banks gold, gems, fragments and (party) tokens.
+  Winning a run banks gold, gems and fragments.
 
 ## Progression
 
@@ -85,7 +95,9 @@ Equip one hero on the Command Center; its ability is the big purple button in ba
   levels 1→15, and `Ascent All` raises every unlocked tower by one level for gold.
 - **Awakenings:** exotic legendary towers (Lightning Princess, Hellstorm) have two awakening tracks
   that cost Magic Tokens, unlock at menu level 10 / 15 and go up to tier V.
-- **Daily Rite:** 60 gold + a random fragment once per real-world day.
+- **Daily Rewards:** a 7-day streak calendar on the Command Center. Each day pays more than the
+  last (gold, fragments, gems, tokens, and a grand cache on day 7). Miss a day and the streak
+  resets to 1.
 - Progress saves to `localStorage` under `magictd_save_v1`; Settings → Reset Progress wipes it.
 
 ### Towers
@@ -107,6 +119,18 @@ Equip one hero on the Command Center; its ability is the big purple button in ba
 | Icestorm | Legendary | Icicles cut a % of current HP |
 | Plasma Lance | Legendary | Pierces a whole file of enemies; exotic awakenings (Overcharge, Searing Path) |
 | Power Plant | Legendary | Aura: attack speed + attack of neighbours |
+| Slingshot | Normal | Fast single-target pebble, self attack-speed buff |
+| Flamethrower | Normal | Sets the target alight for burn damage over time |
+| Spike Trap | Normal | Ground burst that splashes damage around the hit |
+| Boomerang | Normal | Piercing disc that keeps hitting down the lane |
+| Toxic Sprayer | Normal | Splash volley plus a stacking poison burn |
+| Axe Thrower | Decent | Piercing axes with a splash on impact |
+| Frost Spire | Decent | Freeze chance, slow and a chilling aura |
+| Siege Mortar | Decent | Huge splash, slow rate of fire |
+| Laser Cutter | Decent | Rapid chaining beam |
+| Missile Battery | Epic | Four homing rockets with splash damage |
+| Dragon's Maw | Legendary | Heavy splash + burn; every kill stacks damage (exotic: Inferno Roar, Molten Carapace) |
+| Sunforge | Legendary | Hits the whole field with burning flares (exotic: Supernova, Solar Wind) |
 
 ## Layout
 
@@ -132,10 +156,11 @@ scripts/sync-pages.mjs publishes dist/app.html to the repo root
 
 `npm test` boots the real app in jsdom with a stubbed 2D canvas and plays through it:
 loading → every tab, settings toggles + reset persistence, buying/opening/collecting a chest,
-upgrading and re-lineuping towers (tap and drag-and-drop), the daily rite, and a battle run that
-deploys a tower from the lineup, waits for wave 1 to spawn and abandons. It also runs party mode,
-guards the save-file helpers and wave/cost formulas, and executes the committed `index.html`
-artifact end-to-end so a broken or missing build cannot reach the published site.
+trading gold for fragments and gems for tokens, previewing + upgrading towers, waking a tower with
+a congratulations ceremony, claiming the daily streak, upgrading a hero, zooming the arena, and a
+battle run that summons towers onto the grid, buys from the run shop, spawns wave 1 and abandons.
+It also guards the save-file helpers, tower/wave/cost formulas and the committed `index.html`
+artifact end-to-end, so a broken or missing build cannot reach the published site.
 
 ## Deployment
 
