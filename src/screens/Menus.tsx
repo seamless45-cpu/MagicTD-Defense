@@ -251,6 +251,22 @@ export function SettingsModal({
   onClose: () => void;
 }) {
   const [confirmReset, setConfirmReset] = useState(false);
+  const [diagOpen, setDiagOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const diagnostics = () => {
+    const w = window as unknown as { __magictdBootErrors?: string[]; __magictdLastError?: string };
+    return [
+      `url: ${window.location.href}`,
+      `ua: ${navigator.userAgent}`,
+      `renderer: ${document.createElement("canvas").getContext("webgl2") ? "webgl2" : document.createElement("canvas").getContext("webgl") ? "webgl" : "2d"}`,
+      `roundRect: ${typeof (CanvasRenderingContext2D.prototype as { roundRect?: unknown }).roundRect}`,
+      `ResizeObserver: ${typeof ResizeObserver}`,
+      `AudioContext: ${typeof (window.AudioContext || (window as unknown as { webkitAudioContext?: unknown }).webkitAudioContext)}`,
+      `save version: ${localStorage.getItem("magictd_save_v1") ? "present" : "none"}`,
+      `boot errors: ${w.__magictdBootErrors?.length ? w.__magictdBootErrors.join(" | ") : "none"}`,
+      `last render error: ${w.__magictdLastError || "none"}`,
+    ].join("\n");
+  };
   return (
     <Modal onClose={onClose} w={440}>
       <div className="font-disp text-2xl text-[#ffcf4d]">Settings</div>
@@ -296,6 +312,44 @@ export function SettingsModal({
           >
             {confirmReset ? "Confirm?" : "Reset"}
           </button>
+        </div>
+        <div className="rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="font-bold">Diagnostics</div>
+              <div className="text-xs font-semibold text-[var(--dim)]">
+                Environment details — useful if the game misbehaves
+              </div>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <button
+                className="btn px-3 py-1.5 text-sm"
+                onClick={() => {
+                  setDiagOpen((v) => !v);
+                  sfx.click();
+                }}
+              >
+                {diagOpen ? "Hide" : "Show"}
+              </button>
+              <button
+                className="btn px-3 py-1.5 text-sm"
+                onClick={() => {
+                  const text = diagnostics();
+                  navigator.clipboard?.writeText(text).catch(() => {});
+                  setCopied(true);
+                  sfx.click();
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          </div>
+          {diagOpen && (
+            <pre className="scroll-thin mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md border border-[var(--line)] bg-black/40 p-2 text-[11px] leading-snug text-[var(--dim)]">
+              {diagnostics()}
+            </pre>
+          )}
         </div>
       </div>
       <button className="btn mt-4 w-full py-2" onClick={() => { sfx.click(); onClose(); }}>

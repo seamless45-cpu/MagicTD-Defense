@@ -64,6 +64,25 @@ const NAV: { id: Screen; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
+/** Shows module-load failures that would otherwise leave the loading screen forever. */
+function BootErrors() {
+  const [errors, setErrors] = useState<string[]>([]);
+  useEffect(() => {
+    const h = (e: PromiseRejectionEvent) => {
+      const msg = String((e.reason as Error)?.message ?? e.reason ?? "Unknown error");
+      setErrors((prev) => (prev.includes(msg) ? prev : [...prev, msg]));
+    };
+    window.addEventListener("unhandledrejection", h);
+    return () => window.removeEventListener("unhandledrejection", h);
+  }, []);
+  if (errors.length === 0) return null;
+  return (
+    <div className="panel absolute inset-x-4 top-4 z-[99] p-3 text-[13px] font-semibold text-[#ff8f9a]">
+      Failed to load part of the game: {errors[0]} — try a hard reload.
+    </div>
+  );
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
   const [save, setSave] = useState<SaveData>(() => loadSave());
@@ -73,6 +92,11 @@ export default function App() {
   useEffect(() => {
     setSfx(save.sfx);
   }, [save.sfx]);
+
+  // the static splash in index.html is only there until the app has painted
+  useEffect(() => {
+    document.getElementById("boot-splash")?.remove();
+  }, []);
 
   // unlock audio on first user gesture
   useEffect(() => {
@@ -109,6 +133,8 @@ export default function App() {
   if (screen === "loading") {
     return (
       <div className="h-full">
+        {/* If a stale chunk is missing, dynamic import() fails asynchronously; surface it. */}
+        <BootErrors />
         <LoadingScreen onDone={() => setScreen("home")} />
       </div>
     );
