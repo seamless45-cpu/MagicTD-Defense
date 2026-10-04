@@ -1,0 +1,17 @@
+{
+  "name": "MagicTD Defense",
+  "short_name": "MagicTD",
+  "description": "Summon towers straight onto the grid, level heroes and hold the line against waves that grow 57% stronger every round.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#07051a",
+  "theme_color": "#100a2e",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

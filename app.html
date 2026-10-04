@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>MagicTD Defense</title>
+    <!-- Base styles are inline so the page is themed even if the app's JS/CSS never runs. -->
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #07051a;
+        color: #eae6ff;
+        font-family: "Rajdhani", system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      /* The static splash mirrors the in-app loading screen so the hand-off is invisible. */
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background:
+          radial-gradient(1000px 500px at 15% -10%, rgba(84, 42, 190, 0.35), transparent 60%),
+          radial-gradient(900px 500px at 90% 110%, rgba(255, 79, 216, 0.14), transparent 60%),
+          radial-gradient(700px 400px at 70% 0%, rgba(53, 224, 255, 0.1), transparent 55%),
+          linear-gradient(180deg, #100a2e, #07051a 70%);
+        z-index: 1;
+      }
+      #boot-splash .stage {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 168px;
+        height: 168px;
+      }
+      #boot-splash .ring {
+        position: absolute;
+        border-radius: 999px;
+      }
+      #boot-splash .ring.outer {
+        inset: 0;
+        border: 2px dashed rgba(53, 224, 255, 0.32);
+        animation: bootSpin 18s linear infinite;
+      }
+      #boot-splash .ring.inner {
+        inset: 15px;
+        border: 1px solid transparent;
+        border-top-color: rgba(255, 207, 77, 0.9);
+        border-right-color: rgba(255, 79, 216, 0.55);
+        animation: bootSpin 7.5s linear infinite reverse;
+      }
+      #boot-splash .emblem {
+        animation: bootFloat 2.6s ease-in-out infinite;
+        filter: drop-shadow(0 0 16px rgba(255, 179, 36, 0.55));
+      }
+      #boot-splash .name {
+        font-size: 38px;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        line-height: 1;
+        color: #ffb324;
+        text-shadow: 0 0 34px rgba(255, 179, 36, 0.5);
+      }
+      #boot-splash .sub {
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.45em;
+        color: #35e0ff;
+        margin-top: -6px;
+      }
+      #boot-splash .segs {
+        display: flex;
+        gap: 6px;
+        width: 300px;
+        max-width: 74vw;
+        margin-top: 4px;
+      }
+      #boot-splash .segs i {
+        flex: 1;
+        height: 10px;
+        border-radius: 999px;
+        border: 1px solid #322767;
+        background: rgba(8, 5, 26, 0.85);
+        overflow: hidden;
+      }
+      #boot-splash .segs i::after {
+        content: "";
+        display: block;
+        width: 30%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #35e0ff, #ff4fd8, #ffb324);
+        animation: bootSlide 1.3s ease-in-out infinite;
+      }
+      #boot-splash .segs i:nth-child(2)::after {
+        animation-delay: 0.12s;
+      }
+      #boot-splash .segs i:nth-child(3)::after {
+        animation-delay: 0.24s;
+      }
+      #boot-splash .segs i:nth-child(4)::after {
+        animation-delay: 0.36s;
+      }
+      #boot-splash .segs i:nth-child(5)::after {
+        animation-delay: 0.48s;
+      }
+      #boot-splash .status {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        width: 300px;
+        max-width: 74vw;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.3em;
+        color: #9d93d6;
+      }
+      #boot-splash .status b {
+        color: #ffcf4d;
+      }
+      @keyframes bootSlide {
+        0% {
+          transform: translateX(-110%);
+        }
+        100% {
+          transform: translateX(340%);
+        }
+      }
+      @keyframes bootSpin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes bootFloat {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-8px);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash .ring,
+        #boot-splash .emblem,
+        #boot-splash .segs i::after {
+          animation: none;
+        }
+        #boot-splash .segs i::after {
+          width: 100%;
+        }
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Non-blocking font load: if the font CDN is slow or blocked the page still paints. -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bungee&family=Rajdhani:wght@500;600;700&display=swap"
+      rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
+    />
+    <!-- PWA: installable, with the MagicCloud-style icon set -->
+    <meta name="theme-color" content="#100a2e" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MagicTD" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M18 2 6 18h7l-2 12L26 13h-8l3-11z' fill='%23ffb324'/%3E%3C/svg%3E"
+    />
+    <!--
+      The manifest / icon links are attached from script on purpose: the bundler
+      rewrites static hrefs to hashed asset names, which the published single-file
+      build (repo-root index.html, served from a sub-path by GitHub Pages) cannot
+      resolve. Relative URLs built from document.baseURI work in dev, in the
+      preview build and on Pages alike.
+    -->
+    <script>
+      (function () {
+        var base = document.baseURI;
+        function link(rel, href, extra) {
+          var el = document.createElement("link");
+          el.rel = rel;
+          el.href = new URL(href, base).href;
+          if (extra) for (var k in extra) el.setAttribute(k, extra[k]);
+          document.head.appendChild(el);
+        }
+        link("manifest", "manifest.webmanifest");
+        link("icon", "icons/favicon-64.png", { type: "image/png", sizes: "64x64" });
+        link("icon", "icons/icon-192.png", { type: "image/png", sizes: "192x192" });
+        link("apple-touch-icon", "icons/apple-touch-icon.png");
+      })();
+    </script>
+  </head>
+  <body>
+    <!-- Visible until the app mounts; also the worst-case fallback if JS never runs. -->
+    <div id="boot-splash">
+      <div class="stage">
+        <div class="ring outer"></div>
+        <div class="ring inner"></div>
+        <svg class="emblem" viewBox="0 0 100 100" width="104" height="104" aria-hidden="true">
+          <path d="M50 6 88 26v34L50 94 12 60V26z" fill="none" stroke="#ffb324" stroke-width="3" opacity="0.7" />
+          <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="#ffb324" />
+          <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="none" stroke="#fff2b0" stroke-width="1.5" opacity="0.6" />
+        </svg>
+      </div>
+      <div class="name">MagicTD</div>
+      <div class="sub">DEFENSE</div>
+      <div class="segs" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="status"><span>LOADING</span><b>···</b></div>
+    </div>
+    <div id="root"></div>
+    <noscript>
+      <div style="font-weight: 600; color: #eae6ff; padding: 24px">MagicTD Defense needs JavaScript enabled.</div>
+    </noscript>
+    <!--
+      Boot guard: the app paints its own CSS from JS, so a failed script would otherwise
+      leave a blank white page with no explanation. This surfaces the reason instead.
+    -->
+    <script>
+      (function () {
+        var errors = [];
+        window.__magictdBootErrors = errors;
+        var splash = document.getElementById("boot-splash");
+        function report(msg) {
+          if (msg && errors.indexOf(msg) === -1) errors.push(msg);
+        }
+        function fill() {
+          var root = document.getElementById("root");
+          if (!root || root.childElementCount > 0) return;
+          var rows = errors
+            .map(function (e) {
+              return '<li style="margin:2px 0">' + String(e).replace(/[<>&]/g, "") + "</li>";
+            })
+            .join("");
+          root.innerHTML =
+            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px">' +
+            '<div style="max-width:640px">' +
+            '<div style="font-size:22px;font-weight:700;color:#ffb324;margin-bottom:8px">MagicTD could not start</div>' +
+            '<p style="margin:0 0 10px;color:#9d93d6">The game&rsquo;s script did not run. Details:</p>' +
+            '<ul style="margin:0;padding-left:18px;color:#ff8f9a">' +
+            (rows || "<li>No error was reported &mdash; the script file may have been blocked or failed to load.</li>") +
+            "</ul>" +
+            '<p style="margin:12px 0 0;color:#9d93d6">Check the browser console / network tab, then reload.</p>' +
+            "</div></div>";
+          if (splash) splash.style.display = "none";
+        }
+        window.addEventListener(
+          "error",
+          function (e) {
+            var t = e && e.target;
+            if (t && t !== window && (t.src || t.href)) report("Failed to load: " + (t.src || t.href));
+            else report((e && e.message) || "Unknown error");
+            fill();
+          },
+          true
+        );
+        window.addEventListener("unhandledrejection", function (e) {
+          report("Unhandled rejection: " + ((e.reason && e.reason.message) || e.reason));
+          fill();
+        });
+        setTimeout(fill, 6000);
+      })();
+    </script>
+    <script>
+      // PWA: register the shell service worker so the game installs and works offline.
+      if ("serviceWorker" in navigator && location.protocol === "https:") {
+        window.addEventListener("load", function () {
+          navigator.serviceWorker.register(new URL("sw.js", document.baseURI).href, { scope: "./" }).catch(function () {
+            /* offline support is a bonus, never a blocker */
+          });
+        });
+      }
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
