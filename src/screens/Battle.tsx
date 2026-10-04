@@ -7,19 +7,30 @@ import {
   RARITY,
   ENEMY_TYPES,
   roundHp,
+  HP_GROWTH,
   waveComp,
   PARTY_ROUNDS,
   BATTLE_ROUNDS,
   MAX_BATTLE_LEVEL,
   MAX_POINTS,
   POINT_STEP,
+  POINT_DMG_STEP,
+  ASC_DMG_MUL,
+  towerDamage,
   SP_BASE_COST,
   SP_COST_STEP,
   TEAMMATES,
   CHAT_LINES,
+  HERO_BY_ID,
+  OVERDRIVE_ASPD,
+  OVERDRIVE_DMG,
+  OVERDRIVE_TIME,
+  SLOW_VULN,
   type TowerDef,
+  type GameMode,
+  type HeroKind,
 } from "../game/data";
-import { TowerIcon, useToasts, Toasts, CoinIcon } from "../components/ui";
+import { TowerIcon, useToasts, Toasts, CoinIcon, HeroIcon } from "../components/ui";
 
 // ---------- board geometry ----------
 const W = 1000;
@@ -97,6 +108,12 @@ interface Enemy {
   spv: number;
   dead: boolean;
   wob: number;
+  /** slow strength (0..0.9) while slowT > 0 */
+  slow: number;
+  slowT: number;
+  /** remaining burn time and damage per second */
+  burnT: number;
+  burnDps: number;
 }
 interface BT {
   uid: number;
@@ -133,6 +150,20 @@ interface Proj {
   push?: number;
   fireball?: number;
   icicle?: number;
+  /** extra enemies this shot can skewer after the first hit */
+  pierce?: number;
+  /** enemies already hit, so a piercing shot never hits the same one twice */
+  hitIds?: number[];
+  /** bonus damage as a share of max HP */
+  pctHp?: number;
+  /** slow applied on hit */
+  slow?: number;
+  slowDur?: number;
+  /** burn damage per second applied on hit */
+  burnDps?: number;
+  burnDur?: number;
+  /** this shot always crits (overcharged lances, fireballs) */
+  alwaysCrit?: boolean;
   dead: boolean;
   age: number;
 }
@@ -150,12 +181,16 @@ interface Part { x: number; y: number; vx: number; vy: number; life: number; max
 interface FT { x: number; y: number; txt: string; color: string; size: number; life: number; crit: boolean }
 
 interface G {
+  mode: GameMode;
+  heroId: string;
   t: number;
   phase: "deploy" | "wave" | "inter" | "won" | "lost";
   phaseT: number;
   round: number;
   maxRounds: number;
   lives: number;
+  /** Overdrive buff remaining time */
+  odT: number;
   sp: number;
   spSpend: number;
   enemies: Enemy[];
@@ -179,7 +214,7 @@ interface G {
 let uidC = 1;
 let eidC = 1;
 
-function newGame(mode: "battle" | "party", save: SaveData): G {
+function newGame(mode: GameMode, save: SaveData): G {
   const towers: BT[] = save.lineup
     .filter((id) => save.levels[id])
     .map((id, i) => ({
@@ -201,14 +236,18 @@ function newGame(mode: "battle" | "party", save: SaveData): G {
       atkMul: 1,
     }));
   return {
+    mode,
+    heroId: HERO_BY_ID[save.hero] ? save.hero : "nova",
     t: 0,
     phase: "deploy",
-    phaseT: 7,
+    phaseT: mode === "endless" ? 6 : 7,
     round: 1,
-    maxRounds: mode === "party" ? PARTY_ROUNDS : BATTLE_ROUNDS,
-    lives: 20,
+    // endless has no final wave; maxRounds is only used for display
+    maxRounds: mode === "party" ? PARTY_ROUNDS : mode === "battle" ? BATTLE_ROUNDS : 0,
+    lives: mode === "endless" ? 15 : 20,
     sp: 200,
     spSpend: 0,
+    odT: 0,
     enemies: [],
     towers,
     projs: [],
@@ -290,7 +329,7 @@ export default function Battle({
   mutate,
   onExit,
 }: {
-  mode: "battle" | "party";
+  mode: GameMode;
   save: SaveData;
   mutate: (fn: (s: SaveData) => void) => void;
   onExit: () => void;
@@ -304,6 +343,9 @@ export default function Battle({
 
   const [, setTick] = useState(0);
   const { toasts, push } = useToasts();
+  const [ascentArmed, setAscentArmed] = useState(false);
+  const [ascentDrag, setAscentDrag] = useState<{ x: number; y: number } | null>(null);
+  const [ascentHover, setAscentHover] = useState(-1);
   const [pulses, setPulses] = useState<{ id: number; x: number; y: number; dx: number; dy: number }[]>([]);
   const [slotFlash, setSlotFlash] = useState<number>(-1);
   const slotRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -388,18 +430,27 @@ export default function Battle({
       g.phase = won ? "won" : "lost";
       const rounds = won ? g.maxRounds : Math.max(0, g.round - 1);
       const frags: { id: string; n: number }[] = [];
-      const nf = won ? (mode === "party" ? 4 : 3) : 1;
+      // endless runs pay out on how deep you got
+      const nf = mode === "endless" ? Math.min(12, 1 + Math.floor(rounds / 3)) : won ? (mode === "party" ? 4 : 3) : 1;
       for (let i = 0; i < nf; i++) {
         const id = TOWERS[Math.floor(Math.random() * TOWERS.length)].id;
         const e2 = frags.find((f) => f.id === id);
         if (e2) e2.n++;
         else frags.push({ id, n: 1 });
       }
+      const endlessGold = 60 + 45 * rounds + 12 * rounds * rounds;
+      const endlessGems = Math.floor(rounds / 3);
+      const endlessTokens = Math.floor(rounds / 6);
       g.final = {
         won,
-        gold: won ? (mode === "party" ? 200 : 150) + 30 * g.maxRounds : 30 + 10 * rounds,
-        gems: won ? (mode === "party" ? 3 : 2) : 0,
-        tokens: won && mode === "party" ? 1 : 0,
+        gold:
+          mode === "endless"
+            ? endlessGold
+            : won
+              ? (mode === "party" ? 200 : 150) + 30 * g.maxRounds
+              : 30 + 10 * rounds,
+        gems: mode === "endless" ? endlessGems : won ? (mode === "party" ? 3 : 2) : 0,
+        tokens: mode === "endless" ? endlessTokens : won && mode === "party" ? 1 : 0,
         frags,
         rounds,
       };
@@ -425,7 +476,9 @@ export default function Battle({
         if (opt.tw?.def.id === "hellstorm" && mode === "party") cc += 0.2;
         crit = Math.random() < cc;
       }
-      let dmg = raw * (1 - e.armor) * (opt.tw ? opt.tw.atkMul : 1);
+      // note: tower/aura multipliers are already folded into `raw` by the caller
+      let dmg = raw * (1 - e.armor);
+      if (e.slowT > 0) dmg *= 1 + SLOW_VULN; // chilled enemies shatter easier
       if (opt.tw?.def.id === "hellstorm") {
         const tier = saveRef.current.awn["hellstorm"]?.[0] || 0;
         if (tier > 0) {
@@ -463,7 +516,7 @@ export default function Battle({
       const now = performance.now();
       const tier1 = saveRef.current.awn["lightning"]?.[0] || 0;
       const tier2 = saveRef.current.awn["lightning"]?.[1] || 0;
-      const dmgBase = 400 * (1 + 0.12 + 0.02 * (t.menuLv - 1) + 0.03 * (t.bLv - 1));
+      const dmgBase = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * 1.12 * (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1);
       const p = cellCenter(t.cell!.c, t.cell!.r);
       const topY = p.y - 96; // tall bolts start high above the tower
       const targets = g.enemies.filter((e) => !e.dead);
@@ -500,16 +553,23 @@ export default function Battle({
       g.shake = Math.min(10, g.shake + 2);
     };
 
+    /** damage growth from battle levels, points, auras and the Overdrive buff */
+    const towerPower = (t: BT) =>
+      Math.pow(ASC_DMG_MUL, Math.max(0, t.bLv - 1)) *
+      (1 + POINT_DMG_STEP * t.points) *
+      t.atkMul *
+      (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1);
+
     const fireTower = (t: BT, target: Enemy) => {
       const p = cellCenter(t.cell!.c, t.cell!.r);
       const ep = pathPos(target.d);
       t.angle = Math.atan2(ep.y - p.y, ep.x - p.x);
       t.flash = 0.12;
-      const dmg = t.def.dmg + t.def.upDmg * (t.menuLv - 1) + t.def.ascDmg * (t.bLv - 1);
+      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1);
       const upg = t.menuLv - 1;
       const asc = t.bLv - 1;
-      const push = (proj: Partial<Proj>) => {
-        g.projs.push({ x: p.x, y: p.y, tid: target.id, lx: ep.x, ly: ep.y, speed: 520, dmg, kind: t.def.id, tw: t, dead: false, age: 0, ...proj } as Proj);
+      const push = (proj: Partial<Proj>, at: { x: number; y: number } = ep, onto: Enemy = target) => {
+        g.projs.push({ x: p.x, y: p.y, tid: onto.id, lx: at.x, ly: at.y, speed: 520, dmg, kind: t.def.id, tw: t, dead: false, age: 0, ...proj } as Proj);
       };
       switch (t.def.id) {
         case "arrow": push({ speed: 540 }); break;
@@ -518,6 +578,49 @@ export default function Battle({
         case "tesla": push({ speed: 640, chain: Math.round((t.def.chain || 0) + (t.def.upChain || 0) * upg + (t.def.ascChain || 0) * asc) }); break;
         case "gatling": push({ speed: 720 }); break;
         case "core": push({ speed: 300, stunS: (t.def.stun || 0) + (t.def.upStun || 0) * upg + (t.def.ascStun || 0) * asc, push: 96 }); break;
+        case "swarm": {
+          // one bolt per nearby enemy, up to `multi` targets
+          const others = g.enemies
+            .filter((e) => !e.dead)
+            .sort((a, b) => b.d - a.d)
+            .slice(0, t.def.multi || 3);
+          const list = others.length ? others : [target];
+          list.forEach((e) => {
+            const tp = pathPos(e.d);
+            push({ speed: 620, kind: "swarm" }, tp, e);
+          });
+          break;
+        }
+        case "chrono": {
+          const slow = (t.def.slow || 0) + (t.def.upSlow || 0) * upg + (t.def.ascSlow || 0) * asc;
+          push({ speed: 560, slow, slowDur: t.def.slowDur || 3, kind: "chrono" });
+          break;
+        }
+        case "void": {
+          const pctHp = (t.def.pctHp || 0) + (t.def.upPctHp || 0) * upg + (t.def.ascPctHp || 0) * asc;
+          push({ speed: 300, pctHp, kind: "void" });
+          break;
+        }
+        case "plasma": {
+          const pierce = Math.round((t.def.pierce || 0) + (t.def.upPierce || 0) * upg + (t.def.ascPierce || 0) * asc);
+          const tier1 = saveRef.current.awn["plasma"]?.[0] || 0;
+          const over = tier1 > 0 && Math.random() < t.def.awk1!.chance[tier1 - 1];
+          const mult = over ? 1 + t.def.awk1!.mult[tier1 - 1] : 1;
+          const tier2 = saveRef.current.awn["plasma"]?.[1] || 0;
+          const burnDps = tier2 > 0 ? (t.def.awk2!.mult[tier2 - 1] * dmg) / 4 : 0;
+          push({
+            speed: 760,
+            pierce,
+            hitIds: [],
+            dmg: dmg * mult,
+            burnDps,
+            burnDur: burnDps > 0 ? 4 : 0,
+            alwaysCrit: over,
+            kind: "plasma",
+          });
+          if (over) addText(ep.x, ep.y - 40, "OVERCHARGE", "#c44dff", 13, true);
+          break;
+        }
         case "hellstorm": {
           const chance = Math.min(1, (t.def.fbChance || 0) + (t.def.upFb || 0) * upg + (t.def.ascFb || 0) * asc);
           if (Math.random() < chance) push({ speed: 340, fireball: 2.5 + 0.4 * upg + 0.3 * asc, kind: "fireball" });
@@ -556,14 +659,53 @@ export default function Battle({
         return;
       }
       if (!target) return;
-      dealDamage(target, pr.dmg, { tw: pr.tw });
+      // percent-of-max-HP shells (Void Cannon)
+      if (pr.pctHp !== undefined) {
+        dealDamage(target, target.max * pr.pctHp, { tw: pr.tw, color: "#c48cff" });
+        ring(pos.x, pos.y, "#8a4dff", 46);
+      }
+      dealDamage(target, pr.dmg, { alwaysCrit: pr.alwaysCrit, tw: pr.tw });
+      if (pr.slow) {
+        const dur = pr.slowDur || 3;
+        if (pr.slow >= target.slow || target.slowT <= 0) target.slow = Math.min(0.85, pr.slow);
+        target.slowT = Math.max(target.slowT, dur);
+        burst(pos.x, pos.y, "#7fe9ff", 6, 90);
+      }
+      if (pr.burnDps && target.burnT <= 0) {
+        target.burnDps = Math.max(target.burnDps, pr.burnDps);
+        target.burnT = pr.burnDur || 4;
+        addText(pos.x, pos.y - 44, "BURN", "#ff7a3d", 12, false);
+      }
+      // piercing lances carry on to the next enemy in the file
+      if (pr.pierce && pr.pierce > 0) {
+        const hit = pr.hitIds || (pr.hitIds = []);
+        if (!hit.includes(target.id)) hit.push(target.id);
+        const next = g.enemies
+          .filter((e) => !e.dead && !hit.includes(e.id) && e.d > target.d)
+          .sort((a, b) => a.d - b.d)[0];
+        if (next) {
+          const np = pathPos(next.d);
+          const now = performance.now();
+          if (g.bolts.length < 36) g.bolts.push(randBolt(pos.x, pos.y, np.x, np.y, "#d9a6ff", 2.2, 0.16, now));
+          pr.pierce -= 1;
+          pr.tid = next.id;
+          pr.lx = np.x;
+          pr.ly = np.y;
+          pr.x = pos.x;
+          pr.y = pos.y;
+          pr.age = 0;
+          pr.dead = false; // the projectile is already in g.projs; just carry on
+          return;
+        }
+      }
       if (pr.splash !== undefined) {
         ring(pos.x, pos.y, "#ff9d4d", 60);
         sfx.explosion();
         g.enemies.forEach((e) => {
           if (e.dead || e.id === target.id) return;
           const ep = pathPos(e.d);
-          if (Math.hypot(ep.x - pos.x, ep.y - pos.y) <= 92) dealDamage(e, pr.splash!, { tw: pr.tw, color: "#ff9d4d" });
+          if (Math.hypot(ep.x - pos.x, ep.y - pos.y) <= 92)
+            dealDamage(e, pr.splash! * (pr.tw ? towerPower(pr.tw) : 1), { tw: pr.tw, color: "#ff9d4d" });
         });
       }
       if (pr.freezePct !== undefined && Math.random() < pr.freezePct && target.frozen <= 0) {
@@ -629,7 +771,7 @@ export default function Battle({
         targets.forEach((e, i) => {
           const ep = pathPos(e.d);
           if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#ff7a3d", Math.max(1.5, 3.5 - i * 0.05), 0.4, now));
-          dealDamage(e, 800 * partyMul, { alwaysCrit: mode === "party" ? Math.random() < 0.35 : false, tw: b, color: "#ff7a3d" });
+          dealDamage(e, 800 * partyMul * towerPower(b), { alwaysCrit: mode === "party" ? Math.random() < 0.35 : false, tw: b, color: "#ff7a3d" });
         });
         sfx.explosion();
         g.shake = 14;
@@ -646,18 +788,59 @@ export default function Battle({
 
     const hero = () => {
       if (g.heroCd > 0 || g.final) return;
-      g.heroCd = 25;
+      const hero = HERO_BY_ID[g.heroId] || HERO_BY_ID.nova;
+      g.heroCd = hero.cd;
       sfx.hero();
       g.shake = 16;
-      const dmg = 250 + 60 * g.round;
+      const now = performance.now();
+      const kind: HeroKind = hero.kind;
+
+      if (kind === "overdrive") {
+        // no damage: supercharge every tower for a while
+        g.odT = OVERDRIVE_TIME;
+        for (const t of g.towers) {
+          if (!t.cell) continue;
+          const p = cellCenter(t.cell.c, t.cell.r);
+          ring(p.x, p.y, "#3dff8e", 52);
+          addText(p.x, p.y - 44, "OVERDRIVE", "#3dff8e", 12, true);
+        }
+        addText(W / 2, H / 2 - 60, "OVERDRIVE!", "#3dff8e", 26, true);
+        return;
+      }
+
+      if (kind === "freeze") {
+        g.enemies.forEach((e) => {
+          if (e.dead) return;
+          e.frozen = Math.max(e.frozen, 4);
+          e.slow = Math.max(e.slow, 0.5);
+          e.slowT = Math.max(e.slowT, 8);
+          const p = pathPos(e.d);
+          ring(p.x, p.y, "#35e0ff", 46);
+          burst(p.x, p.y, "#9fe8ff", 10, 120);
+        });
+        addText(W / 2, H / 2 - 60, "DEEP FREEZE", "#35e0ff", 26, true);
+        sfx.freeze();
+        return;
+      }
+
+      const dmg = (kind === "burn" ? 200 : 250) + 60 * g.round;
       g.enemies.forEach((e) => {
         if (e.dead) return;
-        e.stun = Math.max(e.stun, 1.2);
         const p = pathPos(e.d);
-        ring(p.x, p.y, "#ff4fd8", 50);
-        dealDamage(e, dmg, { alwaysCrit: true, color: "#ff4fd8" });
+        if (kind === "burn") {
+          dealDamage(e, dmg, { color: hero.color });
+          if (!e.dead) {
+            e.burnDps = Math.max(e.burnDps, dmg * 0.35);
+            e.burnT = Math.max(e.burnT, 8);
+          }
+        } else {
+          e.stun = Math.max(e.stun, 1.2);
+          dealDamage(e, dmg, { alwaysCrit: true, color: hero.color });
+        }
+        ring(p.x, p.y, hero.color, 50);
       });
-      if (g.bolts.length < 36) g.bolts.push(randBolt(W / 2, -30, W / 2, H / 2, "#ff4fd8", 8, 0.5, performance.now()));
+      if (g.bolts.length < 36) g.bolts.push(randBolt(W / 2, -30, W / 2, H / 2, hero.color, 8, 0.5, now));
+      addText(W / 2, H / 2 - 60, kind === "burn" ? "EMBERSTORM" : "NOVA BLAST", hero.color, 24, true);
     };
     heroRef.current = hero;
 
@@ -754,6 +937,7 @@ export default function Battle({
       g.shake = Math.max(0, g.shake - dt * 30);
       g.redFlash = Math.max(0, g.redFlash - dt * 2);
       g.heroCd = Math.max(0, g.heroCd - dt);
+      g.odT = Math.max(0, g.odT - dt);
 
       if (g.final) {
         updateFx(dt);
@@ -778,19 +962,29 @@ export default function Battle({
             id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012), type: s.type,
             frozen: 0, stun: 0, armor: et.armor, lives: et.lives, gold: et.gold + Math.floor(g.round / 2),
             spv: 6 + g.round * 2 + (s.type === 4 ? 40 : 0), dead: false, wob: Math.random() * 7,
+            slow: 0, slowT: 0, burnT: 0, burnDps: 0,
           });
         }
         if (!g.spawnQ.length && g.enemies.length === 0) {
           const bonus = 40 + 10 * g.round;
           g.sp += bonus;
           g.goldEarned += Math.round(bonus / 2);
-          if (g.round >= g.maxRounds) {
+          if (g.mode !== "endless" && g.round >= g.maxRounds) {
             endGame(true);
           } else {
             g.phase = "inter";
-            g.phaseT = 3.5;
+            g.phaseT = mode === "endless" ? 3 : 3.5;
             sfx.coin();
-            toastRef.current(`Round ${g.round} cleared · +${bonus} SP`, "#3dff8e");
+            toastRef.current(
+              `${mode === "endless" ? "Wave" : "Round"} ${g.round} cleared · +${bonus} SP`,
+              "#3dff8e"
+            );
+            if (mode === "endless" && g.round % 5 === 0) {
+              // every 5 waves an endless run hands out tokens
+              mutateRef.current((s) => { s.tokens += 1; });
+              sfx.token();
+              toastRef.current(`Endless wave ${g.round}: +1 Magic Token`, "#ff4fd8");
+            }
             if (mode === "party" && g.round === 10 && !g.tokensAwarded) {
               g.tokensAwarded = true;
               mutateRef.current((s) => { s.tokens += 3; });
@@ -804,9 +998,22 @@ export default function Battle({
       // enemies advance
       for (const e of g.enemies) {
         if (e.dead) continue;
+        if (e.slowT > 0) e.slowT -= dt;
+        if (e.burnT > 0) {
+          e.burnT -= dt;
+          e.hp -= e.burnDps * dt;
+          if (Math.random() < dt * 6) {
+            const bp = pathPos(e.d);
+            if (g.parts.length < 380)
+              g.parts.push({ x: bp.x, y: bp.y, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30, life: 0.4, max: 0.4, size: 3, color: "#ff7a3d", kind: "spark" });
+          }
+          if (e.hp <= 0 && !e.dead) killReward(e);
+        }
+        if (e.dead) continue;
+        const slowMul = e.slowT > 0 ? 1 - e.slow : 1;
         if (e.frozen > 0) e.frozen -= dt;
         else if (e.stun > 0) e.stun -= dt;
-        else e.d += e.speed * dt;
+        else e.d += e.speed * slowMul * dt;
         if (e.d >= PATH_LEN - 2) {
           e.dead = true;
           g.lives -= e.lives;
@@ -850,6 +1057,21 @@ export default function Battle({
       }
       for (const t of g.towers) t.atkMul = 1 + (atkA.get(t.uid) || 0);
 
+      // chrono time fields: chill everything inside the aura
+      for (const t of g.towers) {
+        if (!t.cell || t.def.id !== "chrono" || !t.def.slowAura) continue;
+        const cp = cellCenter(t.cell.c, t.cell.r);
+        const strength = Math.min(0.8, (t.def.slow || 0) + (t.def.upSlow || 0) * (t.menuLv - 1) + (t.def.ascSlow || 0) * (t.bLv - 1) + 0.02 * t.points);
+        for (const e of g.enemies) {
+          if (e.dead) continue;
+          const ep = pathPos(e.d);
+          if (Math.hypot(ep.x - cp.x, ep.y - cp.y) <= t.def.slowAura) {
+            e.slow = Math.max(e.slow, strength);
+            e.slowT = Math.max(e.slowT, 0.35);
+          }
+        }
+      }
+
       // towers fire
       const RANGE = 236;
       const lineupTowers = g.towers.filter((x) => x.lineupIdx >= 0).sort((a, b) => a.lineupIdx - b.lineupIdx);
@@ -871,6 +1093,7 @@ export default function Battle({
         if (t.def.id === "lightning") aspdSelf = 0;
         rate /= 1 + aspdSelf + (aspdA.get(t.uid) || 0);
         rate /= 1 + POINT_STEP * t.points;
+        if (g.odT > 0) rate /= 1 + OVERDRIVE_ASPD; // Overdrive hero buff
         if (t.def.rapid && t.rapidT > 0) rate *= 0.32;
         t.cd -= dt;
         if (t.cd <= 0) {
@@ -1211,6 +1434,99 @@ export default function Battle({
           ctx.lineTo(0, 18);
           ctx.stroke();
           break;
+        case "swarm": {
+          ctx.fillStyle = "#1b1040";
+          ctx.strokeStyle = "#3fb6ff";
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.arc(0, 0, 13, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          const spin = now / 260;
+          for (let i = 0; i < 3; i++) {
+            const a = spin + (i * Math.PI * 2) / 3;
+            ctx.fillStyle = "#8fd8ff";
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * 19, Math.sin(a) * 19, 4.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.fillStyle = "#c44dff";
+          ctx.beginPath();
+          ctx.arc(0, 0, 5, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case "chrono": {
+          ctx.fillStyle = "#0d1f3a";
+          ctx.strokeStyle = "#35e0ff";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.strokeStyle = "#9ff3ff";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(0, -10);
+          ctx.moveTo(0, 0);
+          ctx.lineTo(7, 5);
+          ctx.stroke();
+          ctx.save();
+          ctx.rotate(now / 1100);
+          ctx.strokeStyle = "rgba(159,243,255,0.7)";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(0, 0, 23, 0, Math.PI * 1.1);
+          ctx.stroke();
+          ctx.restore();
+          break;
+        }
+        case "void": {
+          const pulse = 12 + Math.sin(now / 200) * 2;
+          ctx.fillStyle = "#000";
+          ctx.beginPath();
+          ctx.arc(0, 0, 15, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#8a4dff";
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.fillStyle = "rgba(138,77,255,0.85)";
+          ctx.beginPath();
+          ctx.arc(0, 0, pulse * 0.45, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.save();
+          ctx.rotate(now / 700);
+          ctx.strokeStyle = "rgba(196,140,255,0.8)";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 22, 8, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+          break;
+        }
+        case "plasma": {
+          ctx.rotate(a);
+          ctx.fillStyle = "#2a1a3f";
+          ctx.strokeStyle = "#c44dff";
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.roundRect(-18, -8, 30, 16, 5);
+          ctx.fill();
+          ctx.stroke();
+          ctx.strokeStyle = "#ffd9ff";
+          ctx.lineWidth = 5;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(8, 0);
+          ctx.lineTo(30 - rec, 0);
+          ctx.stroke();
+          ctx.fillStyle = "#fff2b0";
+          ctx.beginPath();
+          ctx.arc(30 - rec, 0, 4.5, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
         case "plant":
           ctx.fillStyle = "#153024";
           ctx.strokeStyle = "#3dff8e";
@@ -1369,6 +1685,23 @@ export default function Battle({
           ctx.stroke();
         }
       }
+      if (e.burnT > 0) {
+        ctx.globalAlpha = 0.35 + Math.sin(now / 90 + e.wob) * 0.12;
+        ctx.fillStyle = "#ff7a3d";
+        ctx.beginPath();
+        ctx.arc(0, -2, et.r + 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      if (e.slowT > 0 && e.frozen <= 0) {
+        ctx.strokeStyle = "#7fe9ff";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(0, 0, et.r + 6, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       if (e.stun > 0 && e.frozen <= 0) {
         ctx.strokeStyle = "#ffd23f";
         ctx.lineWidth = 2;
@@ -1428,6 +1761,62 @@ export default function Battle({
           ctx.fill();
           ctx.stroke();
           break;
+        case "swarm":
+          ctx.fillStyle = "#3fb6ff";
+          ctx.beginPath();
+          ctx.arc(0, 0, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#c44dff";
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, 9, -0.7, 0.7);
+          ctx.stroke();
+          break;
+        case "chrono":
+          ctx.fillStyle = "rgba(53,224,255,0.85)";
+          ctx.beginPath();
+          ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#9ff3ff";
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, 11 + Math.sin(pr.age * 12) * 1.6, 0, Math.PI * 2);
+          ctx.stroke();
+          break;
+        case "void": {
+          ctx.fillStyle = "#12042a";
+          ctx.beginPath();
+          ctx.arc(0, 0, 9, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#c48cff";
+          ctx.lineWidth = 2.2;
+          ctx.stroke();
+          ctx.fillStyle = "rgba(196,140,255,0.6)";
+          ctx.beginPath();
+          ctx.arc(0, 0, 4, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case "plasma": {
+          const grad = ctx.createLinearGradient(-26, 0, 26, 0);
+          grad.addColorStop(0, "rgba(196,77,255,0)");
+          grad.addColorStop(0.5, "#e9c2ff");
+          grad.addColorStop(1, "#fff2b0");
+          ctx.strokeStyle = grad;
+          ctx.lineWidth = 6;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(-26, 0);
+          ctx.lineTo(22, 0);
+          ctx.stroke();
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.moveTo(30, 0);
+          ctx.lineTo(20, -5);
+          ctx.lineTo(20, 5);
+          ctx.fill();
+          break;
+        }
         case "tesla":
           ctx.strokeStyle = "#7fe9ff";
           ctx.lineWidth = 2.5;
@@ -1759,6 +2148,97 @@ export default function Battle({
 
   const g = gRef.current;
   const cost = g ? SP_BASE_COST + SP_COST_STEP * g.spSpend : SP_BASE_COST;
+
+  /** which slot (if any) sits under these client coordinates */
+  const slotIndexAt = (x: number, y: number) => {
+    for (let i = 0; i < 6; i++) {
+      const el = slotRefs.current[i];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return i;
+    }
+    return -1;
+  };
+
+  /** ascend the tower in a slot index, or the tower under a canvas drop point */
+  const ascendTower = (uid: number) => {
+    const gg = gRef.current;
+    const t = gg?.towers.find((x) => x.uid === uid);
+    setAscentArmed(false);
+    if (!gg || !t) return;
+    if (t.bLv >= MAX_BATTLE_LEVEL) {
+      sfx.error();
+      push(`${t.def.name} is already at battle level ${MAX_BATTLE_LEVEL}`, "#ff4d5e");
+      return;
+    }
+    const spCost = SP_BASE_COST + SP_COST_STEP * gg.spSpend;
+    if (gg.sp < spCost) {
+      sfx.error();
+      push("Not enough SP", "#ff4d5e");
+      return;
+    }
+    ascendRef.current(uid);
+  };
+
+  /**
+   * The ascent token is dragged into a slot (or a deployed tower on the grid) -
+   * it is never a button that sits next to the slot.
+   */
+  const startAscentDrag = (e: React.PointerEvent) => {
+    e.preventDefault();
+    sfx.hover();
+    setAscentDrag({ x: e.clientX, y: e.clientY });
+    setAscentArmed(true);
+    const move = (ev: PointerEvent) => {
+      setAscentDrag({ x: ev.clientX, y: ev.clientY });
+      const idx = slotIndexAt(ev.clientX, ev.clientY);
+      setAscentHover(idx >= 0 ? idx : fieldTowerSlot(ev.clientX, ev.clientY));
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setAscentDrag(null);
+      setAscentHover(-1);
+      const gg = gRef.current;
+      if (!gg) return;
+      const idx = slotIndexAt(ev.clientX, ev.clientY);
+      if (idx >= 0) {
+        const t = gg.towers.find((x) => x.lineupIdx === idx);
+        if (t) {
+          ascendTower(t.uid);
+          return;
+        }
+      }
+      // dropped on the battlefield?
+      const uid = fieldTowerAt(ev.clientX, ev.clientY);
+      if (uid >= 0) ascendTower(uid);
+      else setAscentArmed(false);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  /** tower uid under a client point on the canvas (or -1) */
+  const fieldTowerAt = (clientX: number, clientY: number) => {
+    const gg = gRef.current;
+    const canvas = canvasRef.current;
+    if (!gg || !canvas) return -1;
+    const r = canvas.getBoundingClientRect();
+    if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) return -1;
+    const p = canvasPoint(canvas, clientX, clientY);
+    const c = Math.floor((p.x - OX) / C);
+    const row = Math.floor((p.y - OY) / C);
+    const t = gg.towers.find((x) => x.cell && x.cell.c === c && x.cell.r === row);
+    return t ? t.uid : -1;
+  };
+
+  /** slot index of the tower under a canvas point (for hover highlight) */
+  const fieldTowerSlot = (clientX: number, clientY: number) => {
+    const uid = fieldTowerAt(clientX, clientY);
+    if (uid < 0) return -1;
+    const t = gRef.current?.towers.find((x) => x.uid === uid);
+    return t && t.lineupIdx >= 0 ? t.lineupIdx : -1;
+  };
   const maxRounds = mode === "party" ? PARTY_ROUNDS : BATTLE_ROUNDS;
 
   const collect = () => {
@@ -1771,7 +2251,9 @@ export default function Battle({
       f.frags.forEach((fr) => {
         s.frags[fr.id] = (s.frags[fr.id] || 0) + fr.n;
       });
-      s.best = Math.max(s.best, f.rounds);
+      s.runs++;
+      if (mode === "endless") s.bestEndless = Math.max(s.bestEndless, f.rounds);
+      else s.best = Math.max(s.best, f.rounds);
       if (f.won) s.wins++;
     });
     sfx.coin();
@@ -1779,6 +2261,7 @@ export default function Battle({
   };
 
   const heroReady = g ? g.heroCd <= 0 : true;
+  const heroDef = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
 
   return (
     <div className="app-bg relative flex h-full flex-col">
@@ -1802,8 +2285,8 @@ export default function Battle({
       ))}
 
       {/* TOP BAR — lineup left / status right */}
-      <div className="flex shrink-0 items-center gap-2 px-3 pt-2">
-        <div className="flex flex-1 items-center gap-1.5">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 px-3 pt-2">
+        <div className="flex flex-1 flex-wrap items-center gap-1.5">
           {Array.from({ length: 6 }).map((_, i) => {
             const t = g?.towers.find((x) => x.lineupIdx === i);
             return (
@@ -1852,7 +2335,9 @@ export default function Battle({
         </div>
         {g && (
           <div className="flex items-center gap-2 text-[15px] font-bold">
-            <span className="chip text-[#35e0ff]">SP {Math.floor(g.sp)}</span>
+            <span data-testid="sp-chip" className="chip text-[#35e0ff]">
+              SP {Math.floor(g.sp)}
+            </span>
             <span className="chip text-[#ffcf4d]">
               <CoinIcon size={15} /> {Math.floor(g.goldEarned)}
             </span>
@@ -1862,8 +2347,15 @@ export default function Battle({
               </svg>
               {g.lives}
             </span>
-            <span className="chip">ROUND {Math.min(g.round, maxRounds)}/{maxRounds}</span>
+            {mode === "endless" ? (
+              <span className="chip border-[#ff9be9]/50 text-[#ff9be9]">WAVE {g.round} · ENDLESS</span>
+            ) : (
+              <span className="chip">
+                ROUND {Math.min(g.round, maxRounds)}/{maxRounds}
+              </span>
+            )}
             <span className="chip text-[var(--dim)]">{g.enemies.length + g.spawnQ.length} left</span>
+            {g.odT > 0 && <span className="chip text-[#3dff8e]">OVERDRIVE {g.odT.toFixed(0)}s</span>}
           </div>
         )}
       </div>
@@ -1878,19 +2370,25 @@ export default function Battle({
           style={{ touchAction: "none", cursor: dragging ? "grabbing" : "default" }}
         />
         {g && (g.phase === "deploy" || g.phase === "inter") && (
-          <div className="pointer-events-none absolute left-1/2 top-[10%] -translate-x-1/2 text-center">
+          <div className="pointer-events-none absolute left-1/2 top-[8%] -translate-x-1/2 text-center">
             <div className="font-disp text-4xl text-[#ffcf4d]" style={{ textShadow: "0 0 26px rgba(255,179,36,.7)" }}>
-              {g.phase === "deploy" ? "DEPLOY TOWERS" : `ROUND ${g.round} CLEARED`}
+              {g.phase === "deploy" ? "DEPLOY TOWERS" : `${mode === "endless" ? "WAVE" : "ROUND"} ${g.round} CLEARED`}
             </div>
             <div className="mt-1 text-base font-bold tracking-[0.25em] text-[var(--txt)]">
               {g.phase === "deploy" ? "DRAG TOWERS FROM THE LINEUP ONTO THE GRID" : `NEXT WAVE IN ${Math.ceil(g.phaseT)}`}
             </div>
+            <div className="mt-1 text-[13px] font-bold tracking-[0.2em] text-[#ff9be9]">
+              WAVE {g.phase === "deploy" ? g.round : g.round + 1} · ENEMY HP ×{Math.pow(HP_GROWTH, g.phase === "deploy" ? g.round - 1 : g.round).toFixed(1)}
+            </div>
           </div>
         )}
         {g && g.phase === "wave" && (
-          <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2">
+          <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 text-center">
             <div className="font-disp text-xl text-[#ff4fd8]" style={{ textShadow: "0 0 18px rgba(255,79,216,.6)" }}>
-              ROUND {g.round}
+              {mode === "endless" ? "WAVE" : "ROUND"} {g.round}
+            </div>
+            <div className="text-[11px] font-bold tracking-[0.2em] text-[#ff9be9]/80">
+              ENEMY HP ×{Math.pow(HP_GROWTH, g.round - 1).toFixed(1)} · +{Math.round((HP_GROWTH - 1) * 100)}% PER WAVE
             </div>
           </div>
         )}
@@ -1907,12 +2405,13 @@ export default function Battle({
               color: heroReady ? "#2c0022" : "#8a7a9a",
             }}
           >
-            <svg width="34" height="34" viewBox="0 0 34 34">
-              <path d="M19 2 7 19h7l-2 13L27 14h-8l4-12z" fill="currentColor" />
-            </svg>
-            <span className="font-disp mt-0.5 text-[11px] leading-tight">HERO</span>
-            <span className="text-[10px] leading-tight">NOVA</span>
-            {!heroReady && <span className="text-lg font-bold">{Math.ceil(g.heroCd)}s</span>}
+            <HeroIcon kind={heroDef.kind} size={40} color={heroReady ? "#2c0022" : "#8a7a9a"} />
+            <span className="font-disp mt-1 text-[11px] leading-tight">{heroDef.name.toUpperCase()}</span>
+            {!heroReady ? (
+              <span className="text-lg font-bold leading-tight">{Math.ceil(g.heroCd)}s</span>
+            ) : (
+              <span className="text-[10px] font-bold leading-tight">READY</span>
+            )}
           </button>
         )}
         {mode === "party" && (
@@ -1937,38 +2436,88 @@ export default function Battle({
         </button>
       </div>
 
-      {/* BOTTOM BAR — ascent per tower */}
+      {/* BOTTOM BAR — tower slots + the ASCENT token you drop into a slot */}
       {g && (
         <div className="flex shrink-0 items-stretch gap-2 px-3 py-2">
+          {/* ascent token */}
+          <div
+            data-testid="ascent-token"
+            onPointerDown={startAscentDrag}
+            className="panel relative flex w-[104px] shrink-0 cursor-grab flex-col items-center justify-center gap-0.5 px-2 py-1.5 select-none"
+            style={{
+              borderColor: ascentArmed ? "#ffcf4d" : "rgba(255,207,77,0.45)",
+              background: ascentArmed
+                ? "linear-gradient(180deg, rgba(255,207,77,0.25), rgba(255,179,32,0.08))"
+                : undefined,
+              opacity: g.sp < cost ? 0.55 : 1,
+              touchAction: "none",
+            }}
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#ffcf4d" strokeWidth="2.2">
+              <path d="M12 19V5M6 11l6-6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span className="font-disp text-[11px] leading-none text-[#ffcf4d]">ASCENT</span>
+            <span className="text-[10px] font-bold leading-none text-[var(--dim)]">
+              {ascentArmed ? "PICK A SLOT" : `SP ${cost}`}
+            </span>
+          </div>
+
+          {/* the six tower slots */}
           {Array.from({ length: 6 }).map((_, i) => {
             const t = g.towers.find((x) => x.lineupIdx === i);
+            const hot = ascentHover === i;
+            const maxed = t ? t.bLv >= MAX_BATTLE_LEVEL : false;
             return (
-              <div key={i} className="panel flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5" style={{ opacity: t ? 1 : 0.45 }}>
+              <div
+                key={i}
+                ref={(el) => {
+                  slotRefs.current[i] = el;
+                }}
+                data-slot={i}
+                onClick={t && (ascentArmed || ascentHover === i) ? () => ascendTower(t.uid) : undefined}
+                className="panel flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 transition-colors"
+                style={{
+                  opacity: t ? 1 : 0.45,
+                  borderColor: hot ? "#ffcf4d" : undefined,
+                  background: hot ? "rgba(255,207,77,0.16)" : undefined,
+                  cursor: t && ascentArmed ? "pointer" : undefined,
+                }}
+              >
                 {t ? (
                   <>
-                    <TowerIcon def={t.def} size={40} />
+                    <TowerIcon def={t.def} size={38} />
                     <div className="min-w-0 flex-1 leading-tight">
                       <div className="truncate text-[12px] font-bold" style={{ color: RARITY[t.def.rarity].color }}>
                         {t.def.name}
                       </div>
                       <div className="flex items-center gap-1">
-                        <span className="text-[11px] font-bold text-[var(--dim)]">Lv {t.bLv}/6</span>
-                        <span key={t.points} className="anim-pop rounded px-1 text-[11px] font-bold" style={{ background: "rgba(0,0,0,0.4)", color: ptColor(t.points) }}>
+                        <span className="text-[11px] font-bold text-[var(--dim)]">
+                          Lv {t.bLv}/{MAX_BATTLE_LEVEL}
+                        </span>
+                        <span
+                          key={t.points}
+                          className="anim-pop rounded px-1 text-[11px] font-bold"
+                          style={{ background: "rgba(0,0,0,0.4)", color: ptColor(t.points) }}
+                        >
                           {t.points >= MAX_POINTS ? "MAX" : `${t.points} pts`}
                         </span>
-                        <span className="hidden text-[10px] font-semibold text-[var(--dim)] lg:inline">+{Math.round(t.points * 25)}% spd</span>
+                      </div>
+                      <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-black/50">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${(t.bLv / MAX_BATTLE_LEVEL) * 100}%`,
+                            background: "linear-gradient(90deg,#35e0ff,#c44dff)",
+                          }}
+                        />
                       </div>
                     </div>
-                    <button
-                      className="btn btn-gold shrink-0 px-2 py-1.5 text-[11px]"
-                      disabled={t.bLv >= MAX_BATTLE_LEVEL || g.sp < cost}
-                      onClick={() => ascendRef.current(t.uid)}
-                    >
-                      {t.bLv >= MAX_BATTLE_LEVEL ? "MAX" : <>ASCENT {cost}</>}
-                    </button>
+                    {maxed && <span className="shrink-0 text-[10px] font-bold text-[#ffcf4d]">MAX</span>}
                   </>
                 ) : (
-                  <span className="w-full text-center text-[10px] font-bold tracking-widest text-[var(--line2)]">EMPTY SLOT</span>
+                  <span className="w-full text-center text-[10px] font-bold tracking-widest text-[var(--line2)]">
+                    EMPTY SLOT
+                  </span>
                 )}
               </div>
             );
@@ -1976,16 +2525,58 @@ export default function Battle({
         </div>
       )}
 
+      {/* drag ghost for the ascent token */}
+      {ascentDrag && (
+        <div
+          className="pointer-events-none fixed z-[96] flex h-14 w-14 items-center justify-center rounded-full"
+          style={{
+            left: ascentDrag.x - 28,
+            top: ascentDrag.y - 28,
+            background: "radial-gradient(circle at 35% 30%, #ffe9b0, #ffb020 60%, #8a5200)",
+            boxShadow: "0 0 22px rgba(255,179,36,.75)",
+          }}
+        >
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3a2400" strokeWidth="2.6">
+            <path d="M12 19V5M6 11l6-6 6 6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+      )}
+
       {/* END OVERLAY */}
       {g?.final && (
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4">
           <div className="panel anim-pop w-[440px] p-6 text-center" style={{ borderColor: g.final.won ? "#ffcf4d88" : "#ff4d5e88" }}>
-            <div className="font-disp text-4xl" style={{ color: g.final.won ? "#ffcf4d" : "#ff4d5e", textShadow: `0 0 26px ${g.final.won ? "rgba(255,207,77,.6)" : "rgba(255,77,94,.6)"}` }}>
-              {g.final.won ? "VICTORY" : "DEFEAT"}
+            <div
+              className="font-disp text-4xl"
+              style={{
+                color: mode === "endless" ? "#ff9be9" : g.final.won ? "#ffcf4d" : "#ff4d5e",
+                textShadow:
+                  mode === "endless"
+                    ? "0 0 26px rgba(255,79,216,.6)"
+                    : `0 0 26px ${g.final.won ? "rgba(255,207,77,.6)" : "rgba(255,77,94,.6)"}`,
+              }}
+            >
+              {mode === "endless" ? "RUN OVER" : g.final.won ? "VICTORY" : "DEFEAT"}
             </div>
             <div className="mt-1 text-sm font-bold tracking-[0.2em] text-[var(--dim)]">
-              {g.final.won ? "THE LINE HELD" : `FELL ON ROUND ${g.round}`} · {g.kills} KILLS
+              {mode === "endless"
+                ? `REACHED WAVE ${g.final.rounds}`
+                : g.final.won
+                  ? "THE LINE HELD"
+                  : `FELL ON ROUND ${g.round}`}{" "}
+              · {g.kills} KILLS
             </div>
+            {mode === "endless" && (
+              <div
+                className="mt-2 inline-block rounded-lg border px-3 py-1 text-[13px] font-bold tracking-widest"
+                style={{
+                  borderColor: g.final.rounds > save.bestEndless ? "#ffcf4d" : "#322767",
+                  color: g.final.rounds > save.bestEndless ? "#ffcf4d" : "var(--dim)",
+                }}
+              >
+                {g.final.rounds > save.bestEndless ? `NEW RECORD · WAS ${save.bestEndless}` : `BEST ${save.bestEndless}`}
+              </div>
+            )}
             <div className="mt-4 space-y-1.5 text-left">
               <RewardRow icon={<CoinIcon size={17} />} label="Gold" val={`+${g.final.gold}`} color="#ffcf4d" />
               {g.final.gems > 0 && <RewardRow icon={<span className="text-[#35e0ff]">◆</span>} label="Gems" val={`+${g.final.gems}`} color="#35e0ff" />}

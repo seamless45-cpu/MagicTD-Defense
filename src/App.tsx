@@ -7,7 +7,13 @@ import Shop from "./screens/Shop";
 import Towers from "./screens/Towers";
 import Battle from "./screens/Battle";
 
-type Screen = "loading" | "home" | "shop" | "towers" | "specials" | "guild" | "battle" | "party";
+type Screen = "loading" | "home" | "shop" | "towers" | "specials" | "guild" | "battle" | "party" | "endless";
+
+const MODES = {
+  battle: { mode: "battle" as const, title: "BATTLE", rounds: "12 rounds" },
+  party: { mode: "party" as const, title: "PARTY", rounds: "15 rounds" },
+  endless: { mode: "endless" as const, title: "ENDLESS", rounds: "no limit" },
+};
 
 const NAV: { id: Screen; label: string; icon: React.ReactNode }[] = [
   {
@@ -140,12 +146,12 @@ export default function App() {
     );
   }
 
-  if (screen === "battle" || screen === "party") {
+  if (screen === "battle" || screen === "party" || screen === "endless") {
     return (
       <div className="h-full">
         <Battle
-          key={screen + save.lastSeen}
-          mode={screen === "party" ? "party" : "battle"}
+          key={screen + save.hero}
+          mode={MODES[screen].mode}
           save={save}
           mutate={mutate}
           onExit={() => setScreen("home")}
@@ -157,19 +163,19 @@ export default function App() {
   return (
     <div className="app-bg flex h-full flex-col">
       <Toasts toasts={toasts} />
-      {/* top bar */}
-      <div className="flex shrink-0 items-center justify-between px-4 pt-3">
-        <div className="flex items-center gap-3">
-          <Emblem size={34} />
+      {/* top bar — wraps on narrow screens so the settings button is never clipped */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-3">
+        <div className="flex shrink-0 items-center gap-3">
+          <Emblem size={32} />
           <div className="leading-none">
             <div className="font-disp text-xl text-[#ffb324]">MagicTD</div>
             <div className="text-[10px] font-bold tracking-[0.4em] text-[var(--cyan)]">DEFENSE</div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <CurrencyBar gold={save.gold} gems={save.gems} tokens={save.tokens} />
           <button
-            className="relative rounded-lg border border-[var(--line)] bg-black/40 p-2 text-[var(--dim)] transition hover:text-[var(--txt)]"
+            className="relative shrink-0 rounded-lg border border-[var(--line)] bg-black/40 p-2 text-[var(--dim)] transition hover:text-[var(--txt)]"
             onClick={() => {
               sfx.click();
               setSettingsOpen(true);
@@ -189,9 +195,11 @@ export default function App() {
         {screen === "home" && (
           <Home
             save={save}
+            mutate={mutate}
             push={push}
             onBattle={() => setScreen("battle")}
             onParty={() => setScreen("party")}
+            onEndless={() => setScreen("endless")}
           />
         )}
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}

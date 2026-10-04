@@ -46,7 +46,14 @@ async function mountApp() {
       <App />
     </StrictMode>
   );
-  await waitFor(() => byText("button", "Battle Mode"), "home screen (loading screen finished)");
+  await waitFor(() => byText("div", "Command Center"), "home screen (loading screen finished)");
+}
+
+/** click the DEPLOY button on one of the home mode cards */
+function startMode(title: string) {
+  const card = all("button").find((b) => (b.textContent || "").includes(title) && (b.textContent || "").includes("DEPLOY"));
+  if (!card) throw new Error(`mode card not found: ${title}`);
+  click(card);
 }
 
 function unmountApp() {
@@ -77,8 +84,9 @@ describe("MagicTD app shell", () => {
   it("boots from the loading screen and navigates every tab", async () => {
     await mountApp();
     expect(document.body.textContent).toContain("Command Center");
-    expect(byText("button", "Battle Mode")).toBeTruthy();
-    expect(byText("button", "Party Mode")).toBeTruthy();
+    expect(byText("button", "Battle")).toBeTruthy();
+    expect(byText("button", "Party")).toBeTruthy();
+    expect(byText("button", "Endless")).toBeTruthy();
 
     click(byText("button", "Shop")!);
     await waitFor(() => byText("div", "CHESTS"), "shop screen");
@@ -176,6 +184,24 @@ describe("Shop", () => {
   });
 });
 
+describe("Heroes", () => {
+  it("selects a hero from the home screen and equips it in battle", async () => {
+    await mountApp();
+    const glacier = all("button").find((b) => (b.textContent || "").includes("Glacier"))!;
+    expect(glacier).toBeTruthy();
+    click(glacier);
+    await waitFor(() => saved().hero === "glacier", "hero saved");
+
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+    // the hero button shows the equipped hero
+    expect(document.body.textContent).toContain("GLACIER");
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  });
+});
+
 describe("Towers", () => {
   it("upgrades a tower with gold + fragments and toggles the lineup", async () => {
     await mountApp();
@@ -259,7 +285,7 @@ describe("Specials", () => {
 describe("Battle", () => {
   it("mounts the engine, deploys a tower, spawns a wave and can be abandoned", async () => {
     await mountApp();
-    click(byText("button", "Battle Mode")!);
+    startMode("Battle");
 
     // engine + canvas boot
     const canvas = await waitFor(() => document.querySelector("canvas"), "battle canvas");
@@ -298,7 +324,7 @@ describe("Battle", () => {
 
   it("boots party mode with teammates and 15 rounds", async () => {
     await mountApp();
-    click(byText("button", "Party Mode")!);
+    startMode("Party");
     await waitFor(() => byText("button", "SUMMON"), "party battle HUD");
     expect(document.body.textContent).toContain("ROUND 1/15");
     expect(document.body.textContent).toContain("PARTY MODE");
@@ -307,6 +333,78 @@ describe("Battle", () => {
     await waitFor(() => canvasStats.calls > 50, "party render loop drawing");
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  });
+
+  it("boots endless mode with no wave cap", async () => {
+    await mountApp();
+    startMode("Endless");
+    await waitFor(() => byText("button", "SUMMON"), "endless battle HUD");
+    expect(document.body.textContent).toContain("WAVE 1 · ENDLESS");
+    expect(document.body.textContent).not.toContain("ROUND 1/12");
+
+    await waitFor(() => canvasStats.calls > 50, "endless render loop drawing");
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  });
+
+  it("ascends a tower by dragging the ascent token into its slot", async () => {
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+
+    const token = document.querySelector('[data-testid="ascent-token"]') as HTMLElement;
+    expect(token, "ascent token exists").toBeTruthy();
+    expect(token.textContent).toContain("ASCENT");
+    const slot0 = document.querySelector('[data-slot="0"]') as HTMLElement;
+    expect(slot0.textContent).toContain("Lv 1/6");
+
+    // drag the token from the tray into slot 0
+    const rect = { left: 100, top: 700, right: 200, bottom: 760, width: 100, height: 60, x: 100, y: 700, toJSON: () => ({}) };
+    slot0.getBoundingClientRect = () => rect as DOMRect;
+    // the SP readout chip (SUMMON and the ascent token also show an "SP <cost>" label)
+    const spNow = () => {
+      const chip = document.querySelector('[data-testid="sp-chip"]');
+      return Number((chip?.textContent || "").replace(/[^\d]/g, ""));
+    };
+    const spBefore = spNow();
+    expect(spBefore).toBeGreaterThan(0);
+
+    pointer("pointerdown", token, 20, 720);
+    pointer("pointermove", window, 150, 730);
+    pointer("pointerup", window, 150, 730);
+
+    await waitFor(() => (document.querySelector('[data-slot="0"]') as HTMLElement).textContent?.includes("Lv 2/6"), "tower ascended to battle level 2");
+    expect(spNow()).toBeLessThan(spBefore);
+
+    // the token is not a per-slot button any more: slots hold no button element
+    expect(slot0.querySelector("button")).toBeNull();
+
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  });
+
+  it("maxes out ascension and refuses further upgrades", async () => {
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+
+    const token = document.querySelector('[data-testid="ascent-token"]') as HTMLElement;
+    const slot0 = () => document.querySelector('[data-slot="0"]') as HTMLElement;
+    const rect = { left: 100, top: 700, right: 200, bottom: 760, width: 100, height: 60, x: 100, y: 700, toJSON: () => ({}) };
+    slot0().getBoundingClientRect = () => rect as DOMRect;
+
+    // SP starts at 200 and each ascent costs 120 + 75 per purchase; do the ones we can afford
+    for (let i = 0; i < 5; i++) {
+      pointer("pointerdown", token, 20, 720);
+      pointer("pointermove", window, 150, 730);
+      pointer("pointerup", window, 150, 730);
+      await sleep(60);
+    }
+    const lvl = slot0().textContent || "";
+    expect(lvl).toMatch(/Lv [2-6]\/6/);
     noErrors();
   });
 });

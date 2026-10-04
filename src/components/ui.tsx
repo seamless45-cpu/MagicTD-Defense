@@ -160,6 +160,45 @@ export function TowerIcon({
             <path d="M24 34v6M14 30l-3 5M34 30l3 5" stroke={c} strokeWidth="2" strokeLinecap="round" />
           </g>
         );
+      case "swarm":
+        return (
+          <g>
+            <circle cx="24" cy="24" r="7" fill="#1b1040" stroke={c} strokeWidth="2.5" />
+            <path d="M24 17V8M20 20l-7-5M28 20l7-5" stroke={c} strokeWidth="2" strokeLinecap="round" />
+            <circle cx="24" cy="7" r="3.4" fill={c} />
+            <circle cx="12" cy="14" r="3.4" fill={c} />
+            <circle cx="36" cy="14" r="3.4" fill={c} />
+            <path d="M19 29l-5 8M29 29l5 8" stroke={c} strokeWidth="1.6" opacity="0.6" />
+          </g>
+        );
+      case "chrono":
+        return (
+          <g>
+            <circle cx="24" cy="26" r="13" fill="#0d1f3a" stroke={c} strokeWidth="2.6" />
+            <path d="M24 26V17M24 26l7 5" stroke={c} strokeWidth="2.6" strokeLinecap="round" />
+            <path d="M24 6v6M13 11l4 4M35 11l-4 4" stroke="#9ff3ff" strokeWidth="2.2" strokeLinecap="round" />
+            <circle cx="24" cy="26" r="2.6" fill={c} />
+          </g>
+        );
+      case "void":
+        return (
+          <g>
+            <circle cx="24" cy="24" r="14" fill="#0a0620" stroke={c} strokeWidth="2.6" />
+            <circle cx="24" cy="24" r="7" fill="#000" stroke={c} strokeWidth="1.6" />
+            <ellipse cx="24" cy="24" rx="17" ry="6" fill="none" stroke={c} strokeWidth="2" transform="rotate(-28 24 24)" />
+            <ellipse cx="24" cy="24" rx="17" ry="6" fill="none" stroke={c} strokeWidth="1.4" opacity="0.7" transform="rotate(30 24 24)" />
+          </g>
+        );
+      case "plasma":
+        return (
+          <g>
+            <path d="M8 30 40 14" stroke={c} strokeWidth="5" strokeLinecap="round" />
+            <path d="M8 30 40 14" stroke="#fff2b0" strokeWidth="1.8" strokeLinecap="round" />
+            <path d="M6 22 20 24l-6 6 12 1" stroke={c} strokeWidth="2.2" fill="none" strokeLinejoin="round" />
+            <circle cx="40" cy="14" r="4.6" fill={c} />
+            <circle cx="40" cy="14" r="8" fill="none" stroke={c} strokeWidth="1.4" opacity="0.6" />
+          </g>
+        );
       default:
         return <circle cx="24" cy="24" r="14" fill={c} />;
     }
@@ -173,6 +212,58 @@ export function TowerIcon({
     >
       <rect x="2" y="2" width="44" height="44" rx="10" fill="rgba(8,5,26,0.6)" stroke={c} strokeWidth="2" />
       {inner(def.id)}
+    </svg>
+  );
+}
+
+export function HeroIcon({
+  kind,
+  size = 34,
+  color = "#ff4fd8",
+}: {
+  kind: string;
+  size?: number;
+  color?: string;
+}) {
+  const art = () => {
+    switch (kind) {
+      case "freeze":
+        return (
+          <g>
+            <path d="M24 6v36M10 16l28 16M38 16 10 32" stroke={color} strokeWidth="3.2" strokeLinecap="round" />
+            <path d="M24 3l3 5-3 5-3-5zM24 45l3-5-3-5-3 5z" fill={color} />
+            <circle cx="24" cy="24" r="5.5" fill="#0b2740" stroke={color} strokeWidth="2" />
+          </g>
+        );
+      case "burn":
+        return (
+          <g>
+            <path d="M24 5c3 10 13 12 13 24a13 13 0 0 1-26 0c0-7 4-9 5-15 2 4 5 5 8-9z" fill={color} stroke="#8a3000" strokeWidth="1.6" />
+            <path d="M24 18c1.5 5 6 6 6 11a6 6 0 0 1-12 0c0-4 4-5 6-11z" fill="#fff2b0" />
+          </g>
+        );
+      case "overdrive":
+        return (
+          <g>
+            <path d="M27 4 13 26h8l-3 18 16-24h-9l5-16z" fill={color} stroke="#0a3d24" strokeWidth="1.6" />
+            <path d="M24 2v44" stroke={color} strokeWidth="1.4" opacity="0.35" />
+            <path d="M8 12h6M8 20h4M8 28h6M8 36h4" stroke={color} strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        );
+      default:
+        return (
+          <g>
+            <circle cx="24" cy="24" r="15" fill="#2a0b33" stroke={color} strokeWidth="2.4" />
+            <path d="M24 12v24M14 24h20M17 17l14 14M31 17 17 31" stroke={color} strokeWidth="2.4" strokeLinecap="round" />
+            <circle cx="24" cy="24" r="4.5" fill={color} />
+          </g>
+        );
+    }
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48">
+      <rect x="2" y="2" width="44" height="44" rx="12" fill="rgba(8,5,26,0.65)" stroke={color} strokeWidth="2" />
+      {art()}
     </svg>
   );
 }

@@ -1,4 +1,4 @@
-import { TOWER_BY_ID } from "./data";
+import { HERO_BY_ID, TOWER_BY_ID } from "./data";
 
 export interface SaveData {
   gold: number;
@@ -8,8 +8,11 @@ export interface SaveData {
   frags: Record<string, number>;
   lineup: string[]; // max 6 tower ids
   awn: Record<string, [number, number]>; // tower id -> [awk1Tier, awk2Tier] 0..5
+  hero: string; // selected hero id
   best: number;
+  bestEndless: number;
   wins: number;
+  runs: number;
   sfx: boolean;
   fx: boolean;
   lastDaily: string;
@@ -27,8 +30,11 @@ export function defaultSave(): SaveData {
     frags: { arrow: 2, cannon: 1, ice: 0 },
     lineup: ["arrow", "cannon", "ice"],
     awn: {},
+    hero: "nova",
     best: 0,
+    bestEndless: 0,
     wins: 0,
+    runs: 0,
     sfx: true,
     fx: true,
     lastDaily: "",
@@ -44,6 +50,7 @@ export function loadSave(): SaveData {
     if (!s.levels || Object.keys(s.levels).length === 0) s.levels = { arrow: 1 };
     if (!Array.isArray(s.lineup)) s.lineup = [];
     s.lineup = s.lineup.filter((id) => s.levels[id]);
+    if (!HERO_BY_ID[s.hero]) s.hero = "nova";
     return s;
   } catch {
     return defaultSave();

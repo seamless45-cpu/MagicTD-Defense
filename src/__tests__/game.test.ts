@@ -13,6 +13,12 @@ import {
   BATTLE_ROUNDS,
   PARTY_ROUNDS,
   ENEMY_TYPES,
+  HP_GROWTH,
+  POINT_DMG_STEP,
+  ASC_DMG_MUL,
+  towerDamage,
+  HEROES,
+  HERO_BY_ID,
 } from "../game/data";
 import {
   defaultSave,
@@ -65,6 +71,54 @@ describe("tower data", () => {
     expect(roundHp(1)).toBeCloseTo(46, 5);
     expect(roundHp(5)).toBeGreaterThan(roundHp(4));
     expect(roundHp(12)).toBeGreaterThan(roundHp(11));
+  });
+
+  it("makes enemies exactly 1.57x stronger every wave", () => {
+    expect(HP_GROWTH).toBeCloseTo(1.57, 10);
+    for (const w of [1, 2, 5, 11, 30, 60]) {
+      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(1.57, 8);
+    }
+    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.57, 29), 3);
+  });
+
+  it("ships the new towers with distinct mechanics", () => {
+    for (const id of ["swarm", "chrono", "void", "plasma"]) {
+      const def = TOWER_BY_ID[id];
+      expect(def, id).toBeDefined();
+    }
+    expect(TOWER_BY_ID.swarm.multi).toBeGreaterThan(1);
+    expect(TOWER_BY_ID.chrono.slow).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.chrono.slowAura).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.void.pctHp).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.plasma.pierce).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.plasma.exotic).toBe(true);
+  });
+
+  it("gives every hero a cooldown, colour and unique ability", () => {
+    expect(HEROES.length).toBeGreaterThanOrEqual(4);
+    const kinds = new Set(HEROES.map((h) => h.kind));
+    expect(kinds.size).toBe(HEROES.length);
+    for (const h of HEROES) {
+      expect(h.cd).toBeGreaterThan(0);
+      expect(h.color).toMatch(/^#/);
+      expect(HERO_BY_ID[h.id]).toBe(h);
+    }
+  });
+
+  it("grows tower damage multiplicatively so it can chase the enemy curve", () => {
+    const def = TOWER_BY_ID.arrow;
+    const base = towerDamage(def, 1, 1, 0);
+    expect(base).toBe(def.dmg);
+    // battle levels multiply damage
+    const ascended = towerDamage(def, 1, 3, 0);
+    expect(ascended).toBeCloseTo(def.dmg * Math.pow(ASC_DMG_MUL, 2), 5);
+    // points multiply damage too
+    expect(towerDamage(def, 1, 1, 4)).toBeCloseTo(def.dmg * (1 + POINT_DMG_STEP * 4), 5);
+    // menu levels stay additive
+    expect(towerDamage(def, 3, 1, 0)).toBe(def.dmg + def.upDmg * 2);
+    // and a maxed tower outgrows an early wave
+    const maxed = towerDamage(def, 15, 6, 8, 1.5);
+    expect(maxed).toBeGreaterThan(def.dmg * 20);
   });
 
   it("builds waves that only use known enemy types and grow", () => {

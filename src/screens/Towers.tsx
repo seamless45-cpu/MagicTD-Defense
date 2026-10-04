@@ -407,5 +407,10 @@ function awkText(def: TowerDef, slot: 0 | 1, tier: number): string {
     if (slot === 0) return tier > 0 ? `+${s.mult[t] * 100}% crit · +1% atk/kill (cap ${s.mult2![t]})` : "No tier";
     return tier > 0 ? `Merge burst: ${s.mult[t]} beams · Party ${s.mult2![t] * 100}% dmg` : "No tier";
   }
+  if (def.id === "plasma") {
+    const s = slot === 0 ? def.awk1! : def.awk2!;
+    if (slot === 0) return tier > 0 ? `${s.chance[t] * 100}% · +${s.mult[t] * 100}% lance dmg, always crit` : "No tier";
+    return tier > 0 ? `${s.chance[t] * 100}% · burn ${s.mult[t]}x–${s.mult2![t]}x on hit` : "No tier";
+  }
   return "";
 }

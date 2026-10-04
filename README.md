@@ -40,18 +40,40 @@ published site keeps serving the previous version.
 
 ## How to play
 
-**Home → Battle Mode** (12 rounds, solo) or **Party Mode** (15 rounds, AI teammates deploy towers
-and chat; Magic Tokens awarded at round 10).
+Pick a mode from the **Command Center**:
+
+| Mode | Length | Notes |
+| --- | --- | --- |
+| **Battle** | 12 rounds | Solo gauntlet. Win it to bank gold, gems and fragments. |
+| **Party** | 15 rounds | AI teammates deploy their own towers and chat; Magic Tokens at round 10. |
+| **Endless** | no limit | Score attack: survive as long as possible. Rewards scale with your depth — gold grows quadratically, gems every 3 waves, a token every 5. |
+
+**Enemies get 57% stronger every wave** (×1.57 per wave, compounding), and both the wave banner
+and the HUD show the current multiplier. Your towers keep up because their damage grows
+multiplicatively: each battle level multiplies damage ×1.55, each point +30%, and Power Plant /
+S-Speaker auras multiply on top.
+
+### Heroes
+
+Equip one hero on the Command Center; its ability is the big purple button in battle.
+
+| Hero | Cooldown | Ability |
+| --- | --- | --- |
+| **Nova** | 25s | Screen-wide detonation: heavy damage + brief stun on everything. |
+| **Glacier** | 30s | Flash-freezes every enemy for 4s, then leaves them chilled and slowed. |
+| **Ember** | 30s | Ignites the field: burst damage plus a long burning wound. |
+| **Overdrive** | 35s | Supercharges every tower: +150% attack speed and +50% damage for 8s. |
 
 - **Deploy:** drag a tower from the lineup row at the top onto a build cell. The path (left column,
   right column, bottom row) is blocked. Seven build columns × three build rows.
 - **Merge:** drag a placed tower onto another tower with the **same point count** to fuse them into
-  a random tower with +1 point (max 8). Higher points = faster firing.
+  a random tower with +1 point (max 8). Higher points = faster firing and +30% damage per point.
 - **Points:** placed lineup towers pulse points to each other as they shoot (+1 point every 3rd
   volley) — lineup order is the pulse ring.
-- **Ascend:** spend SP to raise a deployed tower's battle level (max 6) for more damage.
+- **Ascend:** each slot holds a tower, not a button. Drag the gold **ASCENT** token from the left of
+  the bottom bar into a tower's slot (or tap the token, then tap a slot) to buy a battle level
+  (max 6, ×1.55 damage each). Dropping it on a tower on the grid works too.
 - **Summon:** spend SP for a random unlocked tower in an empty lineup slot. Cost rises each time.
-- **Hero (NOVA):** screen-wide crit nuke with a 25s cooldown.
 - **Battle SFX / Rich FX** toggles live in the settings gear (top right).
 - Enemies leak toward the portal on the right and cost lives (20); at 0 lives the run ends.
   Winning a run banks gold, gems, fragments and (party) tokens.
@@ -71,15 +93,19 @@ and chat; Magic Tokens awarded at round 10).
 | Tower | Rarity | Role |
 | --- | --- | --- |
 | Arrow | Normal | Cheap single target, self attack-speed buff |
-| Cannon | Normal | Splash explosion |
+| Cannon | Normal | Splash explosion (scales with ascension) |
 | Ice Cube | Normal | Chance to freeze for 3s |
 | S-Speaker | Decent | Aura: attack speed of orthogonal neighbours |
+| Arcane Swarm | Decent | Volley of three homing bolts at three different enemies |
 | Tesla Coil | Decent | Chaining lightning |
 | Gatling | Epic | Bursts of rapid fire every 5s |
 | Energy Core | Epic | Knockback + stun |
+| Chrono Spire | Epic | Time field: slows everything nearby; chilled enemies take +25% damage |
+| Void Cannon | Epic | Siege gun that shaves 5%+ of the target's max HP per hit — the endless answer |
 | Lightning Princess | Legendary | Hits every enemy on screen; exotic awakenings |
 | Hellstorm | Legendary | Fireballs, crit scaling, merge-triggered blaze |
 | Icestorm | Legendary | Icicles cut a % of current HP |
+| Plasma Lance | Legendary | Pierces a whole file of enemies; exotic awakenings (Overcharge, Searing Path) |
 | Power Plant | Legendary | Aura: attack speed + attack of neighbours |
 
 ## Layout

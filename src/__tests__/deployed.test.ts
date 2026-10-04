@@ -47,9 +47,14 @@ describe("published build (index.html)", () => {
 
     // loading screen -> home
     for (let i = 0; i < 200 && !/Command Center/.test(root().textContent || ""); i++) await sleep(100);
-    expect(root().textContent).toContain("Command Center");
-    expect(root().textContent).toContain("Battle Mode");
-    expect(root().textContent).toContain("Party Mode");
+    const text = root().textContent || "";
+    expect(text).toContain("Command Center");
+    // all three modes and the hero picker ship in the published build
+    expect(text).toContain("Battle");
+    expect(text).toContain("Party");
+    expect(text).toContain("Endless");
+    expect(text).toContain("HERO");
+    expect(text).toContain("Nova");
 
     dom.window.close();
   }, 30000);

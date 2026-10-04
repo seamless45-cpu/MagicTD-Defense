@@ -20,7 +20,13 @@ export type TowerKind =
   | "lightning"
   | "hellstorm"
   | "icestorm"
-  | "plant";
+  | "plant"
+  | "swarm"
+  | "chrono"
+  | "void"
+  | "plasma";
+
+export type GameMode = "battle" | "party" | "endless";
 
 export interface AwkSpec {
   name: string;
@@ -74,6 +80,22 @@ export interface TowerDef {
   ascIcPct?: number;
   rapid?: boolean;
   exotic?: boolean;
+  /** projectiles per volley (hits that many enemies at once) */
+  multi?: number;
+  /** bonus damage as a share of the target's max HP (0.05 = 5%) */
+  pctHp?: number;
+  upPctHp?: number;
+  ascPctHp?: number;
+  /** how many extra enemies a shot skewers */
+  pierce?: number;
+  upPierce?: number;
+  ascPierce?: number;
+  /** slow strength applied on hit / to nearby enemies (0.4 = 40% slower) */
+  slow?: number;
+  upSlow?: number;
+  ascSlow?: number;
+  slowDur?: number;
+  slowAura?: number;
   awk1?: AwkSpec;
   awk2?: AwkSpec;
   unlockFrags: number;
@@ -177,6 +199,43 @@ export const TOWERS: TowerDef[] = [
     atkAura: 0.03, upAtkAura: 0.01, ascAtkAura: 0.02,
     hpState: [4, 6, 8, 12], unlockFrags: 15,
   },
+  {
+    id: "swarm", name: "Arcane Swarm", rarity: "decent", kind: "swarm", target: "front",
+    desc: "Loose three homing bolts at once, at up to three different enemies.",
+    dmg: 34, upDmg: 11, ascDmg: 0, rate: 0.85, upRate: 0.02, ascRate: 0,
+    multi: 3, unlockFrags: 10,
+  },
+  {
+    id: "chrono", name: "Chrono Spire", rarity: "epic", kind: "chrono", target: "front",
+    desc: "Time field: slows enemies around it and chills whatever it hits. Slowed enemies take +25% damage.",
+    dmg: 70, upDmg: 18, ascDmg: 0, rate: 0.95, upRate: 0.02, ascRate: 0,
+    slow: 0.4, upSlow: 0.04, ascSlow: 0.03, slowDur: 3.5, slowAura: 210, unlockFrags: 14,
+  },
+  {
+    id: "void", name: "Void Cannon", rarity: "epic", kind: "void", target: "front",
+    desc: "Slow siege gun that shaves a share of the target's maximum HP on every hit.",
+    dmg: 110, upDmg: 22, ascDmg: 0, rate: 1.7, upRate: 0.03, ascRate: 0,
+    pctHp: 0.05, upPctHp: 0.009, ascPctHp: 0.014, unlockFrags: 16,
+  },
+  {
+    id: "plasma", name: "Plasma Lance", rarity: "legendary", kind: "plasma", target: "front",
+    desc: "Skewers a whole file of enemies with one lance.",
+    dmg: 560, upDmg: 0, ascDmg: 0, rate: 0.95, upRate: 0.02, ascRate: 0,
+    pierce: 3, upPierce: 1, ascPierce: 1, exotic: true, unlockFrags: 15,
+    awk1: {
+      name: "Overcharge",
+      desc: "Chance to fire a supercharged lance that deals far more damage and always crits.",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [2, 5, 18, 40, 60],
+    },
+    awk2: {
+      name: "Searing Path",
+      desc: "Lances set enemies ablaze: chained burn damage over time on every enemy hit.",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
+  },
 ];
 
 export const TOWER_BY_ID: Record<string, TowerDef> = Object.fromEntries(
@@ -188,9 +247,31 @@ export const ROMAN = ["", "I", "II", "III", "IV", "V"];
 export const MAX_MENU_LEVEL = 15;
 export const MAX_BATTLE_LEVEL = 6;
 export const POINT_STEP = 0.25; // +25% attack speed per point
+export const POINT_DMG_STEP = 0.3; // +30% damage per point
+export const ASC_DMG_MUL = 1.55; // every battle level multiplies damage
 export const MAX_POINTS = 8;
 export const SP_BASE_COST = 120;
 export const SP_COST_STEP = 75;
+
+/** Enemies get 57% stronger every wave - the game's difficulty curve. */
+export const HP_GROWTH = 1.57;
+
+/**
+ * Damage a tower deals per shot.
+ * Menu levels add flat damage, battle levels multiply it, points multiply it again,
+ * and aura buffs come in as `atkMul`. Growth is multiplicative so it can keep up
+ * with the 1.57x enemy curve.
+ */
+export function towerDamage(
+  def: TowerDef,
+  menuLv: number,
+  bLv: number,
+  points: number,
+  atkMul = 1
+): number {
+  const flat = def.dmg + def.upDmg * (menuLv - 1);
+  return flat * Math.pow(ASC_DMG_MUL, Math.max(0, bLv - 1)) * (1 + POINT_DMG_STEP * points) * atkMul;
+}
 
 export function upgradeGoldCost(level: number) {
   return Math.round(50 * Math.pow(1.5, level - 1));
@@ -225,12 +306,12 @@ export const ENEMY_TYPES: EnemyType[] = [
 ];
 
 export function roundHp(round: number) {
-  return 46 * Math.pow(1.33, round - 1);
+  return 46 * Math.pow(HP_GROWTH, round - 1);
 }
 
 export function waveComp(round: number): number[] {
   const out: number[] = [];
-  const n = 6 + round * 2;
+  const n = Math.min(44, 6 + round * 2);
   for (let i = 0; i < n; i++) {
     let t = 0;
     const roll = Math.random();
@@ -239,12 +320,73 @@ export function waveComp(round: number): number[] {
     else if (round >= 3 && roll < 0.62) t = 1;
     out.push(t);
   }
+  // boss every 4th wave, and a second one once the waves get long
   if (round % 4 === 0) out.push(4);
+  if (round >= 16 && round % 4 === 0) out.push(4);
   return out;
 }
 
 export const PARTY_ROUNDS = 15;
 export const BATTLE_ROUNDS = 12;
+/** Endless never stops; this is only used for display before the first wave. */
+export const ENDLESS_ROUNDS = 0;
+
+// ---------- heroes ----------
+export type HeroKind = "nuke" | "freeze" | "burn" | "overdrive";
+
+export interface HeroDef {
+  id: string;
+  name: string;
+  color: string;
+  cd: number;
+  kind: HeroKind;
+  desc: string;
+}
+
+export const HEROES: HeroDef[] = [
+  {
+    id: "nova",
+    name: "Nova",
+    color: "#ff4fd8",
+    cd: 25,
+    kind: "nuke",
+    desc: "Screen-wide detonation: heavy damage and a brief stun on every enemy.",
+  },
+  {
+    id: "glacier",
+    name: "Glacier",
+    color: "#35e0ff",
+    cd: 30,
+    kind: "freeze",
+    desc: "Flash-freezes every enemy solid for 4s, then leaves them chilled and slowed.",
+  },
+  {
+    id: "ember",
+    name: "Ember",
+    color: "#ff7a3d",
+    cd: 30,
+    kind: "burn",
+    desc: "Ignites the whole field: heavy damage plus a long burning wound.",
+  },
+  {
+    id: "overdrive",
+    name: "Overdrive",
+    color: "#3dff8e",
+    cd: 35,
+    kind: "overdrive",
+    desc: "Supercharges every tower: +150% attack speed and +50% damage for 8s.",
+  },
+];
+
+export const HERO_BY_ID: Record<string, HeroDef> = Object.fromEntries(
+  HEROES.map((h) => [h.id, h])
+);
+
+export const OVERDRIVE_TIME = 8;
+export const OVERDRIVE_ASPD = 1.5;
+export const OVERDRIVE_DMG = 0.5;
+/** chilled enemies take extra damage */
+export const SLOW_VULN = 0.25;
 
 export const CHESTS = [
   { id: "common", name: "Common Chest", cost: 40, gem: 0, color: "#9fb4c7", gold: [8, 20], frags: [1, 2] },

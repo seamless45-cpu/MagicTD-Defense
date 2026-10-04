@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
 import { todayStr, clearSave, defaultSave } from "../game/save";
 import { sfx } from "../game/audio";
-import { Emblem, Modal, TowerIcon } from "../components/ui";
-import { TOWERS, BATTLE_ROUNDS, PARTY_ROUNDS } from "../game/data";
+import { Emblem, HeroIcon, Modal, TowerIcon } from "../components/ui";
+import { TOWERS, BATTLE_ROUNDS, PARTY_ROUNDS, HEROES, HERO_BY_ID } from "../game/data";
 
 const LOAD_STEPS = [
   "Charging mana lattice...",
@@ -62,57 +62,181 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
 
 export function Home({
   save,
+  mutate,
   onBattle,
   onParty,
+  onEndless,
   push,
 }: {
   save: SaveData;
+  mutate: (fn: (s: SaveData) => void) => void;
   onBattle: () => void;
   onParty: () => void;
+  onEndless: () => void;
   push: (m: string, c?: string) => void;
 }) {
+  const hero = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
   return (
-    <div className="relative flex h-full flex-col items-center justify-center gap-7">
+    <div className="scroll-thin relative flex h-full flex-col items-center gap-5 overflow-y-auto py-1 pr-1">
       <div
-        className="pointer-events-none absolute left-[8%] top-[12%] h-40 w-40 rounded-full"
+        className="pointer-events-none absolute left-[6%] top-[8%] h-40 w-40 rounded-full"
         style={{ background: "radial-gradient(circle, rgba(53,224,255,.25), transparent 70%)", animation: "orbDrift 7s ease-in-out infinite" }}
       />
       <div
-        className="pointer-events-none absolute bottom-[18%] right-[10%] h-52 w-52 rounded-full"
+        className="pointer-events-none absolute bottom-[14%] right-[8%] h-52 w-52 rounded-full"
         style={{ background: "radial-gradient(circle, rgba(255,79,216,.2), transparent 70%)", animation: "orbDrift 9s ease-in-out infinite reverse" }}
       />
-      <div className="anim-slideup text-center">
-        <div className="font-disp text-4xl tracking-wide text-[#ffb324]" style={{ textShadow: "0 0 24px rgba(255,179,36,.55)" }}>
+
+      <div className="anim-slideup relative text-center">
+        <div className="font-disp text-3xl tracking-wide text-[#ffb324]" style={{ textShadow: "0 0 24px rgba(255,179,36,.55)" }}>
           Command Center
         </div>
-        <div className="mt-1 text-base font-semibold tracking-[0.3em] text-[var(--dim)]">CHOOSE YOUR BATTLEFIELD</div>
+        <div className="mt-0.5 text-[13px] font-semibold tracking-[0.3em] text-[var(--dim)]">
+          ENEMIES GROW +57% STRONGER EVERY WAVE · PICK YOUR HERO · HOLD THE LINE
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-stretch justify-center gap-5">
-        <button className="btn btn-gold anim-pop group w-64 px-6 py-5" onClick={() => { sfx.click(); onBattle(); }}>
-          <span className="font-disp block text-2xl leading-tight">Battle Mode</span>
-          <span className="mt-1 block text-[13px] font-bold normal-case tracking-wide text-[#5c3a00]">
-            Solo defense · {BATTLE_ROUNDS} rounds · earn gold, fragments & gems
-          </span>
-        </button>
-        <button className="btn btn-cyan anim-pop group w-64 px-6 py-5" style={{ animationDelay: "80ms" }} onClick={() => { sfx.click(); onParty(); }}>
-          <span className="font-disp block text-2xl leading-tight">Party Mode</span>
-          <span className="mt-1 block text-[13px] font-bold normal-case tracking-wide text-[#033540]">
-            Co-op with teammates · {PARTY_ROUNDS} rounds · Magic Tokens every 10 rounds
-          </span>
-        </button>
+      {/* mode cards */}
+      <div className="relative grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-3">
+        <ModeCard
+          accent="#ffcf4d"
+          title="Battle"
+          sub={`Solo defense · ${BATTLE_ROUNDS} rounds`}
+          body="Fixed 12-wave gauntlet. Win it to bank gold, gems and fragments."
+          onClick={onBattle}
+          delay="0ms"
+        />
+        <ModeCard
+          accent="#35e0ff"
+          title="Party"
+          sub={`Co-op · ${PARTY_ROUNDS} rounds`}
+          body="AI teammates deploy their own towers. Magic Tokens at round 10."
+          onClick={onParty}
+          delay="60ms"
+        />
+        <ModeCard
+          accent="#ff4fd8"
+          title="Endless"
+          sub="No wave limit · score attack"
+          body="Survive as long as you can. Rewards scale with how deep you get."
+          onClick={onEndless}
+          delay="120ms"
+          badge={`BEST ${save.bestEndless}`}
+        />
       </div>
 
-      <div className="anim-slideup flex items-center gap-3 text-sm font-bold tracking-wider text-[var(--dim)]" style={{ animationDelay: "160ms" }}>
+      {/* hero picker */}
+      <div className="panel relative w-full max-w-4xl p-3">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[12px] font-bold tracking-[0.25em] text-[#ffcf4d]">HERO</div>
+          <div className="text-[11px] font-semibold text-[var(--dim)]">
+            {hero.name} · {hero.desc}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {HEROES.map((h) => {
+            const on = h.id === hero.id;
+            return (
+              <button
+                key={h.id}
+                onClick={() => {
+                  sfx.click();
+                  mutate((s) => {
+                    s.hero = h.id;
+                  });
+                  push(`${h.name} equipped`, h.color);
+                }}
+                className="flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition"
+                style={{
+                  borderColor: on ? h.color : "var(--line)",
+                  background: on ? h.color + "22" : "rgba(8,5,26,0.45)",
+                  boxShadow: on ? `0 0 16px ${h.color}55` : undefined,
+                }}
+              >
+                <HeroIcon kind={h.kind} size={34} color={h.color} />
+                <div className="min-w-0 leading-tight">
+                  <div className="truncate text-[13px] font-bold" style={{ color: h.color }}>
+                    {h.name}
+                  </div>
+                  <div className="text-[10px] font-bold text-[var(--dim)]">{on ? "EQUIPPED" : `${h.cd}s cooldown`}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="anim-slideup relative flex flex-wrap items-center justify-center gap-3 text-sm font-bold tracking-wider text-[var(--dim)]" style={{ animationDelay: "160ms" }}>
         <span className="chip">BEST ROUND · {save.best}</span>
+        <span className="chip">ENDLESS · {save.bestEndless}</span>
         <span className="chip">VICTORIES · {save.wins}</span>
+        <span className="chip">RUNS · {save.runs}</span>
       </div>
       {save.lineup.length < 3 && (
-        <button className="btn text-sm" onClick={() => { sfx.click(); push("Add at least 3 towers to your lineup in the Tower tab", "#ffd23f"); }}>
+        <button
+          className="btn relative text-sm"
+          onClick={() => {
+            sfx.click();
+            push("Add at least 3 towers to your lineup in the Towers tab", "#ffd23f");
+          }}
+        >
           Lineup weak — visit Towers
         </button>
       )}
     </div>
+  );
+}
+
+function ModeCard({
+  accent,
+  title,
+  sub,
+  body,
+  onClick,
+  delay,
+  badge,
+}: {
+  accent: string;
+  title: string;
+  sub: string;
+  body: string;
+  onClick: () => void;
+  delay: string;
+  badge?: string;
+}) {
+  return (
+    <button
+      onClick={() => {
+        sfx.click();
+        onClick();
+      }}
+      className="panel anim-pop group relative overflow-hidden p-4 text-left transition-transform hover:-translate-y-0.5"
+      style={{ animationDelay: delay, borderColor: accent + "88" }}
+    >
+      <div
+        className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full opacity-30 transition-opacity group-hover:opacity-60"
+        style={{ background: `radial-gradient(circle, ${accent}, transparent 70%)` }}
+      />
+      {badge && (
+        <span
+          className="absolute right-2 top-2 rounded-md border px-1.5 py-0.5 text-[10px] font-bold tracking-wider"
+          style={{ borderColor: accent + "88", color: accent }}
+        >
+          {badge}
+        </span>
+      )}
+      <div className="font-disp relative text-2xl leading-none" style={{ color: accent }}>
+        {title}
+      </div>
+      <div className="relative mt-1 text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--dim)]">{sub}</div>
+      <p className="relative mt-2 text-[12px] font-semibold leading-snug text-[var(--txt)]/80">{body}</p>
+      <span
+        className="font-disp relative mt-3 inline-block rounded-lg px-4 py-1.5 text-[13px]"
+        style={{ background: accent, color: "#160e2e" }}
+      >
+        DEPLOY
+      </span>
+    </button>
   );
 }
 
