@@ -1,10 +1,13 @@
 import {
   DAILY_REWARDS,
+  GIFT_CODES,
   HERO_BY_ID,
   HERO_MAX_LEVEL,
   RARITY,
   TOWER_BY_ID,
   heroUpgradeCost,
+  normaliseCode,
+  type GiftCode,
   type Rarity,
 } from "./data";
 
@@ -44,6 +47,8 @@ export interface SaveData {
   lastSeen: number;
   /** arena zoom multiplier, 1 = fitted to the screen */
   zoom: number;
+  /** gift codes already redeemed (normalised form) */
+  redeemed: string[];
 }
 
 const KEY = "magictd_save_v1";
@@ -76,6 +81,7 @@ export function defaultSave(): SaveData {
     lastDaily: "",
     lastSeen: 0,
     zoom: 1.1,
+    redeemed: [],
   };
 }
 
@@ -90,6 +96,7 @@ export function importSave(raw: string): SaveData {
   s.zoom = clampZoom(s.zoom);
   s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
   s.dailyStreak = Number.isFinite(s.dailyStreak) ? Math.max(0, Math.min(7, s.dailyStreak)) : 0;
+  s.redeemed = Array.isArray(s.redeemed) ? s.redeemed.map(String) : [];
   return s;
 }
 
@@ -105,6 +112,7 @@ export function loadSave(): SaveData {
     s.zoom = clampZoom(s.zoom);
     s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
     s.dailyStreak = Number.isFinite(s.dailyStreak) ? Math.max(0, Math.min(7, s.dailyStreak)) : 0;
+    s.redeemed = Array.isArray(s.redeemed) ? s.redeemed.map(String) : [];
     return s;
   } catch {
     return defaultSave();
@@ -185,6 +193,54 @@ function rarityBias(rarity?: Rarity): number {
   if (rarity === "epic") return 0.5;
   if (rarity === "decent") return 0.2;
   return 0;
+}
+
+export type RedeemResult =
+  | { ok: true; code: string; label: string; summary: string; color: string }
+  | { ok: false; reason: "empty" | "unknown" | "used" };
+
+/**
+ * Redeem a gift code. Codes live in GIFT_CODES (src/game/data.ts) and each one
+ * can only be claimed once per save.
+ */
+export function redeemGiftCode(s: SaveData, raw: string, codes: Record<string, GiftCode> = GIFT_CODES): RedeemResult {
+  const code = normaliseCode(raw);
+  if (!code) return { ok: false, reason: "empty" };
+  if (s.redeemed.includes(code)) return { ok: false, reason: "used" };
+  const gift = Object.entries(codes).find(([key]) => normaliseCode(key) === code)?.[1];
+  if (!gift) return { ok: false, reason: "unknown" };
+
+  const bits: string[] = [];
+  if (gift.gold) {
+    s.gold += gift.gold;
+    bits.push(`${gift.gold} gold`);
+  }
+  if (gift.gems) {
+    s.gems += gift.gems;
+    bits.push(`${gift.gems} gems`);
+  }
+  if (gift.tokens) {
+    s.tokens += gift.tokens;
+    bits.push(`${gift.tokens} tokens`);
+  }
+  if (gift.frags) {
+    for (let i = 0; i < gift.frags.n; i++) addFrag(s, randFrag(rarityBias(gift.frags.rarity)), 1);
+    bits.push(`${gift.frags.n} ${gift.frags.rarity} fragments`);
+  }
+  gift.towers?.forEach((t) => {
+    if (!TOWER_BY_ID[t.id]) return;
+    addFrag(s, t.id, t.n);
+    bits.push(`${t.n} ${TOWER_BY_ID[t.id].name} fragments`);
+  });
+
+  s.redeemed = [...s.redeemed, code];
+  return {
+    ok: true,
+    code,
+    label: gift.label,
+    summary: bits.length ? bits.join(" · ") : "nothing but good vibes",
+    color: gift.frags ? RARITY[gift.frags.rarity].color : "#ffcf4d",
+  };
 }
 
 export function unlockedTowers(s: SaveData): string[] {

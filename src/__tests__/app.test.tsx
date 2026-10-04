@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import App from "../App";
+import Battle from "../screens/Battle";
 import { canvasStats, consoleErrors } from "./setup";
 import { defaultSave, persistSave, type SaveData } from "../game/save";
 
@@ -218,6 +219,30 @@ describe("Settings", () => {
     click(rowFor("Reduced Motion").querySelector("button")!);
     await waitFor(() => saved().reducedMotion === true, "reduced motion on");
     await waitFor(() => document.querySelector(".calm"), "calm class applied");
+
+    click(byText("button", "Close")!);
+    await waitFor(() => !byText("div", "Reset Progress"), "settings closed");
+    noErrors();
+  });
+
+  it("redeems a gift code and remembers it", async () => {
+    await mountApp();
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => byText("div", "GIFT CODES"), "settings modal");
+
+    const input = document.querySelector('input[aria-label="Gift code"]') as HTMLInputElement;
+    expect(input, "gift code input").toBeTruthy();
+    const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+
+    // boss codes ship empty, so an unknown code is refused without touching the save
+    const goldBefore = saved().gold;
+    setValue.call(input, "NOTACODE");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const redeem = all("button").find((b) => (b.textContent || "").trim() === "Redeem")!;
+    click(redeem);
+    await waitFor(() => document.querySelector('[data-testid="gift-msg"]'), "rejection message");
+    expect(document.querySelector('[data-testid="gift-msg"]')!.textContent).toContain("not valid");
+    expect(saved().gold).toBe(goldBefore);
 
     click(byText("button", "Close")!);
     await waitFor(() => !byText("div", "Reset Progress"), "settings closed");
@@ -542,22 +567,24 @@ describe("Battle", () => {
     expect(document.body.textContent).toContain("ROUND");
     expect(document.body.textContent).toContain("1/12");
 
-    // three lineup towers are already on the grid, shown on their HUD slots
+    // the field starts EMPTY now: the opening SP buys four summons
     const summon = byText("button", "SUMMON")!;
-    const slot0 = summon.parentElement!.children[0] as HTMLElement;
-    expect(slot0.querySelector(".badge-num")!.textContent).toBe("1");
-    await waitFor(() => slot0.querySelector('[class*="3dff8e"]'), "tower auto-deployed onto the grid");
     const tilesOnField = () => all("[data-slot]").filter((el) => el.textContent && !el.textContent.includes("EMPTY")).length;
-    const fieldBefore = tilesOnField();
+    expect(tilesOnField()).toBe(0);
 
-    // SUMMON drops a tower straight onto a random free cell - no dragging
     const spNow = () =>
       Number((document.querySelector('[data-testid="sp-chip"]')?.textContent || "").replace(/[^\d]/g, ""));
-    const spBefore = spNow();
-    click(summon);
-    await waitFor(() => spNow() < spBefore, "summon spent SP");
-    await waitFor(() => (document.body.textContent || "").includes("deployed!"), "summon toast");
-    await waitFor(() => tilesOnField() >= fieldBefore, "the new tower holds a slot");
+
+    for (let i = 0; i < 4; i++) {
+      const spBefore = spNow();
+      expect(spBefore, `enough SP for summon ${i + 1}`).toBeGreaterThanOrEqual(120);
+      click(summon);
+      await waitFor(() => spNow() < spBefore, `summon ${i + 1} spent SP`);
+      await waitFor(() => (document.body.textContent || "").includes("deployed!"), `summon ${i + 1} toast`);
+      await waitFor(() => tilesOnField() === i + 1, `tower ${i + 1} deployed onto the grid`);
+    }
+    // exactly four fit in the starting budget
+    expect(spNow()).toBeLessThan(120);
 
     // wave 1 begins ~7s after deploy phase starts
     const enemiesOut = await waitFor(() => {
@@ -572,6 +599,81 @@ describe("Battle", () => {
     await waitFor(() => byText("div", "Command Center"), "back home after abandoning");
     noErrors();
   });
+
+  it("moves the hero card to the bottom and shows a cooldown ring", async () => {
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+
+    const hero = document.querySelector('[data-testid="hero-card-battle"]') as HTMLElement;
+    expect(hero, "hero card").toBeTruthy();
+    // the card was moved from the middle of the arena down to the corner
+    expect(hero.className).toContain("bottom-3");
+    expect(hero.className).not.toContain("top-1/2");
+    // reworked cooldown: a two-part progress ring plus the countdown readout
+    expect(hero.querySelector('[data-testid="hero-ring"]'), "cooldown ring").toBeTruthy();
+    expect(hero.querySelector('[data-testid="hero-ring-track"]'), "ring track").toBeTruthy();
+    const circumference = 2 * Math.PI * 32;
+    expect(Number(hero.querySelector('[data-testid="hero-ring"]')!.getAttribute("stroke-dasharray"))).toBeCloseTo(circumference, 1);
+
+    // fire the skill, then the card flips into its cooldown state
+    click(hero);
+    await waitFor(() => (hero.textContent || "").includes("COOLDOWN"), "hero on cooldown");
+    expect(hero.className).not.toContain("hero-ready");
+
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  });
+
+  it("opens a boss cutscene, shows the boss bar and calls out its skills", async () => {
+    // mount the engine straight onto a boss round (4) so the cutscene is reachable
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    root.render(
+      <StrictMode>
+        <Battle mode="battle" save={defaultSave()} mutate={() => {}} onExit={() => {}} debugRound={4} />
+      </StrictMode>
+    );
+
+    const cut = await waitFor(
+      () => document.querySelector('[data-testid="boss-cutscene"]') as HTMLElement,
+      "boss cutscene",
+      15000
+    );
+    const text = cut.textContent || "";
+    expect(text).toContain("WARNING");
+    // the boss that leads an early round is the Warlord
+    expect(text).toContain("WARLORD");
+    expect(text).toContain("ROUND 4");
+    expect(text).toContain("TAP TO CONTINUE");
+    // its whole skill kit is advertised
+    for (const skill of ["Rift Call", "Void Step", "Bulwark", "Blood Frenzy"]) {
+      expect(text, skill).toContain(skill);
+    }
+
+    // tapping dismisses the card and the run resumes
+    click(cut);
+    await waitFor(() => !document.querySelector('[data-testid="boss-cutscene"]'), "cutscene dismissed", 8000);
+
+    // the boss then walks onto the path and the bar appears
+    const bar = await waitFor(() => document.querySelector('[data-testid="boss-bar"]'), "boss health bar", 15000);
+    expect(bar.textContent).toContain("WARLORD");
+
+    // a skill eventually fires and the callout banner names it
+    const cast = await waitFor(
+      () => document.querySelector('[data-testid="boss-cast"]') as HTMLElement,
+      "boss skill callout",
+      25000
+    );
+    // the banner shouts the skill name and explains what it does
+    expect(cast.textContent || "").toMatch(/RIFT CALL|VOID STEP|BULWARK|BLOOD FRENZY/);
+    expect(cast.textContent || "").toMatch(/warlord/i);
+
+    unmountApp();
+    noErrors();
+  }, 60000);
 
   it("zooms the arena in and out", async () => {
     await mountApp();
@@ -637,37 +739,57 @@ describe("Battle", () => {
     noErrors();
   });
 
-  it("ascends a tower by dragging the ascent token into its slot", async () => {
+  it("ascends every tower of the same type with one button press", async () => {
     await mountApp();
     startMode("Battle");
     await waitFor(() => byText("button", "SUMMON"), "battle HUD");
 
-    const token = document.querySelector('[data-testid="ascent-token"]') as HTMLElement;
-    expect(token, "ascent token exists").toBeTruthy();
-    expect(token.textContent).toContain("ASCENT");
-    const slot0 = document.querySelector('[data-slot="0"]') as HTMLElement;
-    expect(slot0.textContent).toContain("Lv 1/6");
+    const summon = byText("button", "SUMMON")!;
+    for (let i = 0; i < 4; i++) {
+      click(summon);
+      await sleep(90);
+    }
+    await waitFor(
+      () => all("[data-slot]").filter((el) => !(el.textContent || "").includes("EMPTY")).length === 4,
+      "four towers deployed"
+    );
 
-    // drag the token from the tray into slot 0
-    const rect = { left: 100, top: 700, right: 200, bottom: 760, width: 100, height: 60, x: 100, y: 700, toJSON: () => ({}) };
-    slot0.getBoundingClientRect = () => rect as DOMRect;
-    // the SP readout chip (SUMMON and the ascent token also show an "SP <cost>" label)
-    const spNow = () => {
-      const chip = document.querySelector('[data-testid="sp-chip"]');
-      return Number((chip?.textContent || "").replace(/[^\d]/g, ""));
-    };
+    // the drag token is gone — each slot owns its own ascend button
+    expect(document.querySelector('[data-testid="ascent-token"]')).toBeNull();
+    const btn0 = () => document.querySelector('[data-testid="ascend-0"]') as HTMLButtonElement;
+    expect(btn0(), "ascent button on slot 0").toBeTruthy();
+    expect(btn0().textContent).toContain("ASCENT");
+    // the opening SP all went into the four summons, so the button locks out
+    expect(btn0().disabled).toBe(true);
+
+    // stock up from the run shop (Mana Battery: 60 gold -> +150 SP)
+    click(document.querySelector('[data-testid="battle-shop"]') as HTMLElement);
+    const shop = await waitFor(
+      () => document.querySelector('[data-testid="run-shop"]') as HTMLElement,
+      "run shop modal"
+    );
+    click(Array.from(shop.querySelectorAll("button")).find((b) => (b.textContent || "").includes("60"))!);
+    await waitFor(() => !btn0().disabled, "ascent affordable again");
+    click(byText("button", "Back to battle")!);
+    await waitFor(() => !document.querySelector('[data-testid="run-shop"]'), "shop closed");
+
+    const spNow = () =>
+      Number((document.querySelector('[data-testid="sp-chip"]')?.textContent || "").replace(/[^\d]/g, ""));
     const spBefore = spNow();
-    expect(spBefore).toBeGreaterThan(0);
 
-    pointer("pointerdown", token, 20, 720);
-    pointer("pointermove", window, 150, 730);
-    pointer("pointerup", window, 150, 730);
-
-    await waitFor(() => (document.querySelector('[data-slot="0"]') as HTMLElement).textContent?.includes("Lv 2/6"), "tower ascended to battle level 2");
+    click(btn0());
+    await waitFor(
+      () => ((document.querySelector('[data-slot="0"]') as HTMLElement).textContent || "").includes("Lv 2/6"),
+      "slot 0 ascended"
+    );
     expect(spNow()).toBeLessThan(spBefore);
 
-    // the token is not a per-slot button any more: slots hold no button element
-    expect(slot0.querySelector("button")).toBeNull();
+    // every deployed copy of that tower type moved up together
+    const name = ((document.querySelector('[data-slot="0"]') as HTMLElement).textContent || "").split("Lv")[0].trim();
+    for (const slot of all("[data-slot]")) {
+      const text = slot.textContent || "";
+      if (name && text.includes(name) && !text.includes("EMPTY")) expect(text).toContain("Lv 2/6");
+    }
 
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
@@ -679,20 +801,23 @@ describe("Battle", () => {
     startMode("Battle");
     await waitFor(() => byText("button", "SUMMON"), "battle HUD");
 
-    const token = document.querySelector('[data-testid="ascent-token"]') as HTMLElement;
-    const slot0 = () => document.querySelector('[data-slot="0"]') as HTMLElement;
-    const rect = { left: 100, top: 700, right: 200, bottom: 760, width: 100, height: 60, x: 100, y: 700, toJSON: () => ({}) };
-    slot0().getBoundingClientRect = () => rect as DOMRect;
-
-    // SP starts at 200 and each ascent costs 120 + 75 per purchase; do the ones we can afford
-    for (let i = 0; i < 5; i++) {
-      pointer("pointerdown", token, 20, 720);
-      pointer("pointermove", window, 150, 730);
-      pointer("pointerup", window, 150, 730);
-      await sleep(60);
+    const summon = byText("button", "SUMMON")!;
+    for (let i = 0; i < 3; i++) {
+      click(summon);
+      await sleep(90);
     }
-    const lvl = slot0().textContent || "";
-    expect(lvl).toMatch(/Lv [2-6]\/6/);
+    await waitFor(() => document.querySelector('[data-testid="ascend-0"]'), "ascent button");
+
+    const slot0 = () => document.querySelector('[data-slot="0"]') as HTMLElement;
+    // press while affordable — SP is the only limiter
+    for (let i = 0; i < 8; i++) {
+      const btn = document.querySelector('[data-testid="ascend-0"]') as HTMLButtonElement;
+      if (!btn || btn.disabled) break;
+      click(btn);
+      await sleep(80);
+    }
+    expect(slot0().textContent || "").toMatch(/Lv [2-6]\/6/);
     noErrors();
   });
+
 });

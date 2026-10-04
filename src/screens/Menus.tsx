@@ -9,6 +9,7 @@ import {
   claimDailyReward,
   heroLevel,
   nextDailyStreak,
+  redeemGiftCode,
   upgradeHero,
 } from "../game/save";
 import { sfx, setVolume } from "../game/audio";
@@ -24,6 +25,39 @@ import {
   heroPower,
   heroUpgradeCost,
 } from "../game/data";
+
+/**
+ * PWA install prompt. Chrome/Edge fire `beforeinstallprompt`; we stash it so the
+ * Settings row can trigger the real install flow on demand. Safari never fires
+ * it, in which case the row explains the Share -> Add to Home Screen route.
+ */
+interface InstallPrompt extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: string }>;
+}
+function useInstallPrompt() {
+  const [promptEvent, setPromptEvent] = useState<InstallPrompt | null>(null);
+  const [installed, setInstalled] = useState(
+    () => typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches
+  );
+  useEffect(() => {
+    const onPrompt = (e: Event) => {
+      e.preventDefault();
+      setPromptEvent(e as InstallPrompt);
+    };
+    const onInstalled = () => {
+      setInstalled(true);
+      setPromptEvent(null);
+    };
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+  return { promptEvent, installed };
+}
 
 const LOAD_STEPS = [
   "Charging the mana lattice",
@@ -548,6 +582,9 @@ export function SettingsModal({
   const [copied, setCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const [giftCode, setGiftCode] = useState("");
+  const [giftMsg, setGiftMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const { promptEvent, installed } = useInstallPrompt();
   const diagnostics = () => {
     const w = window as unknown as { __magictdBootErrors?: string[]; __magictdLastError?: string };
     return [
@@ -617,6 +654,95 @@ export function SettingsModal({
             </button>
           </div>
         ))}
+      </div>
+
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">APP</div>
+      <div className="mt-1.5 flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+        <div>
+          <div className="font-bold">Install App</div>
+          <div className="text-xs font-semibold text-[var(--dim)]">
+            {installed
+              ? "Running as an installed app — nice"
+              : promptEvent
+                ? "Add MagicTD to your home screen and play offline"
+                : "Use your browser menu → Add to Home Screen"}
+          </div>
+        </div>
+        <button
+          data-testid="install-app"
+          className="btn btn-cyan shrink-0 px-4 py-1.5 text-sm"
+          disabled={installed || !promptEvent}
+          onClick={() => {
+            sfx.click();
+            promptEvent?.prompt();
+          }}
+        >
+          {installed ? "Installed" : "Install"}
+        </button>
+      </div>
+
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">GIFT CODES</div>
+      <div className="mt-1.5 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+        <div className="font-bold">Redeem a code</div>
+        <div className="text-xs font-semibold text-[var(--dim)]">
+          Codes are announced on our socials — each one works once per save.
+        </div>
+        <div className="mt-2 flex gap-2">
+          <input
+            value={giftCode}
+            onChange={(e) => {
+              setGiftCode(e.target.value);
+              setGiftMsg(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") (e.currentTarget.nextElementSibling as HTMLButtonElement)?.click();
+            }}
+            placeholder="ENTER CODE"
+            aria-label="Gift code"
+            className="min-w-0 flex-1 rounded-md border border-[var(--line)] bg-black/50 px-3 py-2 text-sm font-bold tracking-[0.15em] text-[var(--txt)] uppercase outline-none placeholder:text-[var(--line2)] focus:border-[var(--cyan)]"
+          />
+          <button
+            className="btn btn-cyan shrink-0 px-4 py-2 text-sm"
+            disabled={!giftCode.trim()}
+            onClick={() => {
+              // redeem on a copy first so the UI can report the outcome immediately
+              const next: SaveData = JSON.parse(JSON.stringify(save));
+              const r = redeemGiftCode(next, giftCode);
+              if (r.ok) {
+                persistSave(next);
+                mutate((s) => {
+                  Object.assign(s, next);
+                });
+                sfx.gem();
+                setGiftCode("");
+                setGiftMsg({ ok: true, text: `${r.label} · ${r.summary}` });
+              } else {
+                sfx.error();
+                setGiftMsg({
+                  ok: false,
+                  text: r.reason === "used" ? "That code was already used on this save" : "That code is not valid",
+                });
+              }
+            }}
+          >
+            Redeem
+          </button>
+        </div>
+        {giftMsg && (
+          <div
+            data-testid="gift-msg"
+            className="mt-2 text-xs font-bold"
+            style={{ color: giftMsg.ok ? "#3dff8e" : "#ff4d5e" }}
+          >
+            {giftMsg.ok ? "✓ " : "✕ "}
+            {giftMsg.text}
+          </div>
+        )}
+        {save.redeemed.length > 0 && (
+          <div className="mt-2 text-[11px] font-semibold text-[var(--dim)]">
+            Redeemed so far: {save.redeemed.join(", ")}
+          </div>
+        )}
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">SAVE DATA</div>

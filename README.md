@@ -48,13 +48,35 @@ Pick a mode from the **Command Center**:
 | **Endless** | no limit | Score attack: survive as long as possible. Rewards scale with your depth — gold grows quadratically, gems every 3 waves, a token every 5. |
 
 **Enemies get 57% stronger every wave** (×1.57 per wave, compounding), and both the wave banner
-and the HUD show the current multiplier. Your towers keep up because their damage grows
+and the HUD show the current multiplier. Each wave holds two more enemies than it used to, and
+every round-clear payout (gold + gems) was raised 40%.
+
+### Bosses
+
+Every 4th round a boss leads the wave in:
+
+| Boss | Onset | Notes |
+| --- | --- | --- |
+| **Warlord** | rounds 4, 8, 12… | 5 lives, 15× HP, 20% armour |
+| **Rift Overlord** | round 16+ every 4th | 8 lives, 26× HP, 28% armour, purple |
+
+Bosses arrive with a **cutscene** (WARNING card, name, round, skill kit — tap to continue; the sim
+holds while it plays), then fight with a **health bar** and four skills, each announced in the arena:
+
+| Skill | Effect |
+| --- | --- |
+| **Rift Call** | summons a pack of minions behind itself |
+| **Void Step** | blinks a chunk of the path forward |
+| **Bulwark** | shields itself (45% damage taken) for 3.4s |
+| **Blood Frenzy** | below 45% HP: +45% speed, ember aura, heavy burst | Your towers keep up because their damage grows
 multiplicatively: each battle level multiplies damage ×1.55, each point +30%, and Power Plant /
 S-Speaker auras multiply on top.
 
 ### Heroes
 
-Equip one hero on the Command Center; its ability is the hero card in the top-right of the arena.
+Equip one hero on the Command Center; its ability is the hero card in the **bottom-right** of the
+arena, wrapped in a sweeping cooldown ring (the portrait dims and the ring drains while the skill
+recharges, then pulses green with a READY ping).
 Heroes level up to 10 with gold — each level adds 30% ability power and shaves 3% off the cooldown
 (floored at 60%).
 
@@ -87,6 +109,20 @@ Heroes level up to 10 with gold — each level adds 30% ability power and shaves
   volume and save export/import.
 - Enemies leak toward the portal on the right and cost lives (20); at 0 lives the run ends.
   Winning a run banks gold, gems and fragments.
+
+### Summoning and ascent
+
+The battlefield starts **empty**. You get enough SP at the start of a run to summon exactly
+**four towers** (120 / 195 / 270 / 345 SP), and each summon is paid for out of that pool before the
+first wave arrives. Towers are never placed for free, and **towers no longer earn points on their
+own** — points only come from merging two equally levelled towers or buying Point Surge in the run
+shop.
+
+**Ascent is a button, not a drag.** Every deployed tower card in the bottom bar carries its own
+`ASCENT` button (showing the SP price and how many copies it will upgrade). One press upgrades
+**every deployed tower of that same type at once**, so a family always shares one battle level.
+Summoning and ascending have separate SP price ladders, so spamming summons never price-gouges
+your upgrades.
 
 ## Progression
 
@@ -132,6 +168,35 @@ Heroes level up to 10 with gold — each level adds 30% ability power and shaves
 | Dragon's Maw | Legendary | Heavy splash + burn; every kill stacks damage (exotic: Inferno Roar, Molten Carapace) |
 | Sunforge | Legendary | Hits the whole field with burning flares (exotic: Supernova, Solar Wind) |
 
+## Gift codes
+
+Players redeem codes in **Settings → GIFT CODES** (they are matched ignoring case, spaces and
+dashes, and each code can only be used once per save).
+
+Codes are **not** shipped by default — you add your own rows to `GIFT_CODES` in
+`src/game/data.ts` and rebuild:
+
+```ts
+export const GIFT_CODES: Record<string, GiftCode> = {
+  LAUNCHDAY: { label: "Launch day cache", gold: 1000, gems: 10, tokens: 2 },
+  THUNDER:   { label: "Thunder God blessing", frags: { rarity: "epic", n: 4 }, gems: 3 },
+  ARROWHAND: { label: "Arrow hand-out", towers: [{ id: "arrow", n: 10 }] },
+};
+```
+
+Every field is optional: `gold`, `gems`, `tokens`, `frags: { rarity, n }` (random fragments of a
+rarity) and `towers: [{ id, n }]` (fragments for a named tower). `label` shows up in the
+confirmation toast. Redeemed codes are stored in `save.redeemed` and listed under the input.
+
+## PWA
+
+MagicTD is installable. `public/manifest.webmanifest` + `public/sw.js` + the icon set are mirrored
+to the repo root by `npm run build` (Pages serves the branch root), the service worker caches the
+shell for offline play, and **Settings → APP → Install** is wired to the browser's install prompt.
+The favicon/app icons are the pastel MagicCloud artwork (cloud mascot, wizard hat, castle) —
+replace `public/icons/icon-*.png` (192/512) plus `icon-maskable-512.png`, `apple-touch-icon.png`
+and `favicon-64.png` to change them.
+
 ## Layout
 
 ```
@@ -149,7 +214,8 @@ src/
   __tests__/           vitest suite: data, app integration, deployed artifact
 app.html               Vite entry (edit this)
 index.html             generated build served by GitHub Pages (do not edit)
-scripts/sync-pages.mjs publishes dist/app.html to the repo root
+public/                manifest, service worker and app icons (mirrored to the root by the build)
+scripts/sync-pages.mjs publishes dist/app.html + the PWA assets to the repo root
 ```
 
 ## Tests
@@ -159,8 +225,11 @@ loading → every tab, settings toggles + reset persistence, buying/opening/coll
 trading gold for fragments and gems for tokens, previewing + upgrading towers, waking a tower with
 a congratulations ceremony, claiming the daily streak, upgrading a hero, zooming the arena, and a
 battle run that summons towers onto the grid, buys from the run shop, spawns wave 1 and abandons.
-It also guards the save-file helpers, tower/wave/cost formulas and the committed `index.html`
-artifact end-to-end, so a broken or missing build cannot reach the published site.
+It also covers the reworked balance (4-summon opening budget, +2 enemies per wave, +40% payouts),
+the boss kit and the new boss cutscene/health bar/skill banners, gift-code redemption, the ascent
+buttons, the moved hero card with its cooldown ring, the save-file helpers, tower/wave/cost
+formulas and the committed `index.html` artifact (including its PWA plumbing) end-to-end, so a
+broken or missing build cannot reach the published site.
 
 ## Deployment
 

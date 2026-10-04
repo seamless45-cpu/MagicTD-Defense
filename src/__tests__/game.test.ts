@@ -27,6 +27,16 @@ import {
   type GameMode,
   HEROES,
   HERO_BY_ID,
+  MAX_POINTS,
+  SPAWN_BUDGET_TOWERS,
+  REWARD_MUL,
+  spCost,
+  spawnBudget,
+  reward,
+  isBossType,
+  BOSS_SKILLS,
+  GIFT_CODES,
+  normaliseCode,
 } from "../game/data";
 import {
   defaultSave,
@@ -46,6 +56,7 @@ import {
   clampZoom,
   ZOOM_MAX,
   ZOOM_MIN,
+  redeemGiftCode,
 } from "../game/save";
 
 describe("tower data", () => {
@@ -389,5 +400,123 @@ describe("save file", () => {
 
   it("todayStr is an iso date", () => {
     expect(todayStr()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("balance patch", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("scales the starting SP to exactly four summons", () => {
+    expect(SPAWN_BUDGET_TOWERS).toBe(4);
+    const opening = spawnBudget();
+    expect(opening).toBe(spCost(0) + spCost(1) + spCost(2) + spCost(3));
+    // a fifth summon is out of reach until round rewards land
+    expect(opening).toBeLessThan(spCost(0) + spCost(1) + spCost(2) + spCost(3) + spCost(4));
+  });
+
+  it("gives each wave two more enemies than before", () => {
+    // was min(44, 6 + round * 2); wave 1 must now hold 10 bodies
+    const wave1 = waveComp(1);
+    expect(wave1.length).toBe(10);
+    expect(waveComp(3).length).toBe(14);
+    expect(waveComp(40).length).toBeGreaterThanOrEqual(46);
+  });
+
+  it("pays 40% more gold and gems for clearing rounds", () => {
+    expect(REWARD_MUL).toBeCloseTo(1.4);
+    expect(reward(100)).toBe(140);
+    expect(reward(10)).toBe(14);
+    // the round-clear payout uses the same multiplier
+    const oldBonus = 40 + 10 * 5;
+    expect(reward(oldBonus / 2)).toBe(Math.round((oldBonus / 2) * 1.4));
+  });
+
+  it("never grants points without a deliberate spend", () => {
+    // only the Point Surge run-shop item and merging hand out points now
+    const pointSources = RUN_SHOP.filter((i) => i.id === "points");
+    expect(pointSources).toHaveLength(1);
+    expect(MAX_POINTS).toBeGreaterThan(0);
+  });
+});
+
+describe("bosses", () => {
+  it("introduces a rift-tier boss and keeps every type well formed", () => {
+    expect(isBossType(4)).toBe(true);
+    expect(isBossType(5)).toBe(true);
+    expect(isBossType(3)).toBe(false);
+    const overlord = ENEMY_TYPES[5];
+    expect(overlord.name).toBe("Rift Overlord");
+    expect(overlord.hpMul).toBeGreaterThan(ENEMY_TYPES[4].hpMul);
+    expect(overlord.lives).toBeGreaterThan(ENEMY_TYPES[4].lives);
+  });
+
+  it("gives bosses a full skill kit", () => {
+    expect(BOSS_SKILLS.map((s) => s.id).sort()).toEqual(["blink", "enrage", "summon", "ward"]);
+    for (const sk of BOSS_SKILLS) {
+      expect(sk.name.length).toBeGreaterThan(2);
+      expect(sk.tell.length).toBeGreaterThan(5);
+    }
+  });
+
+  it("spawns a tougher boss on the late every-4th wave", () => {
+    // stochastic comp — sample a few times and look for the upgraded boss
+    let sawOverlord = false;
+    for (let i = 0; i < 40; i++) {
+      const comp = waveComp(16);
+      const bosses = comp.filter(isBossType);
+      expect(bosses.length).toBeGreaterThanOrEqual(2);
+      if (bosses.includes(5)) sawOverlord = true;
+    }
+    expect(sawOverlord).toBe(true);
+    expect(waveComp(3).filter(isBossType)).toHaveLength(0);
+    expect(waveComp(4).filter(isBossType).length).toBeGreaterThan(0);
+  });
+});
+
+describe("gift codes", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("normalises whatever the player pastes", () => {
+    expect(normaliseCode("  magic-td ")).toBe("MAGICTD");
+    expect(normaliseCode("MAGIC_TD")).toBe("MAGICTD");
+    expect(normaliseCode("magic td")).toBe("MAGICTD");
+  });
+
+  it("rejects empty, unknown and already-used codes", () => {
+    const s = defaultSave();
+    expect(redeemGiftCode(s, "   ")).toEqual({ ok: false, reason: "empty" });
+    expect(redeemGiftCode(s, "NOPE")).toEqual({ ok: false, reason: "unknown" });
+
+    const codes = { TESTCODE: { label: "Test cache", gold: 500, gems: 3 } };
+    const first = redeemGiftCode(s, "test-code", codes);
+    expect(first.ok).toBe(true);
+    if (first.ok) expect(first.summary).toContain("500 gold");
+    expect(s.gold).toBe(defaultSave().gold + 500);
+    expect(s.gems).toBe(3);
+    expect(redeemGiftCode(s, "TESTCODE", codes)).toEqual({ ok: false, reason: "used" });
+  });
+
+  it("grants named towers and rarity fragments", () => {
+    const s = defaultSave();
+    const codes = {
+      FRAGS: { label: "Fragment drop", frags: { rarity: "decent" as const, n: 4 } },
+      TOWER: { label: "Arrow gift", towers: [{ id: "arrow", n: 7 }] },
+    };
+    const before = Object.values(s.frags).reduce((a, b) => a + b, 0);
+    const f = redeemGiftCode(s, "FRAGS", codes);
+    expect(f.ok).toBe(true);
+    expect(Object.values(s.frags).reduce((a, b) => a + b, 0)).toBe(before + 4);
+
+    redeemGiftCode(s, "TOWER", codes);
+    expect(s.frags.arrow).toBe(defaultSave().frags.arrow + 7);
+    expect(s.redeemed).toEqual(["FRAGS", "TOWER"]);
+  });
+
+  it("ships with an empty starter table so codes are added deliberately", () => {
+    expect(Object.keys(GIFT_CODES)).toHaveLength(0);
   });
 });

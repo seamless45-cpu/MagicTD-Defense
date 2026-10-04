@@ -399,6 +399,30 @@ export const MAX_POINTS = 8;
 export const SP_BASE_COST = 120;
 export const SP_COST_STEP = 75;
 
+/**
+ * Towers never earn points on their own — the only sources are the Point Surge
+ * run-shop item and merging two equally-levelled towers.
+ */
+
+/** How many towers a run starts able to summon (paid for out of the starting SP). */
+export const SPAWN_BUDGET_TOWERS = 4;
+
+/** SP price of one summon, given how many summons were already bought this run. */
+export function spCost(spend: number) {
+  return SP_BASE_COST + SP_COST_STEP * spend;
+}
+
+/** Starting SP: exactly enough for `n` summons, so 4 towers deploy before wave 1. */
+export function spawnBudget(n = SPAWN_BUDGET_TOWERS) {
+  let total = 0;
+  for (let i = 0; i < n; i++) total += spCost(i);
+  return total;
+}
+
+/** Round-clear and end-of-run payouts are scaled by this (balance patch: +40%). */
+export const REWARD_MUL = 1.4;
+export const reward = (v: number) => Math.round(v * REWARD_MUL);
+
 /** Enemies get 57% stronger every wave - the game's difficulty curve. */
 export const HP_GROWTH = 1.57;
 
@@ -582,7 +606,33 @@ export const ENEMY_TYPES: EnemyType[] = [
   { name: "Knight", color: "#8fb0ff", hpMul: 1.7, speed: 46, r: 16, armor: 0.35, lives: 2, gold: 4 },
   { name: "Mage", color: "#d06bff", hpMul: 1.25, speed: 52, r: 14, armor: 0.15, lives: 2, gold: 5 },
   { name: "Warlord", color: "#ff5d5d", hpMul: 15, speed: 34, r: 27, armor: 0.2, lives: 5, gold: 30 },
+  { name: "Rift Overlord", color: "#7b2cff", hpMul: 26, speed: 30, r: 31, armor: 0.28, lives: 8, gold: 65 },
 ];
+
+/** types 4+ are bosses: they get a cutscene, a health bar and skills */
+export const BOSS_TYPE = 4;
+export const isBossType = (type: number) => type >= BOSS_TYPE;
+
+export interface BossSkillRow {
+  id: "summon" | "blink" | "enrage" | "ward";
+  name: string;
+  tell: string;
+  color: string;
+}
+
+/** Skill kit shown on the boss bar and called out in the arena when it fires. */
+export const BOSS_SKILLS: BossSkillRow[] = [
+  { id: "summon", name: "Rift Call", tell: "calls minions through the rift", color: "#c44dff" },
+  { id: "blink", name: "Void Step", tell: "blinks down the path", color: "#35e0ff" },
+  { id: "ward", name: "Bulwark", tell: "shields itself for a moment", color: "#8fb0ff" },
+  { id: "enrage", name: "Blood Frenzy", tell: "enrages below 45% health", color: "#ff4d5e" },
+];
+
+export const BOSS_SUMMON_CD = 11;
+export const BOSS_BLINK_CD = 9;
+export const BOSS_WARD_CD = 14;
+export const BOSS_WARD_TIME = 3.4;
+export const BOSS_ENRAGE_AT = 0.45;
 
 export function roundHp(round: number) {
   return 46 * Math.pow(HP_GROWTH, round - 1);
@@ -590,7 +640,8 @@ export function roundHp(round: number) {
 
 export function waveComp(round: number): number[] {
   const out: number[] = [];
-  const n = Math.min(44, 6 + round * 2);
+  // balance patch: two more enemies every wave, capped at 46
+  const n = Math.min(46, 8 + round * 2);
   for (let i = 0; i < n; i++) {
     let t = 0;
     const roll = Math.random();
@@ -600,7 +651,7 @@ export function waveComp(round: number): number[] {
     out.push(t);
   }
   // boss every 4th wave, and a second one once the waves get long
-  if (round % 4 === 0) out.push(4);
+  if (round % 4 === 0) out.push(round >= 16 ? 5 : 4);
   if (round >= 16 && round % 4 === 0) out.push(4);
   return out;
 }
@@ -720,3 +771,35 @@ export const CHESTS = [
   { id: "legendary", name: "Legendary Chest", cost: 60, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12] },
 ] as const;
 
+
+// ---------- gift codes ----------
+/**
+ * Gift codes are redeemed from Settings → Gift Codes. The key is what a player
+ * types; matching ignores case, spaces and dashes, so "MAGIC-TD" and "magictd"
+ * are the same code.
+ *
+ * Codes are intentionally NOT shipped by default — add your own rows to the
+ * object below and they go live in the next build. `frags` rolls random towers
+ * of the given rarity, `towers` grants named towers directly.
+ */
+export interface GiftCode {
+  /** shown in the "code accepted" toast */
+  label: string;
+  gold?: number;
+  gems?: number;
+  tokens?: number;
+  /** random tower fragments of a rarity */
+  frags?: { rarity: Rarity; n: number };
+  /** specific tower ids with a fragment count */
+  towers?: { id: string; n: number }[];
+}
+
+export const GIFT_CODES: Record<string, GiftCode> = {
+  // ── add your codes here, e.g. ─────────────────────────────────────────────
+  // "LAUNCHDAY": { label: "Launch day cache", gold: 1000, gems: 10, tokens: 2 },
+  // "THUNDER": { label: "Thunder God blessing", frags: { rarity: "epic", n: 4 }, gems: 3 },
+  // ──────────────────────────────────────────────────────────────────────────
+};
+
+/** normalise player input so spacing / casing / dashes never matter */
+export const normaliseCode = (raw: string) => raw.trim().toUpperCase().replace(/[\s_-]+/g, "");

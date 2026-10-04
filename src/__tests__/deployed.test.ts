@@ -7,7 +7,7 @@
  * missing/partial build before it reaches players.
  */
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { JSDOM, VirtualConsole } from "jsdom";
 
 const PUBLISHED = "index.html";
@@ -22,6 +22,22 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("published build (index.html)", () => {
   const html = readFileSync(PUBLISHED, "utf8");
+
+  it("ships the PWA plumbing (manifest, icons, service worker)", () => {
+    expect(html).toContain('link("manifest", "manifest.webmanifest")');
+    expect(html).toContain('link("apple-touch-icon", "icons/apple-touch-icon.png")');
+    expect(html).toContain('new URL("sw.js", document.baseURI)');
+    expect(html).toContain('"serviceWorker" in navigator');
+    // the worker and icon set are published next to the page
+    const manifest = JSON.parse(readFileSync("manifest.webmanifest", "utf8"));
+    expect(manifest.name).toBe("MagicTD Defense");
+    expect(manifest.icons.map((i: { sizes: string }) => i.sizes)).toContain("512x512");
+    for (const icon of manifest.icons) {
+      expect(existsSync(icon.src.replace("./", "")), icon.src).toBe(true);
+    }
+    expect(existsSync("sw.js")).toBe(true);
+    expect(existsSync("icons/icon-192.png")).toBe(true);
+  });
 
   it("is self-contained: no external script or local stylesheet references", () => {
     expect(html).toContain("MagicTD");
@@ -69,6 +85,10 @@ describe("published build (index.html)", () => {
       "Toxic Sprayer",
       "CONGRATULATIONS",
       "BATTLE LINEUP",
+      "GIFT CODES",
+      "Install App",
+      "ASCENT",
+      "Rift Overlord",
     ];
     const missing = markers.filter((m) => !html.includes(m));
     expect(missing, `published bundle is missing: ${missing.join(", ")}`).toHaveLength(0);

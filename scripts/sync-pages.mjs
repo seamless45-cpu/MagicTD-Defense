@@ -7,7 +7,7 @@
  *   dist/app.html  -> dist/index.html   (so `npm run preview` works at "/")
  *   dist/app.html  -> ./index.html      (what GitHub Pages serves)
  */
-import { copyFileSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { copyFileSync, readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,8 +41,30 @@ if (!html.includes("GENERATED FILE - do not edit")) {
   html = html.replace(/(<!doctype html>)/i, `$1\n${marker}`);
 }
 
+/**
+ * Pages serves this branch's root, so the PWA assets have to live there too
+ * (vite already copies public/ into dist/ for `npm run preview`).
+ */
+function mirrorDir(from, to) {
+  if (!existsSync(from)) return 0;
+  mkdirSync(to, { recursive: true });
+  let n = 0;
+  for (const entry of readdirSync(from)) {
+    const src = path.join(from, entry);
+    const dst = path.join(to, entry);
+    if (statSync(src).isDirectory()) n += mirrorDir(src, dst);
+    else {
+      copyFileSync(src, dst);
+      n++;
+    }
+  }
+  return n;
+}
+const copied = mirrorDir(path.join(root, "public"), root);
+
 copyFileSync(built, path.join(root, "dist", "index.html"));
 writeFileSync(path.join(root, "index.html"), html);
 console.log(
-  `sync-pages: wrote dist/index.html and index.html (${(html.length / 1024).toFixed(1)} kB) - GitHub Pages ready`
+  `sync-pages: wrote dist/index.html and index.html (${(html.length / 1024).toFixed(1)} kB)` +
+    ` + ${copied} PWA asset${copied === 1 ? "" : "s"} - GitHub Pages ready`
 );

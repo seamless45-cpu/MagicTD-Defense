@@ -739,3 +739,169 @@ body,
     animation: none !important;
   }
 }
+
+/* ---------- battle: ascent buttons, hero cooldown, boss ---------- */
+.ascend-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  border-radius: 9px;
+  border: 2px solid #3a2c74;
+  background: rgba(8, 5, 26, 0.75);
+  color: var(--dim);
+  font-family: "Rajdhani", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  cursor: not-allowed;
+  transition: transform 0.1s ease, filter 0.12s ease;
+}
+.ascend-btn b {
+  font-weight: 700;
+  color: #ffe9b0;
+  font-size: 10px;
+}
+.ascend-btn.on {
+  border-color: #ffcf4d;
+  color: #2c1a00;
+  background: linear-gradient(180deg, #ffd76a, #f59f00);
+  box-shadow: 0 2px 0 #8a5200;
+  cursor: pointer;
+}
+.ascend-btn.on b {
+  color: #4a2c00;
+}
+.ascend-btn.on:hover {
+  filter: brightness(1.08);
+}
+.ascend-btn.on:active {
+  transform: translateY(2px);
+  box-shadow: none;
+}
+
+/* hero card: cooldown ring + ready pulse */
+.hero-ready {
+  animation: heroReady 1.9s ease-in-out infinite;
+}
+@keyframes heroReady {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.02);
+  }
+}
+.hero-ping {
+  border: 2px solid #3dff8e;
+  animation: heroPing 1.8s ease-out infinite;
+}
+@keyframes heroPing {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(1.35);
+    opacity: 0;
+  }
+}
+.hero-cooling {
+  animation: heroCool 2.4s ease-in-out infinite;
+}
+@keyframes heroCool {
+  0%,
+  100% {
+    filter: brightness(0.85);
+  }
+  50% {
+    filter: brightness(1.1);
+  }
+}
+
+/* boss presentation */
+.boss-bar {
+  transition: width 140ms linear;
+}
+.boss-bar-rage {
+  transition: width 140ms linear;
+  animation: bossRage 0.55s ease-in-out infinite;
+}
+@keyframes bossRage {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(1.5) saturate(1.3);
+  }
+}
+.boss-backdrop {
+  background:
+    radial-gradient(circle at 50% 55%, rgba(123, 44, 255, 0.35), transparent 60%),
+    linear-gradient(180deg, rgba(6, 3, 18, 0.94), rgba(6, 3, 18, 0.8));
+  animation: fadeIn 0.35s ease both;
+}
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.boss-cut-in {
+  animation: bossCutIn 0.55s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes bossCutIn {
+  0% {
+    transform: scale(0.7) translateY(24px);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.04) translateY(-4px);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) translateY(0);
+  }
+}
+.boss-cut-ring {
+  border-radius: 999px;
+  border: 3px solid #ffcf4d;
+  animation: bossCutRing 1.8s ease-out infinite;
+}
+@keyframes bossCutRing {
+  0% {
+    transform: scale(0.35);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+.boss-cast {
+  animation: bossCast 2.2s ease-out both;
+}
+@keyframes bossCast {
+  0% {
+    transform: translate(-50%, 14px) scale(0.85);
+    opacity: 0;
+  }
+  12%,
+  78% {
+    transform: translate(-50%, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(-50%, -10px) scale(0.96);
+    opacity: 0;
+  }
+}

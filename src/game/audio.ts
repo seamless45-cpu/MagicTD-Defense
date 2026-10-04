@@ -133,6 +133,18 @@ export const sfx = {
     noise(0.4, 0.35, 1400);
     tone(180, 0.35, "sawtooth", 0.3, 700);
   },
+  /** sharp hit that lands with the big crit number */
+  crit: () => {
+    if (performance.now() - lastShot < 55) return;
+    tone(1500, 0.05, "square", 0.18, -600);
+    noise(0.06, 0.12, 2600);
+  },
+  /** the boss walks in */
+  boss: () => {
+    tone(110, 0.7, "sawtooth", 0.32, 40);
+    tone(165, 0.6, "square", 0.2, 30, 0.18);
+    noise(0.6, 0.22, 320);
+  },
   awaken: () => {
     [660, 880, 1100, 1320].forEach((f, i) => tone(f, 0.15, "sine", 0.25, 0, i * 0.06));
     noise(0.3, 0.15, 2000);
