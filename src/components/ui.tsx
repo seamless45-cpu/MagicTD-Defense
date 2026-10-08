@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { TowerDef } from "../game/data";
-import { RARITY, towerArt } from "../game/data";
+import type { ChipId, TowerDef } from "../game/data";
+import { HERO_BY_ID, RARITY, TOWER_BY_ID, leagueFor, towerArt } from "../game/data";
+import type { RewardLine } from "../game/save";
 
 export function CoinIcon({ size = 18 }: { size?: number }) {
   return (
@@ -28,17 +29,102 @@ export function TokenIcon({ size = 18 }: { size?: number }) {
   );
 }
 
+export function TrophyIcon({ size = 18, color = "#ffcf4d" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20">
+      <path d="M5 3h10v4a5 5 0 0 1-10 0z" fill={color} stroke="#7a5200" strokeWidth="1.2" />
+      <path d="M5 4H2.5v1.5A3.5 3.5 0 0 0 6 9M15 4h2.5v1.5A3.5 3.5 0 0 1 14 9" fill="none" stroke={color} strokeWidth="1.4" />
+      <path d="M8.6 11.6h2.8L11 14h2v3H7v-3h2z" fill={color} stroke="#7a5200" strokeWidth="1.1" />
+    </svg>
+  );
+}
+
+const CHIP_COLORS: Record<ChipId, [string, string]> = {
+  basic: ["#8fe9ff", "#1b6b86"],
+  advanced: ["#c44dff", "#5a1b8a"],
+  elite: ["#ffb324", "#8a5200"],
+};
+
+export function ChipIcon({ id = "basic", size = 18 }: { id?: ChipId; size?: number }) {
+  const [c, dark] = CHIP_COLORS[id] || CHIP_COLORS.basic;
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20">
+      <rect x="4.5" y="4.5" width="11" height="11" rx="2" fill="#120b2c" stroke={c} strokeWidth="1.6" />
+      <rect x="7.5" y="7.5" width="5" height="5" rx="1" fill={c} />
+      <g stroke={c} strokeWidth="1.3" strokeLinecap="round">
+        <path d="M7 4.5V2M10 4.5V2M13 4.5V2M7 15.5V18M10 15.5V18M13 15.5V18" />
+        <path d="M4.5 7H2M4.5 10H2M4.5 13H2M15.5 7H18M15.5 10H18M15.5 13H18" />
+      </g>
+      <rect x="7.5" y="7.5" width="5" height="5" rx="1" fill="none" stroke={dark} strokeWidth="0.8" />
+    </svg>
+  );
+}
+
+export function ShardIcon({ size = 18, color = "#ff4fd8" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20">
+      <path d="M10 1.5 14 8l-4 10.5L6 8z" fill={color} stroke="#2a0b33" strokeWidth="1.2" />
+      <path d="M10 1.5 10 18.5M6 8h8" stroke="#ffffff" strokeWidth="0.8" opacity="0.6" />
+    </svg>
+  );
+}
+
+export function GuildIcon({ size = 18, color = "#ffb324" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20">
+      <path d="M10 1.8 17 4.4v5.3c0 4.2-2.9 7.3-7 8.5-4.1-1.2-7-4.3-7-8.5V4.4z" fill="#140d33" stroke={color} strokeWidth="1.5" />
+      <path d="M10 5.2 11.7 8.7l3.8.5-2.8 2.6.7 3.8L10 13.8l-3.4 1.8.7-3.8-2.8-2.6 3.8-.5z" fill={color} />
+    </svg>
+  );
+}
+
+/** the icon that matches a reward line */
+export function RewardIcon({ line, size = 26 }: { line: RewardLine; size?: number }) {
+  if (line.kind === "gold") return <CoinIcon size={size} />;
+  if (line.kind === "gems") return <GemIcon size={size} />;
+  if (line.kind === "tokens") return <TokenIcon size={size} />;
+  if (line.kind === "trophy") return <TrophyIcon size={size} />;
+  if (line.kind === "chip") return <ChipIcon id={(line.id as ChipId) || "basic"} size={size} />;
+  if (line.kind === "heroShard")
+    return <ShardIcon size={size} color={HERO_BY_ID[line.id || ""]?.color || "#ff4fd8"} />;
+  const def = TOWER_BY_ID[line.id || ""];
+  return def ? <TowerIcon def={def} size={size} /> : <CoinIcon size={size} />;
+}
+
+export function LeagueBadge({ trophies, size = 18 }: { trophies: number; size?: number }) {
+  const l = leagueFor(trophies);
+  return (
+    <span className="pill-dark text-[11px]" style={{ borderColor: l.color + "88", color: l.color }}>
+      <TrophyIcon size={size} color={l.color} />
+      <span className="num">{Math.floor(trophies).toLocaleString()}</span>
+      <span className="ml-0.5 hidden font-bold tracking-wider sm:inline">{l.name.toUpperCase()}</span>
+    </span>
+  );
+}
+
 export function CurrencyBar({
   gold,
   gems,
   tokens,
+  trophies,
 }: {
   gold: number;
   gems: number;
   tokens: number;
+  trophies?: number;
 }) {
   return (
     <div className="flex items-center gap-2">
+      {typeof trophies === "number" && (
+        <div
+          className="pill-dark text-[11px]"
+          style={{ borderColor: leagueFor(trophies).color + "88", color: leagueFor(trophies).color }}
+          data-currency="trophies"
+        >
+          <TrophyIcon size={20} color={leagueFor(trophies).color} />
+          <span className="num">{Math.floor(trophies).toLocaleString()}</span>
+        </div>
+      )}
       <div className="pill-dark text-[11px] text-[#ffcf4d]" style={{ borderColor: "#8a6a1a" }} data-currency="gold">
         <CoinIcon size={20} />
         <span className="num">{Math.floor(gold).toLocaleString()}</span>
@@ -545,6 +631,173 @@ export function Modal({
     >
       <div className="panel anim-pop max-h-[88vh] overflow-y-auto scroll-thin p-5" style={{ width: w }}>
         {children}
+      </div>
+    </div>
+  );
+}
+
+// ---------- reward claim animation ----------
+
+/** stand-alone chest so the claim overlay does not depend on the menus module */
+export function ClaimChest({ color, size = 150, stage }: { color: string; size?: number; stage: "shut" | "shake" | "burst" }) {
+  return (
+    <div
+      className={stage === "shake" ? "claim-chest-shake" : stage === "burst" ? "claim-chest-burst" : ""}
+      style={stage === "shut" ? { animation: "floaty 2.5s ease-in-out infinite" } : undefined}
+    >
+      <svg width={size} height={size} viewBox="0 0 90 90">
+        <ellipse cx="45" cy="78" rx="30" ry="5" fill="#000" opacity="0.45" />
+        <rect x="12" y="34" width="66" height="40" rx="6" fill="#3a2a12" stroke={color} strokeWidth="3" />
+        <g className={stage === "burst" ? "claim-lid" : ""} style={{ transformOrigin: "45px 44px" }}>
+          <path d="M12 42c0-14 14-22 33-22s33 8 33 22v6H12z" fill="#5c451f" stroke={color} strokeWidth="3" />
+          <path d="M45 6l2.6 5.4 6 .6-4.5 4 1.3 5.8L45 18.8 39.6 21.8 40.9 16l-4.5-4 6-.6z" fill={color} opacity="0.9" />
+        </g>
+        <rect x="38" y="36" width="14" height="20" rx="3" fill={color} />
+        <circle cx="45" cy="44" r="3.5" fill="#171038" />
+      </svg>
+    </div>
+  );
+}
+
+export interface ClaimData {
+  /** big headline, e.g. "DAY 3" */
+  title: string;
+  /** one-line description of what was won */
+  subtitle: string;
+  lines: RewardLine[];
+  color: string;
+  /** show the chest-opening beat before the loot */
+  chest?: boolean;
+  /** how many chests pop open in sequence (defaults to 1 when `chest`) */
+  chestCount?: number;
+}
+
+/**
+ * Full-screen reward claim ceremony: the chest rattles, bursts open, a shock
+ * ring fires, sparks rain and each reward line flies in one after another.
+ * Used by the daily streak, chests, guild chests and the competition payout.
+ */
+export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () => void }) {
+  const wantsChest = data.chest !== false && !!data.chest;
+  const [phase, setPhase] = useState<"shake" | "burst" | "loot">(wantsChest ? "shake" : "loot");
+
+  useEffect(() => {
+    if (!wantsChest) return;
+    const a = setTimeout(() => setPhase("burst"), 900);
+    const b = setTimeout(() => setPhase("loot"), 1650);
+    return () => {
+      clearTimeout(a);
+      clearTimeout(b);
+    };
+  }, [wantsChest]);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key === "Escape" || e.key === "Enter" || e.key === " ") onClose();
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+
+  const sparks = useMemo(
+    () =>
+      Array.from({ length: 34 }, (_, i) => ({
+        id: i,
+        dx: (Math.random() - 0.5) * 460,
+        dy: -60 - Math.random() * 360,
+        rot: `${Math.round((Math.random() - 0.5) * 720)}deg`,
+        size: 5 + Math.random() * 9,
+        delay: Math.random() * 0.45,
+        color: [data.color, "#ffcf4d", "#35e0ff", "#ff4fd8", "#ffffff"][i % 5],
+        round: i % 3 === 0,
+      })),
+    [data.color]
+  );
+
+  const chestCount = Math.max(1, data.chestCount || 1);
+
+  return (
+    <div className="claim-root fixed inset-0 z-[90] flex items-center justify-center p-4" data-testid="reward-claim" onPointerDown={onClose}>
+      <div className="claim-rays pointer-events-none absolute" style={{ background: `conic-gradient(from 0deg, ${data.color}00, ${data.color}55, ${data.color}00, ${data.color}55, ${data.color}00)` }} />
+      <div
+        className="panel claim-card relative w-[min(460px,94vw)] p-5 text-center"
+        style={{ borderColor: data.color + "aa", boxShadow: `0 0 60px ${data.color}44, 0 10px 0 #0b0722` }}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <div className="claim-title font-disp text-3xl" style={{ color: data.color, textShadow: `0 0 28px ${data.color}99` }}>
+          {data.title}
+        </div>
+        <div className="mt-0.5 text-[12px] font-bold tracking-[0.22em] text-[var(--dim)]">{data.subtitle.toUpperCase()}</div>
+
+        {phase !== "loot" ? (
+          <div className="relative my-6 grid place-items-center" style={{ minHeight: 170 }}>
+            {Array.from({ length: Math.min(3, chestCount) }).map((_, i) => (
+              <div key={i} className="absolute" style={{ transform: `translateX(${(i - (Math.min(3, chestCount) - 1) / 2) * 66}px) scale(${chestCount > 1 ? 0.8 : 1})` }}>
+                <ClaimChest color={data.color} size={150} stage={phase === "burst" ? "burst" : "shake"} />
+              </div>
+            ))}
+            {phase === "burst" && (
+              <>
+                <span className="claim-ring absolute" style={{ borderColor: data.color }} />
+                <span className="claim-ring absolute" style={{ borderColor: "#ffffff", animationDelay: "120ms" }} />
+                <span className="claim-flash absolute inset-0" style={{ background: `radial-gradient(circle, ${data.color}cc, transparent 65%)` }} />
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="relative my-4">
+            {/* sparks only fire once the loot lands */}
+            <div className="pointer-events-none absolute inset-x-0 top-1/2 h-0">
+              {sparks.map((s) => (
+                <span
+                  key={s.id}
+                  className="claim-spark absolute left-1/2 top-0"
+                  style={
+                    {
+                      width: s.size,
+                      height: s.size,
+                      background: s.color,
+                      borderRadius: s.round ? "50%" : 2,
+                      animationDelay: `${s.delay}s`,
+                      "--dx": `${s.dx}px`,
+                      "--dy": `${s.dy}px`,
+                      "--rot": s.rot,
+                    } as React.CSSProperties
+                  }
+                />
+              ))}
+            </div>
+            <div className="relative space-y-1.5" data-testid="claim-lines">
+              {data.lines.length === 0 && (
+                <div className="py-6 text-sm font-bold text-[var(--dim)]">Nothing but good vibes.</div>
+              )}
+              {data.lines.map((l, i) => (
+                <div
+                  key={`${l.kind}-${l.id ?? i}`}
+                  className="claim-line flex items-center gap-3 rounded-xl border bg-black/45 px-3 py-2"
+                  style={{ borderColor: l.color + "66", animationDelay: `${i * 110}ms` }}
+                >
+                  <span className="claim-line-icon grid h-10 w-10 shrink-0 place-items-center rounded-lg" style={{ background: l.color + "22", border: `1px solid ${l.color}55` }}>
+                    <RewardIcon line={l} size={26} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-left text-[13px] font-bold text-[var(--txt)]">{l.label}</span>
+                  <span className="font-disp shrink-0 text-xl" style={{ color: l.color }}>
+                    ×{l.n.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button
+          className="btn btn-gold mt-2 w-full py-3 text-lg"
+          data-testid="claim-collect"
+          disabled={phase !== "loot"}
+          onClick={onClose}
+        >
+          {phase === "loot" ? "Collect" : "Opening…"}
+        </button>
       </div>
     </div>
   );

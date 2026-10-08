@@ -1,15 +1,47 @@
 import {
+  CHEST_BY_ID,
+  DAILY_RESET_HOUR,
   DAILY_REWARDS,
   GIFT_CODES,
+  GUILD_BY_ID,
+  GUILD_QUESTS,
   HERO_BY_ID,
   HERO_MAX_LEVEL,
+  HERO_SHARD_COST,
   RARITY,
   TOWER_BY_ID,
+  TROPHY_LOSS,
+  TROPHY_WIN,
+  eventForDate,
   heroUpgradeCost,
+  leagueFor,
   normaliseCode,
+  type ChipBag,
+  type ChipId,
+  type DailyReward,
   type GiftCode,
+  type GuildShopItem,
   type Rarity,
 } from "./data";
+
+export interface GuildState {
+  /** id of the guild the player belongs to, or null */
+  id: string | null;
+  /** total contribution xp poured into the guild */
+  xp: number;
+  /** guild coins, spent in the guild store */
+  coins: number;
+  /** game-day stamp of the last donation */
+  lastDonate: string;
+  /** how many donations were made on `lastDonate` */
+  donatesToday: number;
+  /** game-day stamp of the last claimed guild chest */
+  lastChest: string;
+  /** lifetime counters the weekly quests read from */
+  quests: Record<string, number>;
+  /** quest ids already cashed in this week, prefixed with the week stamp */
+  questsDone: string[];
+}
 
 export interface SaveData {
   gold: number;
@@ -21,10 +53,26 @@ export interface SaveData {
   awn: Record<string, [number, number]>; // tower id -> [awk1Tier, awk2Tier] 0..5
   hero: string; // selected hero id
   heroLv: Record<string, number>; // hero id -> level (1..HERO_MAX_LEVEL)
+  /** hero id -> shards banked from Heroes Chests */
+  heroShards: Record<string, number>;
+  /** chip modules by id */
+  chips: Record<ChipId, number>;
+  /** ladder trophies */
+  trophies: number;
+  /** highest trophy count ever reached */
+  bestTrophies: number;
+  /** week stamps of competition payouts already collected */
+  compClaimed: string[];
+  /** guild membership + contribution state */
+  guild: GuildState;
+  /** game-day stamp of the last claimed daily event bonus */
+  lastEvent: string;
   best: number;
   bestEndless: number;
   wins: number;
   runs: number;
+  /** consecutive Battle victories */
+  streak: number;
   sfx: boolean;
   fx: boolean;
   /** 0..1 master volume */
@@ -53,6 +101,19 @@ export interface SaveData {
 
 const KEY = "magictd_save_v1";
 
+/** deep clone used by the UI to roll a reward before committing it to state */
+export function cloneSave(s: SaveData): SaveData {
+  return JSON.parse(JSON.stringify(s)) as SaveData;
+}
+
+export function emptyChips(): Record<ChipId, number> {
+  return { basic: 0, advanced: 0, elite: 0 };
+}
+
+export function emptyGuild(): GuildState {
+  return { id: null, xp: 0, coins: 0, lastDonate: "", donatesToday: 0, lastChest: "", quests: {}, questsDone: [] };
+}
+
 export function defaultSave(): SaveData {
   return {
     gold: 100,
@@ -64,10 +125,18 @@ export function defaultSave(): SaveData {
     awn: {},
     hero: "nova",
     heroLv: {},
+    heroShards: {},
+    chips: emptyChips(),
+    trophies: 0,
+    bestTrophies: 0,
+    compClaimed: [],
+    guild: emptyGuild(),
+    lastEvent: "",
     best: 0,
     bestEndless: 0,
     wins: 0,
     runs: 0,
+    streak: 0,
     sfx: true,
     fx: true,
     vol: 0.7,
@@ -85,35 +154,43 @@ export function defaultSave(): SaveData {
   };
 }
 
+/** repair a partially-shaped save blob (old versions, hand-edited imports) */
+function normalise(s: SaveData): SaveData {
+  if (!s.levels || Object.keys(s.levels).length === 0) s.levels = { arrow: 1 };
+  if (!Array.isArray(s.lineup)) s.lineup = [];
+  s.lineup = s.lineup.filter((id) => s.levels[id]);
+  if (!HERO_BY_ID[s.hero]) s.hero = "nova";
+  s.vol = Math.min(1, Math.max(0, Number.isFinite(s.vol) ? s.vol : 0.7));
+  s.zoom = clampZoom(s.zoom);
+  s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
+  s.heroShards = s.heroShards && typeof s.heroShards === "object" ? s.heroShards : {};
+  s.chips = { ...emptyChips(), ...(s.chips && typeof s.chips === "object" ? s.chips : {}) };
+  s.trophies = Math.max(0, Number.isFinite(s.trophies) ? Math.round(s.trophies) : 0);
+  s.bestTrophies = Math.max(s.trophies, Number.isFinite(s.bestTrophies) ? Math.round(s.bestTrophies) : 0);
+  s.compClaimed = Array.isArray(s.compClaimed) ? s.compClaimed.map(String) : [];
+  s.guild = { ...emptyGuild(), ...(s.guild && typeof s.guild === "object" ? s.guild : {}) };
+  s.guild.quests = s.guild.quests && typeof s.guild.quests === "object" ? s.guild.quests : {};
+  s.guild.questsDone = Array.isArray(s.guild.questsDone) ? s.guild.questsDone.map(String) : [];
+  if (s.guild.id && !GUILD_BY_ID[s.guild.id]) s.guild.id = null;
+  s.streak = Math.max(0, Number.isFinite(s.streak) ? s.streak : 0);
+  s.dailyStreak = Number.isFinite(s.dailyStreak) ? Math.max(0, Math.min(7, s.dailyStreak)) : 0;
+  s.redeemed = Array.isArray(s.redeemed) ? s.redeemed.map(String) : [];
+  return s;
+}
+
 /** merge an exported save blob back into a playable save */
 export function importSave(raw: string): SaveData {
   const parsed = JSON.parse(raw) as Partial<SaveData>;
   const s: SaveData = { ...defaultSave(), ...parsed };
   s.levels = s.levels && Object.keys(s.levels).length ? s.levels : defaultSave().levels;
-  s.lineup = (Array.isArray(s.lineup) ? s.lineup : []).filter((id) => s.levels[id]);
-  if (!HERO_BY_ID[s.hero]) s.hero = "nova";
-  s.vol = Math.min(1, Math.max(0, Number.isFinite(s.vol) ? s.vol : 0.7));
-  s.zoom = clampZoom(s.zoom);
-  s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
-  s.dailyStreak = Number.isFinite(s.dailyStreak) ? Math.max(0, Math.min(7, s.dailyStreak)) : 0;
-  s.redeemed = Array.isArray(s.redeemed) ? s.redeemed.map(String) : [];
-  return s;
+  return normalise(s);
 }
 
 export function loadSave(): SaveData {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaultSave();
-    const s = { ...defaultSave(), ...(JSON.parse(raw) as Partial<SaveData>) };
-    if (!s.levels || Object.keys(s.levels).length === 0) s.levels = { arrow: 1 };
-    if (!Array.isArray(s.lineup)) s.lineup = [];
-    s.lineup = s.lineup.filter((id) => s.levels[id]);
-    if (!HERO_BY_ID[s.hero]) s.hero = "nova";
-    s.zoom = clampZoom(s.zoom);
-    s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
-    s.dailyStreak = Number.isFinite(s.dailyStreak) ? Math.max(0, Math.min(7, s.dailyStreak)) : 0;
-    s.redeemed = Array.isArray(s.redeemed) ? s.redeemed.map(String) : [];
-    return s;
+    return normalise({ ...defaultSave(), ...(JSON.parse(raw) as Partial<SaveData>) });
   } catch {
     return defaultSave();
   }
@@ -135,13 +212,50 @@ export function clearSave() {
   }
 }
 
+// ---------- the 07:00 game-day ----------
+/**
+ * A "game day" starts at 07:00 local time. Everything daily (reward streak,
+ * event bonus, guild donations, free chest) keys off this stamp, so claiming at
+ * 06:59 and again at 07:01 counts as two different days — which is the whole
+ * point of a 7 A.M. reset.
+ */
 export function todayStr(d = new Date()) {
-  return d.toISOString().slice(0, 10);
+  const shifted = new Date(d.getTime() - DAILY_RESET_HOUR * 3600000);
+  // local calendar date of the shifted instant
+  const y = shifted.getFullYear();
+  const m = String(shifted.getMonth() + 1).padStart(2, "0");
+  const day = String(shifted.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
-/** the day before `todayStr()`, used to keep daily streaks alive */
-export function yesterdayStr() {
-  return todayStr(new Date(Date.now() - 86400000));
+/** the game-day before `todayStr()`, used to keep daily streaks alive */
+export function yesterdayStr(d = new Date()) {
+  return todayStr(new Date(d.getTime() - 86400000));
+}
+
+/** ms until the next 07:00 rollover */
+export function msUntilReset(d = new Date()): number {
+  const next = new Date(d);
+  next.setHours(DAILY_RESET_HOUR, 0, 0, 0);
+  if (next.getTime() <= d.getTime()) next.setDate(next.getDate() + 1);
+  return next.getTime() - d.getTime();
+}
+
+/** "6h 12m" style countdown to the next reset */
+export function resetCountdown(d = new Date()): string {
+  const ms = msUntilReset(d);
+  const h = Math.floor(ms / 3600000);
+  const m = Math.floor((ms % 3600000) / 60000);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+/** ISO-ish week stamp (year + week number), used to seed the competition */
+export function weekStr(d = new Date()) {
+  const shifted = new Date(d.getTime() - DAILY_RESET_HOUR * 3600000);
+  const start = new Date(shifted.getFullYear(), 0, 1);
+  const days = Math.floor((shifted.getTime() - start.getTime()) / 86400000);
+  const week = Math.floor((days + start.getDay()) / 7);
+  return `${shifted.getFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
 export const ZOOM_MIN = 1;
@@ -151,7 +265,7 @@ export function clampZoom(z: number) {
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 20) / 20));
 }
 
-/** 1-based day of the streak the player is about to claim, plus the new streak */
+/** 1-based day of the streak the player is about to claim */
 export function nextDailyStreak(s: SaveData): number {
   if (s.lastDaily === todayStr()) return s.dailyStreak; // already claimed today
   if (s.lastDaily === yesterdayStr() && s.dailyStreak >= 1 && s.dailyStreak < 7) return s.dailyStreak + 1;
@@ -173,18 +287,177 @@ export function upgradeHero(s: SaveData, id: string): boolean {
   return true;
 }
 
+/** spend Heroes Chest shards instead of gold to level a hero */
+export function levelHeroWithShards(s: SaveData, id: string): boolean {
+  const lv = heroLevel(s, id);
+  if (lv >= HERO_MAX_LEVEL) return false;
+  if ((s.heroShards[id] || 0) < HERO_SHARD_COST) return false;
+  s.heroShards[id] -= HERO_SHARD_COST;
+  s.heroLv[id] = lv + 1;
+  return true;
+}
+
+export function addHeroShards(s: SaveData, id: string, n: number) {
+  if (!HERO_BY_ID[id]) return;
+  s.heroShards[id] = (s.heroShards[id] || 0) + n;
+}
+
+export function addChips(s: SaveData, bag: ChipBag) {
+  (Object.keys(bag) as ChipId[]).forEach((k) => {
+    s.chips[k] = (s.chips[k] || 0) + (bag[k] || 0);
+  });
+}
+
+// ---------- rewards ----------
+/** one line of loot, used by every claim animation in the UI */
+export interface RewardLine {
+  kind: "gold" | "gems" | "tokens" | "frag" | "chip" | "heroShard" | "trophy";
+  /** tower id / chip id / hero id where it applies */
+  id?: string;
+  label: string;
+  n: number;
+  color: string;
+}
+
+export interface ChestLoot {
+  gold: number;
+  gems: number;
+  tokens: number;
+  frags: { id: string; n: number }[];
+  chips: ChipBag;
+  heroShards: { id: string; n: number }[];
+}
+
+function emptyLoot(): ChestLoot {
+  return { gold: 0, gems: 0, tokens: 0, frags: [], chips: {}, heroShards: [] };
+}
+
+function pushFrag(list: { id: string; n: number }[], id: string, n = 1) {
+  const ex = list.find((f) => f.id === id);
+  if (ex) ex.n += n;
+  else list.push({ id, n });
+}
+
+const rint = (a: number, b: number) => a + Math.floor(Math.random() * (b - a + 1));
+
+/** roll the contents of a chest; `fragBonus`/`bias` come from the live event */
+export function rollChest(chestId: string, fragBonus = 0, biasBonus = 0): ChestLoot {
+  const c = CHEST_BY_ID[chestId];
+  const loot = emptyLoot();
+  if (!c) return loot;
+  loot.gold = rint(c.gold[0], c.gold[1]);
+  const nFrags = Math.max(0, rint(c.frags[0], c.frags[1]) + fragBonus);
+  for (let i = 0; i < nFrags; i++) pushFrag(loot.frags, randFrag(Math.min(1, c.bias + biasBonus)));
+  if (c.id === "epic" && Math.random() < 0.25) loot.gems = 1;
+  if (c.id === "legendary") {
+    if (Math.random() < 0.6) loot.gems = 1 + (Math.random() < 0.4 ? 1 : 0);
+    if (Math.random() < 0.3) loot.tokens = 1;
+  }
+  c.chips?.forEach((ch) => {
+    const n = rint(ch.min, ch.max);
+    if (n > 0) loot.chips[ch.id] = (loot.chips[ch.id] || 0) + n;
+  });
+  if (c.heroShards) {
+    const ids = Object.keys(HERO_BY_ID);
+    const id = ids[Math.floor(Math.random() * ids.length)];
+    loot.heroShards.push({ id, n: rint(c.heroShards[0], c.heroShards[1]) });
+  }
+  return loot;
+}
+
+export function mergeLoot(a: ChestLoot, b: ChestLoot): ChestLoot {
+  const out: ChestLoot = {
+    gold: a.gold + b.gold,
+    gems: a.gems + b.gems,
+    tokens: a.tokens + b.tokens,
+    frags: a.frags.map((f) => ({ ...f })),
+    chips: { ...a.chips },
+    heroShards: a.heroShards.map((h) => ({ ...h })),
+  };
+  b.frags.forEach((f) => pushFrag(out.frags, f.id, f.n));
+  (Object.keys(b.chips) as ChipId[]).forEach((k) => {
+    out.chips[k] = (out.chips[k] || 0) + (b.chips[k] || 0);
+  });
+  b.heroShards.forEach((h) => pushFrag(out.heroShards, h.id, h.n));
+  return out;
+}
+
+export function grantLoot(s: SaveData, loot: ChestLoot) {
+  s.gold += loot.gold;
+  s.gems += loot.gems;
+  s.tokens += loot.tokens;
+  loot.frags.forEach((f) => addFrag(s, f.id, f.n));
+  addChips(s, loot.chips);
+  loot.heroShards.forEach((h) => addHeroShards(s, h.id, h.n));
+}
+
+/** flatten loot into the animated lines the claim UI renders */
+export function lootLines(loot: ChestLoot): RewardLine[] {
+  const out: RewardLine[] = [];
+  if (loot.gold) out.push({ kind: "gold", label: "Gold", n: loot.gold, color: "#ffcf4d" });
+  if (loot.gems) out.push({ kind: "gems", label: "Gems", n: loot.gems, color: "#35e0ff" });
+  if (loot.tokens) out.push({ kind: "tokens", label: "Magic Tokens", n: loot.tokens, color: "#ff4fd8" });
+  loot.frags.forEach((f) =>
+    out.push({
+      kind: "frag",
+      id: f.id,
+      label: `${TOWER_BY_ID[f.id]?.name ?? f.id} fragments`,
+      n: f.n,
+      color: RARITY[TOWER_BY_ID[f.id]?.rarity ?? "normal"].color,
+    })
+  );
+  (Object.keys(loot.chips) as ChipId[]).forEach((k) => {
+    const n = loot.chips[k] || 0;
+    if (n > 0) out.push({ kind: "chip", id: k, label: `${k[0].toUpperCase()}${k.slice(1)} Chip Module`, n, color: k === "basic" ? "#8fe9ff" : k === "advanced" ? "#c44dff" : "#ffb324" });
+  });
+  loot.heroShards.forEach((h) =>
+    out.push({ kind: "heroShard", id: h.id, label: `${HERO_BY_ID[h.id]?.name ?? h.id} shards`, n: h.n, color: HERO_BY_ID[h.id]?.color ?? "#ff4fd8" })
+  );
+  return out;
+}
+
+export interface DailyClaim {
+  day: number;
+  label: string;
+  color: string;
+  reward: DailyReward;
+  loot: ChestLoot;
+  lines: RewardLine[];
+  /** chests that were part of the reward, for the opening animation */
+  chests: { id: string; n: number }[];
+}
+
 /** grant the reward for the day the player is on; mutates the save */
-export function claimDailyReward(s: SaveData): { day: number; label: string; color: string } | null {
+export function claimDailyReward(s: SaveData): DailyClaim | null {
   if (s.lastDaily === todayStr()) return null;
   const day = nextDailyStreak(s);
   const reward = DAILY_REWARDS[day - 1];
-  s.gold += reward.gold || 0;
-  s.gems += reward.gems || 0;
-  s.tokens += reward.tokens || 0;
-  for (let i = 0; i < (reward.frags || 0); i++) addFrag(s, randFrag(rarityBias(reward.rarity)), 1);
+  let loot = emptyLoot();
+  loot.gold += reward.gold || 0;
+  loot.gems += reward.gems || 0;
+  loot.tokens += reward.tokens || 0;
+  for (let i = 0; i < (reward.frags || 0); i++) pushFrag(loot.frags, randFrag(rarityBias(reward.rarity)));
+  if (reward.chips) {
+    (Object.keys(reward.chips) as ChipId[]).forEach((k) => {
+      loot.chips[k] = (loot.chips[k] || 0) + (reward.chips![k] || 0);
+    });
+  }
+  reward.chests?.forEach((c) => {
+    for (let i = 0; i < c.n; i++) loot = mergeLoot(loot, rollChest(c.id));
+  });
+  grantLoot(s, loot);
+  if (reward.trophies) addTrophies(s, reward.trophies);
   s.dailyStreak = day;
   s.lastDaily = todayStr();
-  return { day, label: reward.label, color: reward.rarity ? RARITY[reward.rarity].color : "#ffcf4d" };
+  return {
+    day,
+    label: reward.label,
+    color: reward.accent,
+    reward,
+    loot,
+    lines: lootLines(loot),
+    chests: reward.chests ? reward.chests.map((c) => ({ ...c })) : [],
+  };
 }
 
 /** chests bias toward a rarity; the daily reward uses the same dial */
@@ -193,6 +466,162 @@ function rarityBias(rarity?: Rarity): number {
   if (rarity === "epic") return 0.5;
   if (rarity === "decent") return 0.2;
   return 0;
+}
+
+// ---------- trophies ----------
+export function addTrophies(s: SaveData, n: number): number {
+  const before = s.trophies;
+  s.trophies = Math.max(0, s.trophies + n);
+  s.bestTrophies = Math.max(s.bestTrophies, s.trophies);
+  return s.trophies - before;
+}
+
+/** apply the end-of-battle trophy swing; returns the actual delta */
+export function applyBattleTrophies(s: SaveData, won: boolean, bonusWin = 0, bonusLossRelief = 0): number {
+  const raw = won ? TROPHY_WIN + bonusWin : -(TROPHY_LOSS - bonusLossRelief);
+  return addTrophies(s, raw);
+}
+
+export function playerLeague(s: SaveData) {
+  return leagueFor(s.trophies);
+}
+
+// ---------- daily event ----------
+export function liveEvent(d = new Date()) {
+  return eventForDate(d);
+}
+
+export function eventClaimable(s: SaveData): boolean {
+  return s.lastEvent !== todayStr();
+}
+
+/** the once-a-day event participation bonus */
+export function claimEventBonus(s: SaveData): ChestLoot | null {
+  if (!eventClaimable(s)) return null;
+  const ev = liveEvent();
+  let loot = emptyLoot();
+  switch (ev.id) {
+    case "luck":
+      for (let i = 0; i < 3; i++) pushFrag(loot.frags, randFrag(0.6));
+      loot.gold = 1500;
+      break;
+    case "chestbox":
+      loot = mergeLoot(loot, rollChest("common"));
+      loot = mergeLoot(loot, rollChest("silver"));
+      break;
+    case "trophy":
+      loot.gems = 150;
+      loot.gold = 3000;
+      break;
+    case "items":
+      loot.chips = { basic: 3, advanced: 1 };
+      break;
+    case "mineshaft":
+      loot.gold = 12000;
+      break;
+    case "lightning":
+      loot.gems = 400;
+      loot.tokens = 2;
+      break;
+  }
+  grantLoot(s, loot);
+  s.lastEvent = todayStr();
+  return loot;
+}
+
+// ---------- guild ----------
+export function joinGuild(s: SaveData, id: string): boolean {
+  const g = GUILD_BY_ID[id];
+  if (!g || s.trophies < g.trophyReq) return false;
+  s.guild.id = id;
+  return true;
+}
+
+export function leaveGuild(s: SaveData) {
+  s.guild.id = null;
+}
+
+export const GUILD_DONATIONS_PER_DAY = 3;
+
+export function donationsLeft(s: SaveData): number {
+  if (s.guild.lastDonate !== todayStr()) return GUILD_DONATIONS_PER_DAY;
+  return Math.max(0, GUILD_DONATIONS_PER_DAY - s.guild.donatesToday);
+}
+
+export function donateToGuild(s: SaveData, gold: number, xp: number, coins: number): boolean {
+  if (!s.guild.id || s.gold < gold || donationsLeft(s) <= 0) return false;
+  if (s.guild.lastDonate !== todayStr()) {
+    s.guild.lastDonate = todayStr();
+    s.guild.donatesToday = 0;
+  }
+  s.gold -= gold;
+  s.guild.xp += xp;
+  s.guild.coins += coins;
+  s.guild.donatesToday++;
+  bumpQuest(s, "donate", 1);
+  return true;
+}
+
+export function buyGuildItem(s: SaveData, item: GuildShopItem): boolean {
+  if (!s.guild.id || s.guild.coins < item.coins) return false;
+  s.guild.coins -= item.coins;
+  const g = item.grant;
+  if (g.gold) s.gold += g.gold;
+  if (g.gems) s.gems += g.gems;
+  if (g.tokens) s.tokens += g.tokens;
+  if (g.chips) addChips(s, g.chips);
+  if (g.frags) for (let i = 0; i < g.frags.n; i++) addFrag(s, randFrag(rarityBias(g.frags.rarity)), 1);
+  return true;
+}
+
+export function guildChestReady(s: SaveData): boolean {
+  return !!s.guild.id && s.guild.lastChest !== todayStr();
+}
+
+/** the free daily guild chest; Null Sigil members get bonus chips */
+export function claimGuildChest(s: SaveData): ChestLoot | null {
+  if (!guildChestReady(s)) return null;
+  let loot = rollChest("support");
+  if (s.guild.id === "null") loot = mergeLoot(loot, { ...emptyLoot(), chips: { basic: 2 } });
+  grantLoot(s, loot);
+  s.guild.lastChest = todayStr();
+  bumpQuest(s, "chests", 1);
+  return loot;
+}
+
+export function bumpQuest(s: SaveData, id: string, n = 1) {
+  s.guild.quests[id] = (s.guild.quests[id] || 0) + n;
+}
+
+export function questProgress(s: SaveData, id: string): number {
+  return s.guild.quests[id] || 0;
+}
+
+export function questDone(s: SaveData, id: string): boolean {
+  return s.guild.questsDone.includes(`${weekStr()}:${id}`);
+}
+
+export function claimQuest(s: SaveData, id: string): boolean {
+  const q = GUILD_QUESTS.find((x) => x.id === id);
+  if (!q || !s.guild.id || questDone(s, id) || questProgress(s, id) < q.need) return false;
+  s.guild.xp += q.xp;
+  s.guild.coins += q.coins;
+  s.guild.questsDone = [...s.guild.questsDone, `${weekStr()}:${id}`];
+  return true;
+}
+
+// ---------- competition ----------
+export function compClaimed(s: SaveData): boolean {
+  return s.compClaimed.includes(weekStr());
+}
+
+export function claimCompetition(s: SaveData, gems: number, gold: number, chips: ChipBag): boolean {
+  if (compClaimed(s)) return false;
+  s.gems += gems;
+  s.gold += gold;
+  addChips(s, chips);
+  s.compClaimed = [...s.compClaimed, weekStr()];
+  return true;
 }
 
 export type RedeemResult =

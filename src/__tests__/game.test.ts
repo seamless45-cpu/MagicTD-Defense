@@ -241,7 +241,9 @@ describe("tower data", () => {
 
     const first = claimDailyReward(s)!;
     expect(first.day).toBe(1);
-    expect(s.gold).toBe(100 + DAILY_REWARDS[0].gold!);
+    // day 1 of the reworked calendar is 1,200 gems
+    expect(s.gems).toBe(DAILY_REWARDS[0].gems!);
+    expect(first.lines.some((l) => l.kind === "gems" && l.n === 1200)).toBe(true);
     expect(s.lastDaily).toBe(todayStr());
     expect(nextDailyStreak(s)).toBe(1); // already claimed today
     expect(claimDailyReward(s)).toBeNull();
@@ -511,12 +513,422 @@ describe("gift codes", () => {
     expect(f.ok).toBe(true);
     expect(Object.values(s.frags).reduce((a, b) => a + b, 0)).toBe(before + 4);
 
+    // the random "decent" roll above can also land on arrow, so measure the delta
+    const arrowBefore = s.frags.arrow;
     redeemGiftCode(s, "TOWER", codes);
-    expect(s.frags.arrow).toBe(defaultSave().frags.arrow + 7);
+    expect(s.frags.arrow).toBe(arrowBefore + 7);
     expect(s.redeemed).toEqual(["FRAGS", "TOWER"]);
   });
 
   it("ships with an empty starter table so codes are added deliberately", () => {
     expect(Object.keys(GIFT_CODES)).toHaveLength(0);
+  });
+});
+
+// ---------- 7 A.M. reset, events, trophies, chests, guild & competition ----------
+import {
+  CHESTS,
+  CHEST_BY_ID,
+  CHIPS,
+  COMPETITION_TIERS,
+  DAILY_RESET_HOUR,
+  EVENTS,
+  GUILDS,
+  GUILD_DONATIONS,
+  GUILD_QUESTS,
+  GUILD_SHOP,
+  LEAGUES,
+  TROPHY_LOSS,
+  TROPHY_WIN,
+  competitionBoard,
+  competitionTier,
+  eventBonus,
+  eventForDate,
+  guildLevel,
+  leagueFor,
+  nextLeague,
+  trophyDelta,
+  type ChipId,
+  type EnemyShape,
+} from "../game/data";
+import {
+  addChips,
+  addTrophies,
+  applyBattleTrophies,
+  buyGuildItem,
+  claimCompetition,
+  claimEventBonus,
+  claimGuildChest,
+  claimQuest,
+  cloneSave,
+  compClaimed,
+  donateToGuild,
+  donationsLeft,
+  eventClaimable,
+  grantLoot,
+  guildChestReady,
+  joinGuild,
+  leaveGuild,
+  levelHeroWithShards,
+  lootLines,
+  msUntilReset,
+  questDone,
+  resetCountdown,
+  rollChest,
+  weekStr,
+  GUILD_DONATIONS_PER_DAY,
+} from "../game/save";
+import { HERO_SHARD_COST } from "../game/data";
+
+describe("daily reset at 07:00", () => {
+  it("rolls the game-day over at 7am, not midnight", () => {
+    expect(DAILY_RESET_HOUR).toBe(7);
+    const beforeReset = new Date(2026, 4, 10, 6, 59, 0);
+    const afterReset = new Date(2026, 4, 10, 7, 1, 0);
+    // 06:59 still belongs to the previous game-day
+    expect(todayStr(beforeReset)).toBe("2026-05-09");
+    expect(todayStr(afterReset)).toBe("2026-05-10");
+    // and the streak helper follows the same boundary
+    expect(yesterdayStr(afterReset)).toBe(todayStr(beforeReset));
+  });
+
+  it("counts down to the next 7am rollover", () => {
+    const at8 = new Date(2026, 4, 10, 8, 0, 0);
+    expect(Math.round(msUntilReset(at8) / 3600000)).toBe(23);
+    const at6 = new Date(2026, 4, 10, 6, 0, 0);
+    expect(Math.round(msUntilReset(at6) / 3600000)).toBe(1);
+    expect(resetCountdown(at6)).toMatch(/^\d+h \d+m$|^\d+m$/);
+  });
+});
+
+describe("the seven day reward table", () => {
+  it("matches the designed payout for every day", () => {
+    expect(DAILY_REWARDS).toHaveLength(7);
+    expect(DAILY_REWARDS[0].gems).toBe(1200);
+    expect(DAILY_REWARDS[1].chests).toEqual([{ id: "silver", n: 1 }]);
+    expect(DAILY_REWARDS[2].chests).toEqual([{ id: "legendary", n: 1 }]);
+    expect(DAILY_REWARDS[3]).toMatchObject({ frags: 5, rarity: "legendary" });
+    expect(DAILY_REWARDS[4]).toMatchObject({ gold: 25000, gems: 900 });
+    expect(DAILY_REWARDS[5].chips).toEqual({ basic: 5, advanced: 2 });
+    expect(DAILY_REWARDS[6].chests).toEqual([{ id: "legendary", n: 3 }]);
+    // every chest referenced by the calendar actually exists
+    DAILY_REWARDS.forEach((r) => r.chests?.forEach((c) => expect(CHEST_BY_ID[c.id]).toBeDefined()));
+  });
+
+  it("banks day 4 as five legendary fragments and day 6 as chip modules", () => {
+    const s = defaultSave();
+    s.dailyStreak = 3;
+    s.lastDaily = yesterdayStr();
+    const before = Object.values(s.frags).reduce((a, b) => a + b, 0);
+    const day4 = claimDailyReward(s)!;
+    expect(day4.day).toBe(4);
+    expect(Object.values(s.frags).reduce((a, b) => a + b, 0)).toBe(before + 5);
+
+    s.dailyStreak = 5;
+    s.lastDaily = yesterdayStr();
+    const day6 = claimDailyReward(s)!;
+    expect(day6.day).toBe(6);
+    expect(s.chips.basic).toBe(5);
+    expect(s.chips.advanced).toBe(2);
+    expect(day6.lines.filter((l) => l.kind === "chip")).toHaveLength(2);
+  });
+
+  it("opens the day 7 triple legendary chest and reports its loot", () => {
+    const s = defaultSave();
+    s.dailyStreak = 6;
+    s.lastDaily = yesterdayStr();
+    const day7 = claimDailyReward(s)!;
+    expect(day7.day).toBe(7);
+    expect(day7.chests).toEqual([{ id: "legendary", n: 3 }]);
+    // three legendary chests always pay gold and a pile of fragments
+    expect(day7.loot.gold).toBeGreaterThanOrEqual(150 * 3);
+    expect(day7.loot.frags.reduce((a, f) => a + f.n, 0)).toBeGreaterThanOrEqual(24);
+    expect(day7.lines.length).toBeGreaterThan(1);
+  });
+});
+
+describe("weekday events", () => {
+  it("covers all seven days exactly once", () => {
+    const days = EVENTS.flatMap((e) => e.days).sort();
+    expect(days).toEqual([0, 1, 2, 3, 4, 5, 6]);
+  });
+
+  it("maps each weekday to the right event", () => {
+    const on = (dow: number) => eventForDate(new Date(2026, 1, 1 + dow)).name; // 2026-02-01 is a Sunday
+    expect(on(0)).toBe("Survive Lightning");
+    expect(on(1)).toBe("Luck Hunting");
+    expect(on(2)).toBe("Chest Box");
+    expect(on(3)).toBe("Trophy Competition");
+    expect(on(4)).toBe("Items Finding");
+    expect(on(5)).toBe("Mineshaft");
+    expect(on(6)).toBe("Mineshaft");
+  });
+
+  it("turns each event into real modifiers", () => {
+    expect(eventBonus("luck").chestFragBonus).toBe(1);
+    expect(eventBonus("chestbox").chestPriceMul).toBeLessThan(1);
+    expect(eventBonus("trophy").trophyWin).toBe(30);
+    expect(eventBonus("items").chipDrop).toEqual({ basic: 2 });
+    expect(eventBonus("mineshaft").goldMul).toBeGreaterThan(1);
+    expect(eventBonus("lightning").gemMul).toBe(2);
+    expect(eventBonus("lightning").hpMul).toBeGreaterThan(1);
+  });
+
+  it("pays the event bonus once per game-day", () => {
+    const s = defaultSave();
+    expect(eventClaimable(s)).toBe(true);
+    const loot = claimEventBonus(s);
+    expect(loot).not.toBeNull();
+    expect(eventClaimable(s)).toBe(false);
+    expect(claimEventBonus(s)).toBeNull();
+    expect(s.lastEvent).toBe(todayStr());
+  });
+});
+
+describe("trophies", () => {
+  it("pays 70 for a win and takes 20 for a defeat", () => {
+    expect(TROPHY_WIN).toBe(70);
+    expect(TROPHY_LOSS).toBe(20);
+    expect(trophyDelta(true)).toBe(70);
+    expect(trophyDelta(false)).toBe(-20);
+    const s = defaultSave();
+    expect(applyBattleTrophies(s, true)).toBe(70);
+    expect(s.trophies).toBe(70);
+    expect(applyBattleTrophies(s, false)).toBe(-20);
+    expect(s.trophies).toBe(50);
+  });
+
+  it("never drops below zero and tracks a personal best", () => {
+    const s = defaultSave();
+    addTrophies(s, 30);
+    expect(s.bestTrophies).toBe(30);
+    applyBattleTrophies(s, false);
+    expect(s.trophies).toBe(10);
+    applyBattleTrophies(s, false);
+    expect(s.trophies).toBe(0);
+    expect(s.bestTrophies).toBe(30);
+  });
+
+  it("sweetens the swing on Trophy Competition day", () => {
+    const b = eventBonus("trophy");
+    expect(trophyDelta(true, b)).toBe(100);
+    expect(trophyDelta(false, b)).toBe(-10);
+  });
+
+  it("sorts players into leagues", () => {
+    expect(leagueFor(0).name).toBe("Copper");
+    expect(leagueFor(1000).name).toBe("Silver");
+    expect(leagueFor(99999).name).toBe("Rift Legend");
+    expect(nextLeague(0)!.name).toBe("Iron");
+    expect(nextLeague(99999)).toBeNull();
+    // the ladder is strictly ascending
+    LEAGUES.forEach((l, i) => i > 0 && expect(l.min).toBeGreaterThan(LEAGUES[i - 1].min));
+  });
+});
+
+describe("competition", () => {
+  it("builds a stable weekly board that includes the player", () => {
+    const a = competitionBoard(1200, "2026-W10");
+    const b = competitionBoard(1200, "2026-W10");
+    expect(a.map((r) => r.name)).toEqual(b.map((r) => r.name));
+    expect(a.find((r) => r.name === "You")!.trophies).toBe(1200);
+    // sorted descending
+    a.forEach((r, i) => i > 0 && expect(r.trophies).toBeLessThanOrEqual(a[i - 1].trophies));
+    // a different week reshuffles the rivals
+    expect(competitionBoard(1200, "2026-W11").map((r) => r.name)).not.toEqual(a.map((r) => r.name));
+  });
+
+  it("pays the matching tier once per week", () => {
+    expect(competitionTier(1)!.label).toBe("Champion");
+    expect(competitionTier(7)!.label).toBe("Top 10");
+    expect(competitionTier(999)).toBeNull();
+    const s = defaultSave();
+    const tier = COMPETITION_TIERS[0];
+    expect(compClaimed(s)).toBe(false);
+    expect(claimCompetition(s, tier.gems, tier.gold, tier.chips)).toBe(true);
+    expect(s.gems).toBe(tier.gems);
+    expect(s.chips.elite).toBe(tier.chips.elite);
+    expect(compClaimed(s)).toBe(true);
+    expect(claimCompetition(s, tier.gems, tier.gold, tier.chips)).toBe(false);
+    expect(s.compClaimed).toContain(weekStr());
+  });
+});
+
+describe("support and heroes chests", () => {
+  it("ships the new chest grades", () => {
+    const ids = CHESTS.map((c) => c.id);
+    expect(ids).toContain("support");
+    expect(ids).toContain("hero");
+    expect(CHEST_BY_ID.support.chips).toBeTruthy();
+    expect(CHEST_BY_ID.hero.heroShards).toBeTruthy();
+  });
+
+  it("rolls chip modules out of a Support Chest", () => {
+    let chips = 0;
+    for (let i = 0; i < 40; i++) {
+      const loot = rollChest("support");
+      chips += Object.values(loot.chips).reduce((a: number, b) => a + (b || 0), 0);
+      expect(loot.gold).toBeGreaterThanOrEqual(120);
+    }
+    expect(chips).toBeGreaterThan(0);
+  });
+
+  it("rolls hero shards out of a Heroes Chest and levels a hero with them", () => {
+    const loot = rollChest("hero");
+    expect(loot.heroShards).toHaveLength(1);
+    expect(loot.heroShards[0].n).toBeGreaterThanOrEqual(4);
+
+    const s = defaultSave();
+    expect(levelHeroWithShards(s, "nova")).toBe(false); // no shards yet
+    s.heroShards.nova = HERO_SHARD_COST;
+    expect(levelHeroWithShards(s, "nova")).toBe(true);
+    expect(heroLevel(s, "nova")).toBe(2);
+    expect(s.heroShards.nova).toBe(0);
+  });
+
+  it("grants loot and describes it as animated reward lines", () => {
+    const s = defaultSave();
+    const loot = rollChest("legendary");
+    const goldBefore = s.gold;
+    grantLoot(s, loot);
+    expect(s.gold).toBe(goldBefore + loot.gold);
+    const lines = lootLines(loot);
+    expect(lines.length).toBeGreaterThan(0);
+    lines.forEach((l) => {
+      expect(l.n).toBeGreaterThan(0);
+      expect(l.color).toMatch(/^#/);
+    });
+  });
+
+  it("honours the Luck Hunting fragment bonus", () => {
+    const base = rollChest("common", 0, 0);
+    const lucky = rollChest("common", 1, 0.25);
+    const count = (l: typeof base) => l.frags.reduce((a, f) => a + f.n, 0);
+    expect(count(lucky)).toBeGreaterThan(count(base) - 1);
+  });
+
+  it("tracks chip modules on the save", () => {
+    const s = defaultSave();
+    expect(s.chips).toEqual({ basic: 0, advanced: 0, elite: 0 });
+    addChips(s, { basic: 3, elite: 1 });
+    addChips(s, { basic: 2 });
+    expect(s.chips.basic).toBe(5);
+    expect(s.chips.elite).toBe(1);
+    CHIPS.forEach((c) => expect(s.chips[c.id as ChipId]).toBeGreaterThanOrEqual(0));
+  });
+});
+
+describe("guild", () => {
+  it("gates guilds behind a trophy requirement", () => {
+    const s = defaultSave();
+    expect(joinGuild(s, "null")).toBe(false); // needs 1800 trophies
+    expect(joinGuild(s, "vanguard")).toBe(true);
+    expect(s.guild.id).toBe("vanguard");
+    leaveGuild(s);
+    expect(s.guild.id).toBeNull();
+    GUILDS.forEach((g) => expect(g.perk.length).toBeGreaterThan(0));
+  });
+
+  it("limits donations per game-day and converts them to xp and coins", () => {
+    const s = defaultSave();
+    joinGuild(s, "vanguard");
+    s.gold = 100000;
+    const tier = GUILD_DONATIONS[0];
+    expect(donationsLeft(s)).toBe(GUILD_DONATIONS_PER_DAY);
+    for (let i = 0; i < GUILD_DONATIONS_PER_DAY; i++) expect(donateToGuild(s, tier.gold, tier.xp, tier.coins)).toBe(true);
+    expect(donationsLeft(s)).toBe(0);
+    expect(donateToGuild(s, tier.gold, tier.xp, tier.coins)).toBe(false);
+    expect(s.guild.xp).toBe(tier.xp * GUILD_DONATIONS_PER_DAY);
+    expect(s.guild.coins).toBe(tier.coins * GUILD_DONATIONS_PER_DAY);
+  });
+
+  it("levels the guild from contribution xp", () => {
+    expect(guildLevel(0).level).toBe(1);
+    expect(guildLevel(100000).level).toBeLessThanOrEqual(20);
+    const a = guildLevel(2000);
+    expect(a.level).toBeGreaterThan(1);
+    expect(a.into).toBeLessThan(a.need || Infinity);
+  });
+
+  it("opens one guild chest per day and gives Null Sigil extra chips", () => {
+    const s = defaultSave();
+    joinGuild(s, "vanguard");
+    expect(guildChestReady(s)).toBe(true);
+    expect(claimGuildChest(s)).not.toBeNull();
+    expect(guildChestReady(s)).toBe(false);
+    expect(claimGuildChest(s)).toBeNull();
+
+    const n = defaultSave();
+    n.trophies = 5000;
+    joinGuild(n, "null");
+    const loot = claimGuildChest(n)!;
+    expect((loot.chips.basic || 0)).toBeGreaterThanOrEqual(2);
+  });
+
+  it("spends guild coins in the coin store", () => {
+    const s = defaultSave();
+    joinGuild(s, "vanguard");
+    const item = GUILD_SHOP[0];
+    expect(buyGuildItem(s, item)).toBe(false); // broke
+    s.guild.coins = item.coins;
+    const gold = s.gold;
+    expect(buyGuildItem(s, item)).toBe(true);
+    expect(s.gold).toBe(gold + item.grant.gold!);
+    expect(s.guild.coins).toBe(0);
+  });
+
+  it("claims weekly war objectives only once they are complete", () => {
+    const s = defaultSave();
+    joinGuild(s, "vanguard");
+    const q = GUILD_QUESTS.find((x) => x.id === "wins")!;
+    expect(claimQuest(s, q.id)).toBe(false);
+    s.guild.quests.wins = q.need;
+    expect(claimQuest(s, q.id)).toBe(true);
+    expect(questDone(s, q.id)).toBe(true);
+    expect(claimQuest(s, q.id)).toBe(false);
+    expect(s.guild.coins).toBe(q.coins);
+  });
+});
+
+describe("reworked enemies", () => {
+  it("gives every enemy a full palette and a distinct silhouette", () => {
+    const shapes = new Set<EnemyShape>();
+    ENEMY_TYPES.forEach((e) => {
+      expect(e.color).toMatch(/^#/);
+      expect(e.accent).toMatch(/^#/);
+      expect(e.shade).toMatch(/^#/);
+      expect(e.title.length).toBeGreaterThan(0);
+      expect(e.bobRate).toBeGreaterThan(0);
+      shapes.add(e.shape);
+    });
+    // no two enemies share a body
+    expect(shapes.size).toBe(ENEMY_TYPES.length);
+  });
+
+  it("keeps the boss indices intact after the rework", () => {
+    expect(ENEMY_TYPES).toHaveLength(6);
+    expect(isBossType(4)).toBe(true);
+    expect(isBossType(3)).toBe(false);
+    expect(ENEMY_TYPES[5].name).toBe("Rift Overlord");
+  });
+});
+
+describe("save migration", () => {
+  it("fills in the new fields for an old save blob", () => {
+    const s = importSave(JSON.stringify({ gold: 10, levels: { arrow: 1 }, lineup: ["arrow"] }));
+    expect(s.chips).toEqual({ basic: 0, advanced: 0, elite: 0 });
+    expect(s.trophies).toBe(0);
+    expect(s.guild.id).toBeNull();
+    expect(s.heroShards).toEqual({});
+    expect(s.compClaimed).toEqual([]);
+  });
+
+  it("clones a save without sharing references", () => {
+    const s = defaultSave();
+    const c = cloneSave(s);
+    c.chips.basic = 9;
+    c.guild.coins = 5;
+    expect(s.chips.basic).toBe(0);
+    expect(s.guild.coins).toBe(0);
   });
 });

@@ -590,23 +590,132 @@ export function runShopCost(item: RunShopItem, bought: number) {
   return Math.round(item.cost * Math.pow(item.step ?? 1, bought));
 }
 
+export type EnemyShape = "slime" | "runner" | "knight" | "mage" | "warlord" | "overlord";
+
 export interface EnemyType {
   name: string;
+  /** short flavour line used by the bestiary and boss cut-ins */
+  title: string;
   color: string;
+  /** secondary colour used for plating, robes, cores */
+  accent: string;
+  /** darker tone for shading and outlines */
+  shade: string;
+  shape: EnemyShape;
   hpMul: number;
   speed: number;
   r: number;
   armor: number;
   lives: number;
   gold: number;
+  /** how many legs/limbs the walk cycle animates */
+  legs: number;
+  /** animation rate multiplier for the walk/bob cycle */
+  bobRate: number;
 }
+
+/**
+ * Reworked enemy roster. Every entry now carries a full palette (base, accent,
+ * shade) plus a `shape` tag that the renderer uses to pick a hand-drawn body,
+ * so enemies read as distinct silhouettes instead of coloured polygons.
+ */
 export const ENEMY_TYPES: EnemyType[] = [
-  { name: "Slime", color: "#5dff7a", hpMul: 1, speed: 55, r: 13, armor: 0, lives: 1, gold: 2 },
-  { name: "Runner", color: "#ffd23f", hpMul: 0.55, speed: 118, r: 11, armor: 0, lives: 1, gold: 3 },
-  { name: "Knight", color: "#8fb0ff", hpMul: 1.7, speed: 46, r: 16, armor: 0.35, lives: 2, gold: 4 },
-  { name: "Mage", color: "#d06bff", hpMul: 1.25, speed: 52, r: 14, armor: 0.15, lives: 2, gold: 5 },
-  { name: "Warlord", color: "#ff5d5d", hpMul: 15, speed: 34, r: 27, armor: 0.2, lives: 5, gold: 30 },
-  { name: "Rift Overlord", color: "#7b2cff", hpMul: 26, speed: 30, r: 31, armor: 0.28, lives: 8, gold: 65 },
+  {
+    name: "Slime",
+    title: "Rift Ooze",
+    color: "#5dff7a",
+    accent: "#c7ffd4",
+    shade: "#0f7a33",
+    shape: "slime",
+    hpMul: 1,
+    speed: 55,
+    r: 13,
+    armor: 0,
+    lives: 1,
+    gold: 2,
+    legs: 0,
+    bobRate: 1,
+  },
+  {
+    name: "Runner",
+    title: "Wisp Courier",
+    color: "#ffd23f",
+    accent: "#fff3b0",
+    shade: "#9a6b00",
+    shape: "runner",
+    hpMul: 0.55,
+    speed: 118,
+    r: 11,
+    armor: 0,
+    lives: 1,
+    gold: 3,
+    legs: 2,
+    bobRate: 2.2,
+  },
+  {
+    name: "Knight",
+    title: "Bulwark Knight",
+    color: "#8fb0ff",
+    accent: "#e6edff",
+    shade: "#2a3f7a",
+    shape: "knight",
+    hpMul: 1.7,
+    speed: 46,
+    r: 16,
+    armor: 0.35,
+    lives: 2,
+    gold: 4,
+    legs: 2,
+    bobRate: 0.8,
+  },
+  {
+    name: "Mage",
+    title: "Rift Adept",
+    color: "#d06bff",
+    accent: "#f3d6ff",
+    shade: "#55198a",
+    shape: "mage",
+    hpMul: 1.25,
+    speed: 52,
+    r: 14,
+    armor: 0.15,
+    lives: 2,
+    gold: 5,
+    legs: 0,
+    bobRate: 1.1,
+  },
+  {
+    name: "Warlord",
+    title: "Crimson Warlord",
+    color: "#ff5d5d",
+    accent: "#ffd0b0",
+    shade: "#7a1020",
+    shape: "warlord",
+    hpMul: 15,
+    speed: 34,
+    r: 27,
+    armor: 0.2,
+    lives: 5,
+    gold: 30,
+    legs: 2,
+    bobRate: 0.7,
+  },
+  {
+    name: "Rift Overlord",
+    title: "Sovereign of the Rift",
+    color: "#7b2cff",
+    accent: "#d7b4ff",
+    shade: "#2d0a63",
+    shape: "overlord",
+    hpMul: 26,
+    speed: 30,
+    r: 31,
+    armor: 0.28,
+    lives: 8,
+    gold: 65,
+    legs: 0,
+    bobRate: 0.6,
+  },
 ];
 
 /** types 4+ are bosses: they get a cutscene, a health bar and skills */
@@ -737,6 +846,36 @@ export const heroCooldown = (cd: number, lv: number) =>
   cd * Math.max(0.6, 1 - 0.03 * (Math.max(1, lv) - 1));
 
 // ---------- daily rewards ----------
+// ---------- chip modules ----------
+/**
+ * Chip modules are the crafting currency introduced with the event rotation.
+ * Basic chips come from Support Chests and the Items Finding event, advanced
+ * chips are rarer, and elite chips only drop from the weekly competition.
+ */
+export type ChipId = "basic" | "advanced" | "elite";
+
+export interface ChipDef {
+  id: ChipId;
+  name: string;
+  short: string;
+  color: string;
+  desc: string;
+}
+
+export const CHIPS: ChipDef[] = [
+  { id: "basic", name: "Basic Chip Module", short: "Basic", color: "#8fe9ff", desc: "Standard arcane circuitry. Feeds tower ascension and guild crafting." },
+  { id: "advanced", name: "Advanced Chip Module", short: "Advanced", color: "#c44dff", desc: "Refined lattice core. Worth five basic modules at the exchange." },
+  { id: "elite", name: "Elite Chip Module", short: "Elite", color: "#ffb324", desc: "Competition-only module stamped by the arena marshals." },
+];
+
+export const CHIP_BY_ID: Record<ChipId, ChipDef> = Object.fromEntries(CHIPS.map((c) => [c.id, c])) as Record<ChipId, ChipDef>;
+
+export type ChipBag = Partial<Record<ChipId, number>>;
+
+// ---------- daily rewards ----------
+/** Rewards roll over at 07:00 local time, not at midnight. */
+export const DAILY_RESET_HOUR = 7;
+
 export interface DailyReward {
   gold?: number;
   gems?: number;
@@ -744,19 +883,275 @@ export interface DailyReward {
   frags?: number;
   /** fragment rarity, used when frags are granted */
   rarity?: Rarity;
+  /** chests handed over already opened — their loot is rolled on claim */
+  chests?: { id: string; n: number }[];
+  /** chip modules granted directly */
+  chips?: ChipBag;
+  /** trophies granted directly */
+  trophies?: number;
   label: string;
+  /** which icon the calendar tile shows */
+  icon: "gold" | "gem" | "token" | "frag" | "chest" | "chip";
+  /** tile accent colour */
+  accent: string;
 }
 
-/** seven day streak; claim once per day and the streak keeps climbing */
+/**
+ * Seven day streak, claimable once per game-day (a game-day flips at 07:00).
+ * Miss a day and the streak restarts from day 1.
+ */
 export const DAILY_REWARDS: DailyReward[] = [
-  { gold: 75, label: "75 gold" },
-  { frags: 2, rarity: "normal", label: "2 normal fragments" },
-  { gold: 160, gems: 1, label: "160 gold + 1 gem" },
-  { frags: 3, rarity: "decent", label: "3 decent fragments" },
-  { gold: 320, tokens: 1, label: "320 gold + 1 token" },
-  { gems: 3, frags: 2, rarity: "epic", label: "3 gems + 2 epic fragments" },
-  { gold: 900, gems: 6, tokens: 3, label: "Grand cache: 900 gold, 6 gems, 3 tokens" },
+  { gems: 1200, label: "1,200 gems", icon: "gem", accent: "#35e0ff" },
+  { chests: [{ id: "silver", n: 1 }], label: "Silver Chest", icon: "chest", accent: "#cfd8e6" },
+  { chests: [{ id: "legendary", n: 1 }], label: "Legendary Chest", icon: "chest", accent: "#ffb324" },
+  { frags: 5, rarity: "legendary", label: "×5 legendary tower fragments", icon: "frag", accent: "#ffb324" },
+  { gold: 25000, gems: 900, label: "25,000 gold + 900 gems", icon: "gold", accent: "#ffcf4d" },
+  { chips: { basic: 5, advanced: 2 }, label: "×5 basic + ×2 advanced chips", icon: "chip", accent: "#c44dff" },
+  { chests: [{ id: "legendary", n: 3 }], label: "×3 Legendary Chests", icon: "chest", accent: "#ffb324" },
 ];
+
+// ---------- weekly event rotation ----------
+export type EventId = "luck" | "chestbox" | "trophy" | "items" | "mineshaft" | "lightning";
+
+export interface GameEvent {
+  id: EventId;
+  name: string;
+  /** 0 = Sunday … 6 = Saturday, matching Date#getDay */
+  days: number[];
+  tagline: string;
+  desc: string;
+  /** what the event actually changes in game */
+  perk: string;
+  color: string;
+  icon: EventId;
+}
+
+/**
+ * One event is live per weekday. Each one applies a real modifier through
+ * `eventBonus()` below, so the rotation is more than flavour text.
+ */
+export const EVENTS: GameEvent[] = [
+  {
+    id: "luck",
+    name: "Luck Hunting",
+    days: [1],
+    tagline: "Monday",
+    desc: "The rift leaks fortune. Fragment rolls lean rare and every chest rolls one extra fragment.",
+    perk: "+1 chest fragment · fragment rarity bias +0.25",
+    color: "#3dff8e",
+    icon: "luck",
+  },
+  {
+    id: "chestbox",
+    name: "Chest Box",
+    days: [2],
+    tagline: "Tuesday",
+    desc: "The quartermaster is in a giving mood — every chest in the Shop is discounted.",
+    perk: "-25% chest price · free Common Chest each day",
+    color: "#ffcf4d",
+    icon: "chestbox",
+  },
+  {
+    id: "trophy",
+    name: "Trophy Competition",
+    days: [3],
+    tagline: "Wednesday",
+    desc: "Ladder day. Victories are worth more trophies and defeats cost you less.",
+    perk: "+30 trophies on a win · defeats only cost 10",
+    color: "#ff4fd8",
+    icon: "trophy",
+  },
+  {
+    id: "items",
+    name: "Items Finding",
+    days: [4],
+    tagline: "Thursday",
+    desc: "Salvage crews sweep the battlefield after every run and pull chip modules out of the wreck.",
+    perk: "Battle victories drop 2 basic chips (+1 advanced on a boss wave)",
+    color: "#8fe9ff",
+    icon: "items",
+  },
+  {
+    id: "mineshaft",
+    name: "Mineshaft",
+    days: [5, 6],
+    tagline: "Friday & Saturday",
+    desc: "The old gold seams under the arena are open. Everything you bank is worth more.",
+    perk: "+60% gold from every run",
+    color: "#ffb324",
+    icon: "mineshaft",
+  },
+  {
+    id: "lightning",
+    name: "Survive Lightning",
+    days: [0],
+    tagline: "Sunday",
+    desc: "Storm clouds sit over the arena. Enemies hit harder, but gems rain down on anyone who holds.",
+    perk: "×2 gems from runs · +15% enemy health",
+    color: "#c44dff",
+    icon: "lightning",
+  },
+];
+
+export const EVENT_BY_ID: Record<EventId, GameEvent> = Object.fromEntries(EVENTS.map((e) => [e.id, e])) as Record<
+  EventId,
+  GameEvent
+>;
+
+/** the event live on a given date (defaults to now) */
+export function eventForDate(d: Date = new Date()): GameEvent {
+  const day = d.getDay();
+  return EVENTS.find((e) => e.days.includes(day)) || EVENTS[0];
+}
+
+export interface EventBonus {
+  goldMul: number;
+  gemMul: number;
+  fragBias: number;
+  chestFragBonus: number;
+  chestPriceMul: number;
+  trophyWin: number;
+  trophyLoss: number;
+  hpMul: number;
+  chipDrop: ChipBag | null;
+}
+
+export const BASE_EVENT_BONUS: EventBonus = {
+  goldMul: 1,
+  gemMul: 1,
+  fragBias: 0,
+  chestFragBonus: 0,
+  chestPriceMul: 1,
+  trophyWin: 0,
+  trophyLoss: 0,
+  hpMul: 1,
+  chipDrop: null,
+};
+
+/** numeric modifiers for the given event — the single source of truth for perks */
+export function eventBonus(id: EventId): EventBonus {
+  switch (id) {
+    case "luck":
+      return { ...BASE_EVENT_BONUS, fragBias: 0.25, chestFragBonus: 1 };
+    case "chestbox":
+      return { ...BASE_EVENT_BONUS, chestPriceMul: 0.75 };
+    case "trophy":
+      return { ...BASE_EVENT_BONUS, trophyWin: 30, trophyLoss: 10 };
+    case "items":
+      return { ...BASE_EVENT_BONUS, chipDrop: { basic: 2 } };
+    case "mineshaft":
+      return { ...BASE_EVENT_BONUS, goldMul: 1.6 };
+    case "lightning":
+      return { ...BASE_EVENT_BONUS, gemMul: 2, hpMul: 1.15 };
+  }
+}
+
+// ---------- trophies & competition ----------
+export const TROPHY_WIN = 70;
+export const TROPHY_LOSS = 20;
+
+export interface League {
+  name: string;
+  min: number;
+  color: string;
+}
+
+/** Ladder tiers; the player's league is the highest one they clear. */
+export const LEAGUES: League[] = [
+  { name: "Copper", min: 0, color: "#c98b5e" },
+  { name: "Iron", min: 350, color: "#9fb4c7" },
+  { name: "Silver", min: 900, color: "#cfd8e6" },
+  { name: "Gold", min: 1700, color: "#ffcf4d" },
+  { name: "Crystal", min: 2800, color: "#35e0ff" },
+  { name: "Arcane", min: 4200, color: "#c44dff" },
+  { name: "Mythic", min: 6000, color: "#ff4fd8" },
+  { name: "Rift Legend", min: 8500, color: "#ffb324" },
+];
+
+export function leagueFor(trophies: number): League {
+  let out = LEAGUES[0];
+  for (const l of LEAGUES) if (trophies >= l.min) out = l;
+  return out;
+}
+
+export function nextLeague(trophies: number): League | null {
+  return LEAGUES.find((l) => l.min > trophies) || null;
+}
+
+/** trophies gained (positive) or lost (negative) for a finished battle */
+export function trophyDelta(won: boolean, bonus: EventBonus = BASE_EVENT_BONUS): number {
+  return won ? TROPHY_WIN + bonus.trophyWin : -(TROPHY_LOSS - bonus.trophyLoss);
+}
+
+export interface CompetitionTier {
+  /** minimum rank (1 = champion) needed for the payout */
+  rank: number;
+  label: string;
+  gems: number;
+  gold: number;
+  chips: ChipBag;
+  color: string;
+}
+
+/** Weekly competition payout table, read top-down until the rank fits. */
+export const COMPETITION_TIERS: CompetitionTier[] = [
+  { rank: 1, label: "Champion", gems: 2500, gold: 40000, chips: { elite: 3, advanced: 5 }, color: "#ffb324" },
+  { rank: 3, label: "Top 3", gems: 1400, gold: 24000, chips: { elite: 1, advanced: 3 }, color: "#cfd8e6" },
+  { rank: 10, label: "Top 10", gems: 700, gold: 12000, chips: { advanced: 2, basic: 6 }, color: "#c98b5e" },
+  { rank: 25, label: "Top 25", gems: 300, gold: 5000, chips: { basic: 4 }, color: "#8fe9ff" },
+  { rank: 50, label: "Top 50", gems: 120, gold: 2000, chips: { basic: 2 }, color: "#9fb4c7" },
+];
+
+export function competitionTier(rank: number): CompetitionTier | null {
+  return COMPETITION_TIERS.find((t) => rank <= t.rank) || null;
+}
+
+/** Deterministic rival ladder so the standings do not reshuffle on every render. */
+export interface Rival {
+  name: string;
+  trophies: number;
+  guild: string;
+}
+
+const RIVAL_NAMES = [
+  "Kaelthas", "Mirabel", "Torin", "Sable", "Volkan", "Nyx", "Rhen", "Ossian",
+  "Petra", "Ilyana", "Dorn", "Yuki", "Castor", "Brann", "Vesper", "Lumen",
+  "Hadrik", "Seren", "Oryx", "Talia", "Garruk", "Fenna", "Ziv", "Marek",
+  "Aurel", "Thale", "Nadir", "Quill", "Rosk", "Idris", "Belka", "Corvin",
+  "Dazhen", "Eiko", "Fjall", "Grim", "Halia", "Ivar", "Jorun", "Kesh",
+  "Lyra", "Mogul", "Nessa", "Orin", "Pike", "Qara", "Riven", "Sten",
+  "Tove", "Ulric", "Vanya", "Wrenn", "Xalia", "Ysolde", "Zarek", "Ardan",
+  "Brisa", "Cael", "Delphi", "Eron",
+];
+
+const RIVAL_GUILDS = ["Arcane Vanguard", "Storm Callers", "Ember Pact", "Null Sigil", "Gilded Spiral"];
+
+/** cheap 32-bit string hash so rival stats are stable per name + week */
+function hash32(str: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967296;
+}
+
+/**
+ * Build the weekly standings around the player. Rivals are seeded from the
+ * week stamp so the board is stable for the whole week but refreshes on Monday.
+ */
+export function competitionBoard(playerTrophies: number, weekStamp: string, playerName = "You"): Rival[] {
+  const rivals: Rival[] = RIVAL_NAMES.map((name, i) => {
+    const r = hash32(`${name}:${weekStamp}`);
+    const r2 = hash32(`${name}:${weekStamp}:g`);
+    // spread rivals around the player so the ladder always feels competitive
+    const spread = 1 - i / RIVAL_NAMES.length;
+    const base = Math.round(playerTrophies * (0.45 + spread * 1.15) + (r - 0.5) * 420);
+    return { name, trophies: Math.max(0, base), guild: RIVAL_GUILDS[Math.floor(r2 * RIVAL_GUILDS.length)] };
+  });
+  rivals.push({ name: playerName, trophies: playerTrophies, guild: "—" });
+  return rivals.sort((a, b) => b.trophies - a.trophies);
+}
 
 export const OVERDRIVE_TIME = 8;
 export const OVERDRIVE_ASPD = 1.5;
@@ -764,13 +1159,188 @@ export const OVERDRIVE_DMG = 0.5;
 /** chilled enemies take extra damage */
 export const SLOW_VULN = 0.25;
 
-export const CHESTS = [
-  { id: "common", name: "Common Chest", cost: 40, gem: 0, color: "#9fb4c7", gold: [8, 20], frags: [1, 2] },
-  { id: "silver", name: "Silver Chest", cost: 250, gem: 0, color: "#cfd8e6", gold: [30, 70], frags: [3, 5] },
-  { id: "epic", name: "Epic Chest", cost: 20, gem: 1, color: "#c44dff", gold: [60, 140], frags: [5, 8] },
-  { id: "legendary", name: "Legendary Chest", cost: 60, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12] },
-] as const;
+export interface ChestDef {
+  id: string;
+  name: string;
+  /** 0 = priced in gold, 1 = priced in gems */
+  gem: 0 | 1;
+  cost: number;
+  color: string;
+  gold: [number, number];
+  frags: [number, number];
+  /** chip modules rolled on open */
+  chips?: { id: ChipId; min: number; max: number }[];
+  /** hero shards rolled on open */
+  heroShards?: [number, number];
+  /** fragment rarity bias 0..1 */
+  bias: number;
+  blurb: string;
+}
 
+export const CHESTS: ChestDef[] = [
+  { id: "common", name: "Common Chest", cost: 40, gem: 0, color: "#9fb4c7", gold: [8, 20], frags: [1, 2], bias: 0, blurb: "Cheap and cheerful." },
+  { id: "silver", name: "Silver Chest", cost: 250, gem: 0, color: "#cfd8e6", gold: [30, 70], frags: [3, 5], bias: 0.15, blurb: "Steady fragment income." },
+  {
+    id: "support",
+    name: "Support Chest",
+    cost: 900,
+    gem: 0,
+    color: "#3dff8e",
+    gold: [120, 260],
+    frags: [1, 3],
+    chips: [
+      { id: "basic", min: 2, max: 5 },
+      { id: "advanced", min: 0, max: 2 },
+    ],
+    bias: 0.1,
+    blurb: "Chip modules for the workshop.",
+  },
+  {
+    id: "hero",
+    name: "Heroes Chest",
+    cost: 35,
+    gem: 1,
+    color: "#ff4fd8",
+    gold: [60, 150],
+    frags: [0, 1],
+    heroShards: [4, 9],
+    bias: 0.3,
+    blurb: "Hero shards — level heroes for free.",
+  },
+  { id: "epic", name: "Epic Chest", cost: 20, gem: 1, color: "#c44dff", gold: [60, 140], frags: [5, 8], bias: 0.45, blurb: "Epic-leaning fragments." },
+  { id: "legendary", name: "Legendary Chest", cost: 60, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12], bias: 1, blurb: "Best odds at a legendary." },
+];
+
+export const CHEST_BY_ID: Record<string, ChestDef> = Object.fromEntries(CHESTS.map((c) => [c.id, c]));
+
+// ---------- hero shards ----------
+/** shards needed to push a hero one level, regardless of current level */
+export const HERO_SHARD_COST = 12;
+
+// ---------- guild ----------
+export interface GuildDef {
+  id: string;
+  name: string;
+  tag: string;
+  members: number;
+  power: number;
+  trophyReq: number;
+  color: string;
+  motto: string;
+  perk: string;
+}
+
+export const GUILDS: GuildDef[] = [
+  {
+    id: "vanguard",
+    name: "Arcane Vanguard",
+    tag: "AVG",
+    members: 84,
+    power: 12480,
+    trophyReq: 0,
+    color: "#ffb324",
+    motto: "Hold the line, then move it forward.",
+    perk: "+10% gold from Battle runs",
+  },
+  {
+    id: "storm",
+    name: "Storm Callers",
+    tag: "STM",
+    members: 61,
+    power: 9310,
+    trophyReq: 400,
+    color: "#35e0ff",
+    motto: "Thunder answers to us.",
+    perk: "+1 gem per completed wave bracket",
+  },
+  {
+    id: "ember",
+    name: "Ember Pact",
+    tag: "EMB",
+    members: 47,
+    power: 7050,
+    trophyReq: 900,
+    color: "#ff4d5e",
+    motto: "Burn bright, burn everything.",
+    perk: "+15% trophies on win streaks",
+  },
+  {
+    id: "null",
+    name: "Null Sigil",
+    tag: "NUL",
+    members: 93,
+    power: 15870,
+    trophyReq: 1800,
+    color: "#c44dff",
+    motto: "We unmake what the rift sends.",
+    perk: "+2 basic chips per guild chest",
+  },
+];
+
+export const GUILD_BY_ID: Record<string, GuildDef> = Object.fromEntries(GUILDS.map((g) => [g.id, g]));
+
+export const GUILD_MAX_LEVEL = 20;
+/** xp needed to go from `level` to `level + 1` */
+export const guildXpFor = (level: number) => Math.round(400 * Math.pow(1.28, Math.max(0, level - 1)));
+
+export function guildLevel(xp: number): { level: number; into: number; need: number } {
+  let level = 1;
+  let rest = Math.max(0, xp);
+  while (level < GUILD_MAX_LEVEL && rest >= guildXpFor(level)) {
+    rest -= guildXpFor(level);
+    level++;
+  }
+  return { level, into: rest, need: level >= GUILD_MAX_LEVEL ? 0 : guildXpFor(level) };
+}
+
+export interface DonationTier {
+  id: string;
+  label: string;
+  gold: number;
+  xp: number;
+  coins: number;
+}
+
+export const GUILD_DONATIONS: DonationTier[] = [
+  { id: "small", label: "Supply Drop", gold: 500, xp: 60, coins: 25 },
+  { id: "medium", label: "War Chest", gold: 2500, xp: 340, coins: 140 },
+  { id: "large", label: "Relic Tribute", gold: 10000, xp: 1500, coins: 650 },
+];
+
+/** things guild coins buy at the guild store */
+export interface GuildShopItem {
+  id: string;
+  name: string;
+  coins: number;
+  desc: string;
+  color: string;
+  grant: { gold?: number; gems?: number; tokens?: number; chips?: ChipBag; frags?: { n: number; rarity: Rarity } };
+}
+
+export const GUILD_SHOP: GuildShopItem[] = [
+  { id: "gcoin-gold", name: "Bullion Crate", coins: 80, desc: "8,000 gold straight into the vault.", color: "#ffcf4d", grant: { gold: 8000 } },
+  { id: "gcoin-gem", name: "Gem Pouch", coins: 150, desc: "450 gems from the guild treasury.", color: "#35e0ff", grant: { gems: 450 } },
+  { id: "gcoin-chip", name: "Workshop Pallet", coins: 220, desc: "6 basic and 2 advanced chip modules.", color: "#c44dff", grant: { chips: { basic: 6, advanced: 2 } } },
+  { id: "gcoin-frag", name: "Relic Shard Case", coins: 400, desc: "4 legendary tower fragments.", color: "#ffb324", grant: { frags: { n: 4, rarity: "legendary" } } },
+  { id: "gcoin-token", name: "Token Satchel", coins: 260, desc: "12 Magic Tokens for awakenings.", color: "#ff4fd8", grant: { tokens: 12 } },
+];
+
+export interface GuildQuest {
+  id: string;
+  name: string;
+  desc: string;
+  need: number;
+  xp: number;
+  coins: number;
+}
+
+/** weekly guild war objectives, tracked against lifetime counters */
+export const GUILD_QUESTS: GuildQuest[] = [
+  { id: "runs", name: "Deployment Orders", desc: "Finish runs for the guild", need: 5, xp: 240, coins: 60 },
+  { id: "wins", name: "Hold The Line", desc: "Win Battle runs", need: 3, xp: 420, coins: 110 },
+  { id: "donate", name: "Quartermaster", desc: "Donate to the guild vault", need: 2, xp: 300, coins: 80 },
+  { id: "chests", name: "Lockpicker", desc: "Open chests of any grade", need: 6, xp: 260, coins: 70 },
+];
 
 // ---------- gift codes ----------
 /**

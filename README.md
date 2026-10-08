@@ -131,10 +131,63 @@ your upgrades.
   levels 1→15, and `Ascent All` raises every unlocked tower by one level for gold.
 - **Awakenings:** exotic legendary towers (Lightning Princess, Hellstorm) have two awakening tracks
   that cost Magic Tokens, unlock at menu level 10 / 15 and go up to tier V.
-- **Daily Rewards:** a 7-day streak calendar on the Command Center. Each day pays more than the
-  last (gold, fragments, gems, tokens, and a grand cache on day 7). Miss a day and the streak
-  resets to 1.
 - Progress saves to `localStorage` under `magictd_save_v1`; Settings → Reset Progress wipes it.
+
+### Daily Rewards (resets at 07:00)
+
+The 7-day streak calendar lives on the Command Center. **A "game day" starts at 07:00 local
+time**, not at midnight — claiming at 06:59 and again at 07:01 counts as two different days.
+The panel shows a live countdown to the next rollover. Miss a day and the streak resets to 1.
+
+| Day | Reward |
+| --- | --- |
+| 1 | 1,200 gems |
+| 2 | Silver Chest |
+| 3 | Legendary Chest |
+| 4 | ×5 random legendary tower fragments |
+| 5 | 25,000 gold + 900 gems |
+| 6 | ×5 Basic Chip Module + ×2 Advanced Chip Module |
+| 7 | ×3 Legendary Chests |
+
+Chest days roll their contents on claim, so the loot the animation shows is exactly what is
+banked. Every claim — daily streak, event bonus, shop chest, guild chest, competition payout —
+plays the **reward claim ceremony**: the chest rattles, bursts open with a shock ring and spark
+shower, and each reward line flies in one after another (`RewardClaim` in `src/components/ui.tsx`).
+
+### Daily events
+
+One event is live per weekday and each one applies a real modifier (see `eventBonus()` in
+`src/game/data.ts`), plus a once-a-day bonus you can claim from the Specials tab or the home
+banner.
+
+| Day | Event | Effect |
+| --- | --- | --- |
+| Monday | **Luck Hunting** | +1 chest fragment, fragment rolls bias rare |
+| Tuesday | **Chest Box** | −25% on every chest in the Shop |
+| Wednesday | **Trophy Competition** | +30 trophies per win, defeats only cost 10 |
+| Thursday | **Items Finding** | Victories drop chip modules |
+| Friday & Saturday | **Mineshaft** | +60% gold from every run |
+| Sunday | **Survive Lightning** | ×2 gems from runs, +15% enemy health |
+
+### Trophies & competition
+
+Battle runs stake ladder trophies: **a victory pays +70 and a defeat costs −20** (never below 0).
+Endless is a score mode and does not touch the ladder. Trophies sort you into eight leagues
+(Copper → Rift Legend) and feed the **weekly competition** on Specials → Competition: a standings
+board seeded from the week stamp, with a once-a-week payout for Champion / Top 3 / 10 / 25 / 50.
+
+### Chips, Support and Heroes chests
+
+Chip modules (Basic, Advanced, Elite) are the new crafting currency. The Shop now sells six chest
+grades including the **Support Chest** (chip modules + gold) and the **Heroes Chest** (hero
+shards). Banking `HERO_SHARD_COST` shards levels a hero for free, without spending gold.
+
+### Guild
+
+Joining a guild is now real state on the save. Guilds are gated behind a trophy requirement and
+each one carries a perk. Members get a contribution level fed by daily donations (3 per game day),
+a free daily guild chest, a guild-coin store, weekly war objectives tracked against your own
+counters, a roster pulled from the ladder, and a chat you can post in.
 
 ### Towers
 
@@ -225,6 +278,11 @@ loading → every tab, settings toggles + reset persistence, buying/opening/coll
 trading gold for fragments and gems for tokens, previewing + upgrading towers, waking a tower with
 a congratulations ceremony, claiming the daily streak, upgrading a hero, zooming the arena, and a
 battle run that summons towers onto the grid, buys from the run shop, spawns wave 1 and abandons.
+It also pins down the new systems: the 07:00 game-day rollover, the exact 7-day reward table and
+its claim ceremony, the weekday event rotation and its modifiers, the +70/−20 trophy swing with
+league tiers, the weekly competition board and payout tiers, the Support/Heroes chest rolls, chip
+modules, hero shards, the full guild loop (join gating, donation caps, chest, coin store, war
+objectives) and the reworked enemy palettes/silhouettes.
 It also covers the reworked balance (4-summon opening budget, +2 enemies per wave, +40% payouts),
 the boss kit and the new boss cutscene/health bar/skill banners, gift-code redemption, the ascent
 buttons, the moved hero card with its cooldown ring, the save-file helpers, tower/wave/cost

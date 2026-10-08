@@ -1,17 +1,9 @@
 import { useState } from "react";
 import type { SaveData } from "../game/save";
-import { randFrag } from "../game/save";
+import { bumpQuest, grantLoot, lootLines, rollChest, type ChestLoot } from "../game/save";
 import { sfx } from "../game/audio";
-import { CHESTS, TOWERS, TOWER_BY_ID, RARITY, type Rarity } from "../game/data";
-import { CoinIcon, GemIcon, Modal, TokenIcon, TowerIcon } from "../components/ui";
-import { ChestSVG } from "./Menus";
-
-interface Reward {
-  gold: number;
-  gems: number;
-  tokens: number;
-  frags: { id: string; n: number }[];
-}
+import { CHESTS, CHIPS, HERO_BY_ID, TOWERS, TOWER_BY_ID, RARITY, eventBonus, eventForDate, type Rarity } from "../game/data";
+import { ChipIcon, CoinIcon, ClaimChest, GemIcon, Modal, RewardClaim, ShardIcon, TokenIcon, TowerIcon, type ClaimData } from "../components/ui";
 
 /** gold price of one fragment of each rarity */
 const FRAG_PRICE: Record<Rarity, number> = { normal: 120, decent: 320, epic: 750, legendary: 1400 };
@@ -21,27 +13,6 @@ const TOKEN_PACKS = [
   { tokens: 5, gems: 4 },
   { tokens: 12, gems: 9 },
 ];
-
-function rollReward(chestId: string): Reward {
-  const c = CHESTS.find((x) => x.id === chestId)!;
-  const gold = c.gold[0] + Math.floor(Math.random() * (c.gold[1] - c.gold[0]));
-  const nFrags = c.frags[0] + Math.floor(Math.random() * (c.frags[1] - c.frags[0] + 1));
-  const frags: { id: string; n: number }[] = [];
-  for (let i = 0; i < nFrags; i++) {
-    const id = randFrag(c.id === "legendary" ? 1 : c.id === "epic" ? 0.45 : c.id === "silver" ? 0.15 : 0);
-    const ex = frags.find((f) => f.id === id);
-    if (ex) ex.n++;
-    else frags.push({ id, n: 1 });
-  }
-  let gems = 0;
-  let tokens = 0;
-  if (c.id === "epic" && Math.random() < 0.25) gems = 1;
-  if (c.id === "legendary") {
-    if (Math.random() < 0.6) gems = 1 + (Math.random() < 0.4 ? 1 : 0);
-    if (Math.random() < 0.3) tokens = 1;
-  }
-  return { gold, gems, tokens, frags };
-}
 
 export default function Shop({
   save,
@@ -54,9 +25,15 @@ export default function Shop({
 }) {
   const [opening, setOpening] = useState<string | null>(null);
   const [stage, setStage] = useState<"closed" | "shaking" | "reward">("closed");
-  const [reward, setReward] = useState<Reward | null>(null);
+  const [loot, setLoot] = useState<ChestLoot | null>(null);
+  const [claim, setClaim] = useState<ClaimData | null>(null);
   const [fragPick, setFragPick] = useState<string>(TOWERS[0].id);
   const [fragQty, setFragQty] = useState<1 | 5>(1);
+
+  // the live weekday event discounts chests and sweetens the fragment rolls
+  const ev = eventForDate();
+  const bonus = eventBonus(ev.id);
+  const priceOf = (c: (typeof CHESTS)[number]) => Math.max(1, Math.round(c.cost * bonus.chestPriceMul));
 
   const chest = CHESTS.find((c) => c.id === opening);
   const picked = TOWER_BY_ID[fragPick];
@@ -65,19 +42,21 @@ export default function Shop({
 
   const tryBuy = (id: string) => {
     const c = CHESTS.find((x) => x.id === id)!;
-    if (c.gem === 1 ? save.gems < c.cost : save.gold < c.cost) {
+    const cost = priceOf(c);
+    if (c.gem === 1 ? save.gems < cost : save.gold < cost) {
       sfx.error();
       push(c.gem === 1 ? "Not enough gems" : "Not enough gold", "#ff4d5e");
       return;
     }
     sfx.chest();
     mutate((s) => {
-      if (c.gem === 1) s.gems -= c.cost;
-      else s.gold -= c.cost;
+      if (c.gem === 1) s.gems -= cost;
+      else s.gold -= cost;
+      bumpQuest(s, "chests", 1);
     });
     setOpening(id);
     setStage("closed");
-    setReward(null);
+    setLoot(null);
     setTimeout(() => setStage("shaking"), 500);
   };
 
@@ -109,25 +88,21 @@ export default function Shop({
     push(`+${tokens} Magic Tokens`, "#ff4fd8");
   };
 
-  const collect = () => {
-    if (!reward) return;
-    mutate((s) => {
-      s.gold += reward.gold;
-      s.gems += reward.gems;
-      s.tokens += reward.tokens;
-      reward.frags.forEach((f) => {
-        s.frags[f.id] = (s.frags[f.id] || 0) + f.n;
-      });
+  /** roll + bank the chest, then hand the exact loot to the claim animation */
+  const smash = () => {
+    if (!chest) return;
+    const rolled = rollChest(chest.id, bonus.chestFragBonus, bonus.fragBias);
+    setLoot(rolled);
+    setStage("reward");
+    sfx.gem();
+    mutate((s) => grantLoot(s, rolled));
+    setClaim({
+      title: chest.name.toUpperCase(),
+      subtitle: bonus.chestPriceMul < 1 ? `${ev.name} discount applied` : chest.blurb,
+      color: chest.color,
+      chest: true,
+      lines: lootLines(rolled),
     });
-    sfx.coin();
-    push(
-      `+${reward.gold} gold` +
-        (reward.gems ? ` · +${reward.gems} gems` : "") +
-        (reward.tokens ? ` · +${reward.tokens} tokens` : "") +
-        ` · ${reward.frags.length} frag${reward.frags.length > 1 ? "s" : ""}`,
-      "#ffcf4d"
-    );
-    setOpening(null);
   };
 
   const legendaries = TOWERS.filter((t) => t.rarity === "legendary");
@@ -141,32 +116,113 @@ export default function Shop({
         </p>
       </div>
 
+      {/* live event banner */}
+      <div className="tile event-card live flex flex-wrap items-center gap-3 p-3" style={{ borderColor: ev.color + "77" }}>
+        <span className="live-dot shrink-0" style={{ background: ev.color }} />
+        <div className="min-w-[180px] flex-1">
+          <div className="font-disp text-base leading-none" style={{ color: ev.color }}>
+            {ev.name}
+          </div>
+          <div className="text-[11.5px] font-semibold text-[var(--dim)]">{ev.perk}</div>
+        </div>
+        {bonus.chestPriceMul < 1 && (
+          <span className="pill-dark text-[11px] text-[#3dff8e]">-{Math.round((1 - bonus.chestPriceMul) * 100)}% ON ALL CHESTS</span>
+        )}
+      </div>
+
       <div>
         <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">CHESTS</div>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
           {CHESTS.map((c, i) => {
-            const afford = c.gem === 1 ? save.gems >= c.cost : save.gold >= c.cost;
+            const cost = priceOf(c);
+            const afford = c.gem === 1 ? save.gems >= cost : save.gold >= cost;
+            const discounted = cost < c.cost;
             return (
-              <div key={c.id} className="tile tile-hover anim-pop flex flex-col items-center p-4" style={{ animationDelay: `${i * 60}ms`, borderColor: c.color + "66" }}>
-                <ChestSVG color={c.color} size={92} />
-                <div className="font-disp mt-1 text-base" style={{ color: c.color }}>{c.name}</div>
-                <div className="mt-0.5 h-4 text-xs font-bold text-[var(--dim)]">
-                  {c.gold[0]}–{c.gold[1]}g · {c.frags[0]}–{c.frags[1]} frags
+              <div
+                key={c.id}
+                className="tile tile-hover anim-pop relative flex flex-col items-center p-4"
+                style={{ animationDelay: `${i * 60}ms`, borderColor: c.color + "66" }}
+                data-chest={c.id}
+              >
+                {discounted && (
+                  <span className="badge-num absolute -right-1.5 -top-1.5" style={{ borderColor: "#3dff8e", color: "#3dff8e" }}>
+                    SALE
+                  </span>
+                )}
+                <ClaimChest color={c.color} size={88} stage="shut" />
+                <div className="font-disp mt-1 text-center text-base" style={{ color: c.color }}>
+                  {c.name}
                 </div>
-                <button
-                  className={`btn mt-3 w-full py-2 text-sm ${afford ? "btn-gold" : ""}`}
-                  disabled={!afford}
-                  onClick={() => tryBuy(c.id)}
-                >
-                  {c.gem === 1 ? (
-                    <span className="inline-flex items-center gap-1.5"><GemIcon size={15} /> {c.cost}</span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5"><CoinIcon size={15} /> {c.cost}</span>
+                <div className="mt-0.5 text-center text-[11px] font-bold text-[var(--dim)]">{c.blurb}</div>
+                <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[10.5px] font-bold text-[var(--dim)]">
+                  <span className="text-[#ffcf4d]">
+                    {c.gold[0]}–{c.gold[1]}g
+                  </span>
+                  {c.frags[1] > 0 && (
+                    <span>
+                      · {c.frags[0]}–{c.frags[1]} frags
+                    </span>
                   )}
+                  {c.chips?.map((ch) => (
+                    <span key={ch.id} className="inline-flex items-center gap-0.5">
+                      · <ChipIcon id={ch.id} size={13} />
+                      {ch.min}–{ch.max}
+                    </span>
+                  ))}
+                  {c.heroShards && (
+                    <span className="inline-flex items-center gap-0.5">
+                      · <ShardIcon size={13} />
+                      {c.heroShards[0]}–{c.heroShards[1]} shards
+                    </span>
+                  )}
+                </div>
+                <button className={`btn mt-3 w-full py-2 text-sm ${afford ? "btn-gold" : ""}`} disabled={!afford} onClick={() => tryBuy(c.id)}>
+                  <span className="inline-flex items-center gap-1.5">
+                    {c.gem === 1 ? <GemIcon size={15} /> : <CoinIcon size={15} />}
+                    {cost.toLocaleString()}
+                    {discounted && <s className="text-[10px] opacity-60">{c.cost.toLocaleString()}</s>}
+                  </span>
                 </button>
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* CHIP MODULES */}
+      <div>
+        <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">CHIP MODULES</div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {CHIPS.map((c) => (
+            <div key={c.id} className="tile flex items-center gap-3 p-3" style={{ borderColor: c.color + "44" }}>
+              <ChipIcon id={c.id} size={34} />
+              <div className="min-w-0 flex-1">
+                <div className="font-disp text-[15px]" style={{ color: c.color }}>
+                  {c.name}
+                </div>
+                <div className="text-[11px] font-semibold leading-snug text-[var(--dim)]">{c.desc}</div>
+              </div>
+              <span className="font-disp shrink-0 text-xl" style={{ color: c.color }}>
+                {save.chips[c.id] || 0}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* HERO SHARDS */}
+      <div>
+        <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">HERO SHARDS</div>
+        <div className="tile flex flex-wrap gap-2 p-3">
+          {Object.values(HERO_BY_ID).map((h) => (
+            <span key={h.id} className="pill-dark text-[11px]" style={{ borderColor: h.color + "55", color: h.color }}>
+              <ShardIcon size={15} color={h.color} />
+              {h.name} <span className="num">{save.heroShards[h.id] || 0}</span>
+            </span>
+          ))}
+          <span className="w-full text-[11px] font-semibold text-[var(--dim)]">
+            Heroes Chests drop shards. Spend them on the Command Center to level a hero without gold.
+          </span>
         </div>
       </div>
 
@@ -293,60 +349,33 @@ export default function Shop({
       </div>
       <div className="h-2 shrink-0" />
 
-      {chest && (
+      {chest && !claim && (
         <Modal w={420} onClose={stage === "reward" ? () => setOpening(null) : undefined}>
           <div className="flex flex-col items-center">
-            <div className="font-disp text-2xl" style={{ color: chest.color }}>{chest.name}</div>
-            {stage !== "reward" ? (
-              <>
-                <div className="my-4" style={stage === "shaking" ? { animation: "shake 0.28s ease infinite" } : undefined}>
-                  <ChestSVG color={chest.color} size={150} />
-                </div>
-                <button
-                  className="btn btn-gold px-8 py-2.5"
-                  disabled={stage !== "shaking"}
-                  onClick={() => {
-                    setReward(rollReward(chest.id));
-                    setStage("reward");
-                    sfx.gem();
-                  }}
-                >
-                  {stage === "shaking" ? "Smash Open!" : "Warming up..."}
-                </button>
-              </>
-            ) : (
-              reward && (
-                <div className="anim-pop mt-3 w-full">
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    {reward.gold > 0 && (
-                      <span className="chip text-lg text-[#ffcf4d]"><CoinIcon /> +{reward.gold}</span>
-                    )}
-                    {reward.gems > 0 && (
-                      <span className="chip text-lg text-[#35e0ff]"><GemIcon /> +{reward.gems}</span>
-                    )}
-                    {reward.tokens > 0 && (
-                      <span className="chip text-lg text-[#ff4fd8]"><TokenIcon /> +{reward.tokens}</span>
-                    )}
-                  </div>
-                  <div className="mt-3 flex flex-wrap justify-center gap-2">
-                    {reward.frags.map((f) => (
-                      <div key={f.id} className="chip">
-                        <TowerIcon def={TOWER_BY_ID[f.id]} size={26} />
-                        <span className="text-[13px]">{TOWER_BY_ID[f.id].name} ×{f.n}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <button className="btn btn-gold mt-4 w-full py-2.5" onClick={collect}>
-                    Collect
-                  </button>
-                  <button className="btn mt-2 w-full py-2 text-sm" onClick={() => setOpening(null)}>
-                    Close
-                  </button>
-                </div>
-              )
-            )}
+            <div className="font-disp text-2xl" style={{ color: chest.color }}>
+              {chest.name}
+            </div>
+            <div className="my-4">
+              <ClaimChest color={chest.color} size={150} stage={stage === "shaking" ? "shake" : "shut"} />
+            </div>
+            <button className="btn btn-gold px-8 py-2.5" disabled={stage !== "shaking"} onClick={smash}>
+              {stage === "shaking" ? "Smash Open!" : "Warming up..."}
+            </button>
           </div>
         </Modal>
+      )}
+
+      {claim && (
+        <RewardClaim
+          data={claim}
+          onClose={() => {
+            setClaim(null);
+            setOpening(null);
+            setLoot(null);
+            sfx.coin();
+            if (loot) push(`Banked ${lootLines(loot).length} reward${lootLines(loot).length === 1 ? "" : "s"}`, chest?.color || "#ffcf4d");
+          }}
+        />
       )}
     </div>
   );

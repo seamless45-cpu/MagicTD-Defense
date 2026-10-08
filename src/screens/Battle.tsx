@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { clampZoom, heroLevel } from "../game/save";
+import { addChips, applyBattleTrophies, bumpQuest, clampZoom, heroLevel } from "../game/save";
 import { sfx } from "../game/audio";
 import {
   TOWERS,
@@ -38,6 +38,11 @@ import {
   OVERDRIVE_TIME,
   SLOW_VULN,
   RUN_SHOP,
+  eventBonus,
+  eventForDate,
+  leagueFor,
+  trophyDelta,
+  type ChipBag,
   runShopCost,
   towerArt,
   type TowerDef,
@@ -45,7 +50,14 @@ import {
   type HeroKind,
   type RunShopItem,
 } from "../game/data";
-import { TowerIcon, useToasts, Toasts, CoinIcon, HeroIcon } from "../components/ui";
+import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon } from "../components/ui";
+
+/**
+ * The weekday event is resolved once per module load: it modifies enemy health,
+ * payouts and the trophy swing for every run played today.
+ */
+const LIVE_EVENT = eventForDate();
+const EV_BONUS = eventBonus(LIVE_EVENT.id);
 
 // ---------- board geometry ----------
 const W = 1000;
@@ -259,7 +271,18 @@ interface G {
   shake: number;
   redFlash: number;
   tokensAwarded: boolean;
-  final: null | { won: boolean; gold: number; gems: number; tokens: number; frags: { id: string; n: number }[]; rounds: number };
+  final: null | {
+    won: boolean;
+    gold: number;
+    gems: number;
+    tokens: number;
+    frags: { id: string; n: number }[];
+    rounds: number;
+    /** trophy swing applied on collect (Battle only) */
+    trophies: number;
+    /** chip modules from the Items Finding event */
+    chips: ChipBag | null;
+  };
 }
 
 let uidC = 1;
@@ -510,18 +533,26 @@ export default function Battle({
       // whatever is left in the run wallet is paid out on top of the clear bonus
       const wallet = Math.floor(g.gold);
 
+      const baseGold =
+        (mode === "endless" ? endlessGold : won ? reward(150 + 30 * g.maxRounds) : reward(30 + 10 * rounds)) + wallet;
+      const baseGems = mode === "endless" ? endlessGems : won ? reward(2) : 0;
+      // Items Finding drops chip modules on a win (one extra advanced on boss waves)
+      const chips: ChipBag | null =
+        won && EV_BONUS.chipDrop
+          ? { ...EV_BONUS.chipDrop, ...(rounds >= 4 ? { advanced: 1 } : {}) }
+          : null;
+      // trophies only move in Battle; Endless is a score mode with no ladder stake
+      const trophies = mode === "battle" ? trophyDelta(won, EV_BONUS) : 0;
+
       g.final = {
         won,
-        gold:
-          (mode === "endless"
-            ? endlessGold
-            : won
-              ? reward(150 + 30 * g.maxRounds)
-              : reward(30 + 10 * rounds)) + wallet,
-        gems: mode === "endless" ? endlessGems : won ? reward(2) : 0,
+        gold: Math.round(baseGold * EV_BONUS.goldMul),
+        gems: Math.round(baseGems * EV_BONUS.gemMul),
         tokens: mode === "endless" ? endlessTokens : 0,
         frags,
         rounds,
+        trophies,
+        chips,
       };
       if (won) sfx.win();
       else sfx.lose();
@@ -1326,7 +1357,7 @@ export default function Battle({
         while (g.spawnQ.length && g.spawnQ[0].at <= g.t) {
           const s = g.spawnQ.shift()!;
           const et = ENEMY_TYPES[s.type];
-          const hp = roundHp(g.round) * et.hpMul;
+          const hp = roundHp(g.round) * et.hpMul * EV_BONUS.hpMul;
           const boss = isBossType(s.type);
           g.enemies.push({
             id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012), type: s.type,
@@ -2121,80 +2152,416 @@ export default function Battle({
       ctx.globalAlpha = 1;
     };
 
+    /**
+     * Enemy renderer (reworked). Every type now has a hand-drawn body built
+     * from layered shapes: a ground shadow, a walk/float cycle, directional
+     * facing along the path, shading, limbs and per-type details (armour
+     * plates, robes and staff, warlord axe, overlord rift crown).
+     */
     const drawEnemy = (e: Enemy, now: number) => {
       const p = pathPos(e.d);
       const et = ENEMY_TYPES[e.type];
-      const w2 = Math.sin(now / 150 + e.wob) * 2;
+      // facing: sample a point slightly ahead on the path
+      const ahead = pathPos(e.d + 6);
+      const face = Math.atan2(ahead.y - p.y, ahead.x - p.x);
+      const flip = Math.cos(face) < 0 ? -1 : 1;
+      const cycle = now / 1000 * et.bobRate * 6 + e.wob;
+      const bob = Math.sin(cycle) * (et.shape === "slime" ? 0 : 2);
+      const R = et.r;
+
+      // ground shadow, squashed with the bob so the step reads as weight
       ctx.save();
-      ctx.translate(p.x, p.y + w2);
-      ctx.fillStyle = et.color;
-      ctx.strokeStyle = "rgba(0,0,0,0.5)";
+      ctx.globalAlpha = 0.32;
+      ctx.fillStyle = "#000";
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y + R * 0.92, R * 0.86, R * 0.3 + Math.sin(cycle) * 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.translate(p.x, p.y + bob);
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = et.shade;
       ctx.lineWidth = 2;
-      if (e.type === 0) {
+
+      /** vertical body gradient: lit top, shaded belly */
+      const bodyGrad = (h: number) => {
+        const gr = ctx.createLinearGradient(0, -h, 0, h);
+        gr.addColorStop(0, et.accent);
+        gr.addColorStop(0.45, et.color);
+        gr.addColorStop(1, et.shade);
+        return gr;
+      };
+
+      const eye = (x: number, y: number, r: number, pupil = et.shade) => {
+        ctx.fillStyle = "#ffffff";
         ctx.beginPath();
-        ctx.ellipse(0, 0, et.r, et.r * (0.85 + Math.sin(now / 120 + e.wob) * 0.12), 0, 0, Math.PI * 2);
+        ctx.ellipse(x, y, r, r * 1.1, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#0a3d1f";
+        ctx.fillStyle = pupil;
         ctx.beginPath();
-        ctx.arc(-4, -3, 2.5, 0, Math.PI * 2);
+        ctx.arc(x + flip * r * 0.28, y + r * 0.12, r * 0.52, 0, Math.PI * 2);
         ctx.fill();
+      };
+
+      /** two stubby legs swinging out of phase */
+      const legs = (y: number, spread: number, len: number, w: number) => {
+        ctx.strokeStyle = et.shade;
+        ctx.lineWidth = w;
+        ctx.lineCap = "round";
+        for (let i = 0; i < 2; i++) {
+          const sw = Math.sin(cycle + i * Math.PI) * len * 0.55;
+          const lx = (i === 0 ? -spread : spread);
+          ctx.beginPath();
+          ctx.moveTo(lx, y);
+          ctx.lineTo(lx + sw, y + len);
+          ctx.stroke();
+        }
+        ctx.lineCap = "butt";
+      };
+
+      if (et.shape === "slime") {
+        // gelatinous blob: squash/stretch, inner nucleus, glossy highlight
+        const sq = 1 + Math.sin(cycle) * 0.14;
+        const rx = R * (1.08 / sq);
+        const ry = R * (0.88 * sq);
+        ctx.fillStyle = bodyGrad(ry);
         ctx.beginPath();
-        ctx.arc(4, -3, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (e.type === 1) {
-        ctx.rotate((e.d / 40) % Math.PI);
-        ctx.beginPath();
-        ctx.moveTo(et.r + 4, 0);
-        ctx.lineTo(-et.r, -et.r);
-        ctx.lineTo(-et.r, et.r);
+        ctx.moveTo(-rx, ry * 0.9);
+        ctx.bezierCurveTo(-rx * 1.1, -ry * 1.1, rx * 1.1, -ry * 1.1, rx, ry * 0.9);
+        ctx.quadraticCurveTo(0, ry * 1.35, -rx, ry * 0.9);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
-      } else if (e.type === 2) {
+        // drips
+        ctx.fillStyle = et.color;
+        ctx.globalAlpha = 0.75;
+        for (let i = -1; i <= 1; i++) {
+          ctx.beginPath();
+          ctx.arc(i * rx * 0.55, ry * 0.95 + Math.sin(cycle + i) * 1.5, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        // nucleus
+        ctx.fillStyle = et.shade;
+        ctx.globalAlpha = 0.55;
         ctx.beginPath();
-        ctx.roundRect(-et.r, -et.r, et.r * 2, et.r * 2, 6);
+        ctx.ellipse(0, ry * 0.25, rx * 0.34, ry * 0.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        eye(-rx * 0.3, -ry * 0.2, R * 0.21);
+        eye(rx * 0.32, -ry * 0.2, R * 0.21);
+        // gloss
+        ctx.fillStyle = "rgba(255,255,255,0.45)";
+        ctx.beginPath();
+        ctx.ellipse(-rx * 0.38, -ry * 0.55, rx * 0.22, ry * 0.14, -0.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (et.shape === "runner") {
+        // lean sprinter wrapped in a speed cowl, trailing wisps
+        ctx.save();
+        ctx.scale(flip, 1);
+        // motion trail
+        ctx.globalAlpha = 0.28;
+        ctx.fillStyle = et.color;
+        for (let i = 1; i <= 3; i++) {
+          ctx.beginPath();
+          ctx.ellipse(-R * (0.9 + i * 0.5), 0, R * 0.42, R * 0.3, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        legs(R * 0.55, R * 0.3, R * 0.6, 3);
+        // body: forward-leaning teardrop
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.moveTo(R * 1.05, -R * 0.1);
+        ctx.quadraticCurveTo(R * 0.2, -R * 0.95, -R * 0.55, -R * 0.35);
+        ctx.quadraticCurveTo(-R * 0.95, 0, -R * 0.5, R * 0.55);
+        ctx.quadraticCurveTo(R * 0.3, R * 0.8, R * 1.05, -R * 0.1);
+        ctx.closePath();
         ctx.fill();
         ctx.stroke();
-        ctx.strokeStyle = "#dbe7ff";
+        // cowl stripe
+        ctx.strokeStyle = et.accent;
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.35, -R * 0.1);
+        ctx.quadraticCurveTo(R * 0.2, -R * 0.35, R * 0.8, -R * 0.12);
+        ctx.stroke();
+        // trailing scarf
+        ctx.strokeStyle = et.accent;
         ctx.lineWidth = 3;
+        ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.arc(0, 0, et.r + 4, -0.8, 0.8);
+        ctx.moveTo(-R * 0.4, -R * 0.3);
+        ctx.quadraticCurveTo(-R * 1.1, -R * 0.5 + Math.sin(cycle * 1.6) * 3, -R * 1.7, -R * 0.1 + Math.sin(cycle * 1.6 + 1) * 4);
         ctx.stroke();
-      } else if (e.type === 3) {
+        ctx.lineCap = "butt";
+        eye(R * 0.45, -R * 0.28, R * 0.19);
+        ctx.restore();
+      } else if (et.shape === "knight") {
+        // armoured block with a shield arm and a crested helm
+        legs(R * 0.8, R * 0.42, R * 0.5, 4);
+        ctx.fillStyle = bodyGrad(R);
         ctx.beginPath();
-        for (let i = 0; i < 5; i++) {
-          const ang = (i / 5) * Math.PI * 2 - Math.PI / 2;
-          const px = Math.cos(ang) * et.r;
-          const py = Math.sin(ang) * et.r;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
+        ctx.roundRect(-R * 0.82, -R * 0.75, R * 1.64, R * 1.6, 5);
+        ctx.fill();
+        ctx.stroke();
+        // chest plating
+        ctx.strokeStyle = et.accent;
+        ctx.lineWidth = 1.6;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(-R * 0.72, -R * 0.4 + i * R * 0.42);
+          ctx.lineTo(R * 0.72, -R * 0.4 + i * R * 0.42);
+          ctx.stroke();
         }
+        // pauldrons
+        ctx.fillStyle = et.accent;
+        ctx.beginPath();
+        ctx.ellipse(-R * 0.86, -R * 0.55, R * 0.34, R * 0.26, 0, 0, Math.PI * 2);
+        ctx.ellipse(R * 0.86, -R * 0.55, R * 0.34, R * 0.26, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // helm
+        ctx.fillStyle = et.accent;
+        ctx.strokeStyle = et.shade;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(-R * 0.5, -R * 1.25, R, R * 0.6, 3);
+        ctx.fill();
+        ctx.stroke();
+        // visor slit
+        ctx.fillStyle = "#121a33";
+        ctx.fillRect(-R * 0.36, -R * 1.05, R * 0.72, R * 0.16);
+        ctx.fillStyle = "#ff8f5a";
+        ctx.fillRect(-R * 0.3 + flip * 2, -R * 1.02, R * 0.18, R * 0.1);
+        ctx.fillRect(R * 0.12 + flip * 2, -R * 1.02, R * 0.18, R * 0.1);
+        // crest
+        ctx.fillStyle = "#dbe7ff";
+        ctx.beginPath();
+        ctx.moveTo(0, -R * 1.25);
+        ctx.quadraticCurveTo(flip * R * 0.25, -R * 1.75, flip * R * 0.55, -R * 1.35);
+        ctx.quadraticCurveTo(flip * R * 0.2, -R * 1.35, 0, -R * 1.18);
+        ctx.fill();
+        // shield (front arm), rocking with the step
+        ctx.save();
+        ctx.translate(flip * R * 0.95, R * 0.05);
+        ctx.rotate(Math.sin(cycle) * 0.12);
+        ctx.fillStyle = "#dbe7ff";
+        ctx.strokeStyle = et.shade;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -R * 0.6);
+        ctx.lineTo(R * 0.42 * flip, -R * 0.4);
+        ctx.lineTo(R * 0.42 * flip, R * 0.3);
+        ctx.lineTo(0, R * 0.68);
+        ctx.lineTo(-R * 0.42 * flip, R * 0.3);
+        ctx.lineTo(-R * 0.42 * flip, -R * 0.4);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
+        ctx.restore();
+      } else if (et.shape === "mage") {
+        // hovering robed caster with an orbiting focus orb
+        const float = Math.sin(cycle * 0.6) * 2.5;
+        ctx.translate(0, float);
+        // robe
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.moveTo(0, -R * 0.55);
+        ctx.quadraticCurveTo(R * 0.75, -R * 0.2, R * 0.9, R * 0.95);
+        ctx.quadraticCurveTo(0, R * 1.25, -R * 0.9, R * 0.95);
+        ctx.quadraticCurveTo(-R * 0.75, -R * 0.2, 0, -R * 0.55);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // robe trim
+        ctx.strokeStyle = et.accent;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.75, R * 0.82);
+        ctx.quadraticCurveTo(0, R * 1.08, R * 0.75, R * 0.82);
+        ctx.stroke();
+        // hood
+        ctx.fillStyle = et.shade;
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.52, -R * 0.4);
+        ctx.quadraticCurveTo(0, -R * 1.45, R * 0.52, -R * 0.4);
+        ctx.quadraticCurveTo(0, -R * 0.15, -R * 0.52, -R * 0.4);
+        ctx.closePath();
+        ctx.fill();
+        // glowing eyes in the hood
         ctx.fillStyle = "#fff";
+        ctx.shadowColor = et.accent;
+        ctx.shadowBlur = 8;
         ctx.beginPath();
-        ctx.arc(0, -2, 3, 0, Math.PI * 2);
+        ctx.arc(-R * 0.17, -R * 0.52, 2.1, 0, Math.PI * 2);
+        ctx.arc(R * 0.17, -R * 0.52, 2.1, 0, Math.PI * 2);
         ctx.fill();
-      } else {
+        ctx.shadowBlur = 0;
+        // staff + orbiting orb
+        ctx.strokeStyle = "#6b4a2a";
+        ctx.lineWidth = 2.4;
         ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const ang = (i / 6) * Math.PI * 2 + now / 800;
-          const rr = i % 2 === 0 ? et.r + 6 : et.r;
-          const px = Math.cos(ang) * rr;
-          const py = Math.sin(ang) * rr;
-          if (i === 0) ctx.moveTo(px, py);
-          else ctx.lineTo(px, py);
-        }
+        ctx.moveTo(flip * R * 0.75, -R * 0.75);
+        ctx.lineTo(flip * R * 0.62, R * 0.95);
+        ctx.stroke();
+        const oa = cycle * 0.5;
+        const ox = flip * R * 0.75 + Math.cos(oa) * R * 0.3;
+        const oy = -R * 0.9 + Math.sin(oa) * R * 0.18;
+        ctx.fillStyle = et.accent;
+        ctx.shadowColor = et.color;
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(ox, oy, R * 0.22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      } else if (et.shape === "warlord") {
+        // hulking brute: heavy shoulders, horned helm, swinging axe
+        legs(R * 0.72, R * 0.4, R * 0.52, 6);
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.95, -R * 0.45);
+        ctx.quadraticCurveTo(0, -R * 0.95, R * 0.95, -R * 0.45);
+        ctx.lineTo(R * 0.7, R * 0.8);
+        ctx.quadraticCurveTo(0, R * 1.05, -R * 0.7, R * 0.8);
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
-        ctx.fillStyle = "#ffd0d0";
-        ctx.font = "700 16px Rajdhani, sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("W", 0, 5);
+        // ribbed armour
+        ctx.strokeStyle = et.shade;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(-R * 0.6, -R * 0.15 + i * R * 0.3);
+          ctx.quadraticCurveTo(0, R * 0.05 + i * R * 0.3, R * 0.6, -R * 0.15 + i * R * 0.3);
+          ctx.stroke();
+        }
+        // spiked pauldrons
+        ctx.fillStyle = et.shade;
+        [-1, 1].forEach((sgn) => {
+          ctx.beginPath();
+          ctx.moveTo(sgn * R * 0.6, -R * 0.58);
+          ctx.lineTo(sgn * R * 1.22, -R * 0.3);
+          ctx.lineTo(sgn * R * 0.62, R * 0.02);
+          ctx.closePath();
+          ctx.fill();
+        });
+        // head + horns
+        ctx.fillStyle = et.accent;
+        ctx.beginPath();
+        ctx.arc(0, -R * 0.75, R * 0.33, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#f3e2c8";
+        ctx.lineWidth = 3;
+        ctx.lineCap = "round";
+        [-1, 1].forEach((sgn) => {
+          ctx.beginPath();
+          ctx.moveTo(sgn * R * 0.26, -R * 0.92);
+          ctx.quadraticCurveTo(sgn * R * 0.62, -R * 1.3, sgn * R * 0.4, -R * 1.55);
+          ctx.stroke();
+        });
+        ctx.lineCap = "butt";
+        ctx.fillStyle = "#2a0a10";
+        ctx.beginPath();
+        ctx.arc(-R * 0.12, -R * 0.78, 2.6, 0, Math.PI * 2);
+        ctx.arc(R * 0.12, -R * 0.78, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+        // axe, swinging with the gait
+        ctx.save();
+        ctx.translate(flip * R * 1.05, R * 0.1);
+        ctx.rotate(Math.sin(cycle) * 0.22 - flip * 0.3);
+        ctx.strokeStyle = "#6b4a2a";
+        ctx.lineWidth = 3.2;
+        ctx.beginPath();
+        ctx.moveTo(0, -R * 0.75);
+        ctx.lineTo(0, R * 0.7);
+        ctx.stroke();
+        ctx.fillStyle = "#d8dee8";
+        ctx.beginPath();
+        ctx.moveTo(0, -R * 0.75);
+        ctx.quadraticCurveTo(flip * R * 0.75, -R * 0.6, flip * R * 0.55, -R * 0.08);
+        ctx.quadraticCurveTo(flip * R * 0.25, -R * 0.26, 0, -R * 0.2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      } else {
+        // overlord: a levitating rift sovereign — cloak, crown, orbiting shards
+        const float = Math.sin(cycle * 0.5) * 3.5;
+        ctx.translate(0, float);
+        // rift aura
+        const aura = ctx.createRadialGradient(0, 0, R * 0.3, 0, 0, R * 1.7);
+        aura.addColorStop(0, et.color + "88");
+        aura.addColorStop(1, "transparent");
+        ctx.fillStyle = aura;
+        ctx.beginPath();
+        ctx.arc(0, 0, R * 1.7, 0, Math.PI * 2);
+        ctx.fill();
+        // cloak
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.moveTo(0, -R * 0.85);
+        ctx.quadraticCurveTo(R * 1.0, -R * 0.35, R * 0.85, R * 0.85);
+        ctx.quadraticCurveTo(R * 0.4, R * 0.6 + Math.sin(cycle) * 3, 0, R * 1.05);
+        ctx.quadraticCurveTo(-R * 0.4, R * 0.6 - Math.sin(cycle) * 3, -R * 0.85, R * 0.85);
+        ctx.quadraticCurveTo(-R * 1.0, -R * 0.35, 0, -R * 0.85);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // sigil on the chest
+        ctx.strokeStyle = et.accent;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, R * 0.1, R * 0.28, 0, Math.PI * 2);
+        ctx.moveTo(0, R * 0.1 - R * 0.34);
+        ctx.lineTo(0, R * 0.1 + R * 0.34);
+        ctx.stroke();
+        // void face
+        ctx.fillStyle = "#0a0320";
+        ctx.beginPath();
+        ctx.ellipse(0, -R * 0.62, R * 0.4, R * 0.34, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.shadowColor = et.accent;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.ellipse(-R * 0.15, -R * 0.63, 2.6, 1.6, 0, 0, Math.PI * 2);
+        ctx.ellipse(R * 0.15, -R * 0.63, 2.6, 1.6, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // jagged crown
+        ctx.fillStyle = et.accent;
+        ctx.beginPath();
+        for (let i = -2; i <= 2; i++) {
+          const bx = i * R * 0.2;
+          ctx.moveTo(bx - R * 0.09, -R * 0.9);
+          ctx.lineTo(bx, -R * 1.25 - Math.abs(2 - Math.abs(i)) * R * 0.08);
+          ctx.lineTo(bx + R * 0.09, -R * 0.9);
+          ctx.closePath();
+        }
+        ctx.fill();
+        // orbiting rift shards
+        for (let i = 0; i < 3; i++) {
+          const a = cycle * 0.35 + (i / 3) * Math.PI * 2;
+          const sx = Math.cos(a) * R * 1.25;
+          const sy = Math.sin(a) * R * 0.5 - R * 0.2;
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(a * 2);
+          ctx.fillStyle = et.accent;
+          ctx.shadowColor = et.color;
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.moveTo(0, -4.5);
+          ctx.lineTo(3, 0);
+          ctx.lineTo(0, 4.5);
+          ctx.lineTo(-3, 0);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.shadowBlur = 0;
       }
+
       if (isBossType(e.type)) {
         // ward bubble
         if (e.ward > 0) {
@@ -2274,12 +2641,24 @@ export default function Battle({
         ctx.stroke();
       }
       ctx.restore();
+      // health bar: rounded, outlined, with a lighter cap so it reads at speed
       const w3 = Math.max(26, et.r * 2);
-      const hpPct = Math.max(0, e.hp / e.max);
-      ctx.fillStyle = "rgba(0,0,0,0.6)";
-      ctx.fillRect(p.x - w3 / 2, p.y - et.r - 14 + w2, w3, 5);
-      ctx.fillStyle = hpPct > 0.5 ? "#3dff8e" : hpPct > 0.25 ? "#ffd23f" : "#ff4d5e";
-      ctx.fillRect(p.x - w3 / 2, p.y - et.r - 14 + w2, w3 * hpPct, 5);
+      const hpPct = Math.max(0, Math.min(1, e.hp / e.max));
+      const by = p.y - et.r - (isBossType(e.type) ? 22 : 15) + bob;
+      const bh = isBossType(e.type) ? 6 : 5;
+      ctx.fillStyle = "rgba(0,0,0,0.72)";
+      ctx.beginPath();
+      ctx.roundRect(p.x - w3 / 2 - 1, by - 1, w3 + 2, bh + 2, 3);
+      ctx.fill();
+      const hpCol = hpPct > 0.5 ? "#3dff8e" : hpPct > 0.25 ? "#ffd23f" : "#ff4d5e";
+      const hpGrad = ctx.createLinearGradient(0, by, 0, by + bh);
+      hpGrad.addColorStop(0, "#ffffffaa");
+      hpGrad.addColorStop(0.35, hpCol);
+      hpGrad.addColorStop(1, hpCol);
+      ctx.fillStyle = hpGrad;
+      ctx.beginPath();
+      ctx.roundRect(p.x - w3 / 2, by, Math.max(1, w3 * hpPct), bh, 2);
+      ctx.fill();
     };
 
     const drawProj = (pr: Proj) => {
@@ -2752,6 +3131,14 @@ export default function Battle({
       if (mode === "endless") s.bestEndless = Math.max(s.bestEndless, f.rounds);
       else s.best = Math.max(s.best, f.rounds);
       if (f.won) s.wins++;
+      if (f.chips) addChips(s, f.chips);
+      if (mode === "battle") {
+        // +70 on a victory, -20 on a defeat (trophies never go below zero)
+        applyBattleTrophies(s, f.won, EV_BONUS.trophyWin, EV_BONUS.trophyLoss);
+        s.streak = f.won ? s.streak + 1 : 0;
+        if (f.won) bumpQuest(s, "wins", 1);
+      }
+      bumpQuest(s, "runs", 1);
     });
     sfx.coin();
     onExit();
@@ -3230,10 +3617,46 @@ export default function Battle({
                 {g.final.rounds > save.bestEndless ? `NEW RECORD · WAS ${save.bestEndless}` : `BEST ${save.bestEndless}`}
               </div>
             )}
+            {/* trophy swing — the ladder stake for Battle runs */}
+            {mode === "battle" && (
+              <div
+                className="trophy-pop mx-auto mt-3 inline-flex items-center gap-2 rounded-xl border px-3.5 py-2"
+                data-testid="trophy-swing"
+                style={{
+                  borderColor: g.final.trophies >= 0 ? "#3dff8e88" : "#ff4d5e88",
+                  background: g.final.trophies >= 0 ? "rgba(61,255,142,.08)" : "rgba(255,77,94,.08)",
+                }}
+              >
+                <TrophyIcon size={24} color={g.final.trophies >= 0 ? "#3dff8e" : "#ff4d5e"} />
+                <span className="font-disp text-2xl" style={{ color: g.final.trophies >= 0 ? "#3dff8e" : "#ff4d5e" }}>
+                  {g.final.trophies >= 0 ? "+" : ""}
+                  {g.final.trophies}
+                </span>
+                <span className="text-[11px] font-bold tracking-widest text-[var(--dim)]">
+                  {leagueFor(Math.max(0, save.trophies + g.final.trophies)).name.toUpperCase()} ·{" "}
+                  {Math.max(0, save.trophies + g.final.trophies).toLocaleString()}
+                </span>
+              </div>
+            )}
+            {EV_BONUS !== undefined && (LIVE_EVENT.id === "mineshaft" || LIVE_EVENT.id === "lightning" || LIVE_EVENT.id === "trophy" || LIVE_EVENT.id === "items") && (
+              <div className="mt-2 text-[11px] font-bold tracking-widest" style={{ color: LIVE_EVENT.color }}>
+                {LIVE_EVENT.name.toUpperCase()} BONUS APPLIED
+              </div>
+            )}
             <div className="mt-4 space-y-1.5 text-left">
               <RewardRow icon={<CoinIcon size={17} />} label="Gold" val={`+${g.final.gold}`} color="#ffcf4d" />
               {g.final.gems > 0 && <RewardRow icon={<span className="text-[#35e0ff]">◆</span>} label="Gems" val={`+${g.final.gems}`} color="#35e0ff" />}
               {g.final.tokens > 0 && <RewardRow icon={<span className="text-[#ff4fd8]">✦</span>} label="Magic Tokens" val={`+${g.final.tokens}`} color="#ff4fd8" />}
+              {g.final.chips &&
+                (Object.keys(g.final.chips) as (keyof typeof g.final.chips)[]).map((k) => (
+                  <RewardRow
+                    key={k}
+                    icon={<ChipIcon id={k} size={18} />}
+                    label={`${String(k)[0].toUpperCase()}${String(k).slice(1)} Chip Module`}
+                    val={`+${g.final!.chips![k]}`}
+                    color={k === "basic" ? "#8fe9ff" : k === "advanced" ? "#c44dff" : "#ffb324"}
+                  />
+                ))}
               {g.final.frags.map((f) => (
                 <RewardRow
                   key={f.id}

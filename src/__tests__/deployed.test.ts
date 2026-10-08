@@ -89,6 +89,20 @@ describe("published build (index.html)", () => {
       "Install App",
       "ASCENT",
       "Rift Overlord",
+      // 7 A.M. daily rewards, events, trophies, new chests and the guild rework
+      "Daily Rewards",
+      "Luck Hunting",
+      "Chest Box",
+      "Trophy Competition",
+      "Items Finding",
+      "Mineshaft",
+      "Survive Lightning",
+      "Support Chest",
+      "Heroes Chest",
+      "Advanced Chip Module",
+      "Guild Hall",
+      "COIN STORE",
+      "STANDINGS",
     ];
     const missing = markers.filter((m) => !html.includes(m));
     expect(missing, `published bundle is missing: ${missing.join(", ")}`).toHaveLength(0);

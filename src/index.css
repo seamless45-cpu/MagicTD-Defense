@@ -905,3 +905,264 @@ body,
     opacity: 0;
   }
 }
+
+/* ---------- reward claim ceremony ---------- */
+.claim-root {
+  background: rgba(2, 1, 10, 0.82);
+  animation: cerBackdrop 0.3s ease both;
+  backdrop-filter: blur(3px);
+}
+.claim-rays {
+  width: 140vmax;
+  height: 140vmax;
+  opacity: 0.22;
+  animation: spinSlow 26s linear infinite;
+  pointer-events: none;
+}
+.claim-card {
+  animation: claimCard 0.5s cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+@keyframes claimCard {
+  0% {
+    opacity: 0;
+    transform: translateY(26px) scale(0.86);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+.claim-title {
+  animation: claimTitle 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes claimTitle {
+  0% {
+    opacity: 0;
+    transform: scale(0.4) rotate(-6deg);
+    filter: blur(6px);
+  }
+  60% {
+    transform: scale(1.12) rotate(1deg);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+.claim-chest-shake {
+  animation: claimShake 0.26s ease-in-out infinite;
+}
+@keyframes claimShake {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  25% {
+    transform: translate(-5px, 1px) rotate(-4deg);
+  }
+  75% {
+    transform: translate(5px, -1px) rotate(4deg);
+  }
+}
+.claim-chest-burst {
+  animation: claimBurst 0.6s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+@keyframes claimBurst {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.22) translateY(-10px);
+  }
+  100% {
+    transform: scale(1.06) translateY(-4px);
+  }
+}
+.claim-lid {
+  animation: claimLid 0.55s cubic-bezier(0.3, 1.3, 0.5, 1) both;
+}
+@keyframes claimLid {
+  0% {
+    transform: rotate(0deg) translateY(0);
+  }
+  100% {
+    transform: rotate(-26deg) translateY(-16px);
+  }
+}
+.claim-ring {
+  width: 90px;
+  height: 90px;
+  border-radius: 999px;
+  border-width: 4px;
+  border-style: solid;
+  animation: claimRing 0.85s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+@keyframes claimRing {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.3);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(3.4);
+  }
+}
+.claim-flash {
+  animation: claimFlash 0.6s ease-out both;
+  pointer-events: none;
+}
+@keyframes claimFlash {
+  0% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.claim-spark {
+  position: absolute;
+  animation: claimSpark 1.35s cubic-bezier(0.1, 0.7, 0.3, 1) both;
+  pointer-events: none;
+}
+@keyframes claimSpark {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.4) rotate(0deg);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx)), var(--dy)) scale(1) rotate(var(--rot));
+  }
+}
+.claim-line {
+  animation: claimLine 0.5s cubic-bezier(0.2, 1.5, 0.4, 1) both;
+}
+@keyframes claimLine {
+  0% {
+    opacity: 0;
+    transform: translateX(-34px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+.claim-line-icon {
+  animation: claimIcon 1.4s ease-in-out infinite;
+}
+@keyframes claimIcon {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-3px) scale(1.07);
+  }
+}
+
+/* day tile "ready to claim" shimmer */
+.day-tile.next {
+  animation: dayReady 1.9s ease-in-out infinite;
+}
+@keyframes dayReady {
+  0%,
+  100% {
+    box-shadow: 0 0 0 rgba(255, 207, 77, 0);
+  }
+  50% {
+    box-shadow: 0 0 18px rgba(255, 207, 77, 0.45);
+  }
+}
+
+/* ---------- events / competition / guild ---------- */
+.event-card {
+  position: relative;
+  overflow: hidden;
+}
+.event-card.live::before {
+  content: "";
+  position: absolute;
+  inset: -40% -10%;
+  background: linear-gradient(115deg, transparent 40%, rgba(255, 255, 255, 0.14) 50%, transparent 60%);
+  animation: shineSweep 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  animation: livePulse 1.3s ease-in-out infinite;
+}
+@keyframes livePulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.7);
+  }
+}
+.ladder-row {
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+.ladder-row.me {
+  background: rgba(255, 207, 77, 0.12);
+  border-color: #ffcf4d88;
+}
+.bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.4s cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+.trophy-pop {
+  animation: trophyPop 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+@keyframes trophyPop {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) translateY(10px);
+  }
+  60% {
+    transform: scale(1.18);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+.tab-btn {
+  padding: 0.4rem 0.95rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--line);
+  background: rgba(8, 5, 26, 0.5);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  transition: all 0.15s ease;
+}
+.tab-btn:hover {
+  color: var(--txt);
+}
+.tab-btn.on {
+  color: #0b0722;
+  background: linear-gradient(180deg, #ffd766, #f5a623);
+  border-color: #ffd766;
+  box-shadow: 0 3px 0 #8a5200;
+}

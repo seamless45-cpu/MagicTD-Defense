@@ -103,7 +103,15 @@ describe("MagicTD app shell", () => {
     expect(document.body.textContent).toContain("Ascent All");
 
     click(byText("button", "Specials")!);
-    await waitFor(() => byText("div", "Season 3"), "specials screen");
+    await waitFor(() => byText("div", "WEEKLY ROTATION"), "specials screen");
+    // the weekday event rotation is listed in full
+    ["Luck Hunting", "Chest Box", "Trophy Competition", "Items Finding", "Mineshaft", "Survive Lightning"].forEach((n) =>
+      expect(document.body.textContent).toContain(n)
+    );
+    // and the competition tab shows the trophy ladder
+    click(document.querySelector('[data-testid="tab-competition"]') as HTMLElement);
+    await waitFor(() => document.querySelector('[data-testid="ladder"]'), "competition ladder");
+    expect(document.body.textContent).toContain("STANDINGS");
 
     click(byText("button", "Guild")!);
     await waitFor(() => byText("div", "Guild Hall"), "guild screen");
@@ -120,7 +128,7 @@ describe("MagicTD app shell", () => {
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
     expect(saved().sfx).not.toBe(false);
-    click(byText("button", "ON")!);
+    click(document.querySelector('[data-testid="toggle-sfx"]') as HTMLElement);
     await waitFor(() => saved().sfx === false, "sfx toggle persisted");
 
     click(byText("button", "Close")!);
@@ -500,25 +508,82 @@ describe("Awakenings", () => {
 });
 
 describe("Daily rewards", () => {
-  it("claims the daily streak once per day and banks the reward", async () => {
+  it("claims the 7am streak once per day and plays the claim animation", async () => {
     await mountApp();
     const panel = await waitFor(() => document.querySelector('[data-testid="daily-rewards"]') as HTMLElement, "daily panel");
     expect(panel.textContent).toContain("Daily Rewards");
+    // the reset hour is spelled out on the panel
+    expect(panel.textContent).toContain("07:00");
     // the first day is highlighted as the one being claimed
     expect(panel.querySelectorAll(".day-tile")).toHaveLength(7);
     expect(panel.querySelector(".day-tile.next")).toBeTruthy();
 
-    const goldBefore = saved().gold;
+    const gemsBefore = saved().gems;
     click(document.querySelector('[data-testid="daily-claim"]') as HTMLElement);
     await waitFor(() => saved().lastDaily !== "", "daily claimed");
-    await waitFor(() => saved().gold > goldBefore, "daily gold banked");
+    // day 1 is 1,200 gems
+    await waitFor(() => saved().gems === gemsBefore + 1200, "day 1 gems banked");
     expect(saved().dailyStreak).toBe(1);
+
+    // the claim ceremony is on screen with the reward lines
+    const overlay = await waitFor(() => document.querySelector('[data-testid="reward-claim"]') as HTMLElement, "claim animation");
+    expect(overlay.textContent).toContain("DAY 1");
+    await waitFor(() => document.querySelector('[data-testid="claim-lines"]'), "reward lines");
+    click(document.querySelector('[data-testid="claim-collect"]') as HTMLElement);
+    await waitFor(() => !document.querySelector('[data-testid="reward-claim"]'), "claim dismissed");
 
     const btn = document.querySelector('[data-testid="daily-claim"]') as HTMLButtonElement;
     await waitFor(() => btn.hasAttribute("disabled"), "claim button locked for the day");
     click(btn);
     await sleep(60);
-    expect(saved().gold).toBe(goldBefore + 75); // no double dip
+    expect(saved().gems).toBe(gemsBefore + 1200); // no double dip
+    noErrors();
+  });
+
+  it("claims the weekday event bonus once a day", async () => {
+    await mountApp();
+    const card = await waitFor(() => document.querySelector('[data-testid="today-event"]') as HTMLElement, "event card");
+    expect(card.textContent).toContain("LIVE TODAY");
+    click(document.querySelector('[data-testid="event-claim"]') as HTMLElement);
+    await waitFor(() => saved().lastEvent !== "", "event bonus claimed");
+    await waitFor(() => document.querySelector('[data-testid="reward-claim"]'), "event claim animation");
+    click(document.querySelector('[data-testid="claim-collect"]') as HTMLElement);
+    await waitFor(() => !document.querySelector('[data-testid="reward-claim"]'), "claim dismissed");
+    expect((document.querySelector('[data-testid="event-claim"]') as HTMLButtonElement).disabled).toBe(true);
+    noErrors();
+  });
+});
+
+describe("Trophies", () => {
+  it("shows the ladder standing and the win/loss stake on the home screen", async () => {
+    await mountApp();
+    const card = await waitFor(() => document.querySelector('[data-testid="trophy-card"]') as HTMLElement, "trophy card");
+    expect(card.textContent).toContain("+70");
+    expect(card.textContent).toContain("-20");
+    expect(card.textContent).toContain("Copper");
+    noErrors();
+  });
+});
+
+describe("Guild", () => {
+  it("joins a guild, donates and opens the daily guild chest", async () => {
+    await mountApp();
+    click(byText("button", "Guild")!);
+    await waitFor(() => document.querySelector('[data-testid="guild"]'), "guild screen");
+    expect(document.body.textContent).toContain("Arcane Vanguard");
+
+    click(byText("button", "Join Guild")!);
+    await waitFor(() => saved().guild.id === "vanguard", "joined the guild");
+    await waitFor(() => byText("button", "COIN STORE"), "guild tabs");
+
+    // the daily guild chest pays out through the claim ceremony
+    click(document.querySelector('[data-testid="guild-chest"]') as HTMLElement);
+    await waitFor(() => saved().guild.lastChest !== "", "guild chest opened");
+    await waitFor(() => document.querySelector('[data-testid="reward-claim"]'), "guild chest animation");
+    // the chest rattles open before the loot lands, so wait for the collect button
+    await waitFor(() => !(document.querySelector('[data-testid="claim-collect"]') as HTMLButtonElement).disabled, "chest opened");
+    click(document.querySelector('[data-testid="claim-collect"]') as HTMLElement);
+    await waitFor(() => !document.querySelector('[data-testid="reward-claim"]'), "claim dismissed");
     noErrors();
   });
 });

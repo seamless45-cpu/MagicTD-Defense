@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
+import type { ClaimData } from "../components/ui";
 import {
   todayStr,
   clearSave,
@@ -7,23 +8,77 @@ import {
   importSave,
   persistSave,
   claimDailyReward,
+  claimEventBonus,
+  cloneSave,
+  grantLoot,
+  claimGuildChest,
+  bumpQuest,
+  claimQuest,
+  donateToGuild,
+  donationsLeft,
+  eventClaimable,
+  guildChestReady,
   heroLevel,
+  joinGuild,
+  leaveGuild,
+  levelHeroWithShards,
+  lootLines,
   nextDailyStreak,
+  questDone,
+  questProgress,
   redeemGiftCode,
+  resetCountdown,
   upgradeHero,
+  weekStr,
+  buyGuildItem,
+  claimCompetition,
+  compClaimed,
+  GUILD_DONATIONS_PER_DAY,
 } from "../game/save";
 import { sfx, setVolume } from "../game/audio";
-import { CoinIcon, Emblem, GemIcon, HeroIcon, Modal, TokenIcon, TowerIcon } from "../components/ui";
+import {
+  ChipIcon,
+  CoinIcon,
+  Emblem,
+  GemIcon,
+  GuildIcon,
+  HeroIcon,
+  Modal,
+  RewardClaim,
+  ShardIcon,
+  TokenIcon,
+  TowerIcon,
+  TrophyIcon,
+} from "../components/ui";
 import {
   TOWERS,
   BATTLE_ROUNDS,
+  CHIPS,
+  COMPETITION_TIERS,
   DAILY_REWARDS,
+  EVENTS,
+  GUILDS,
+  GUILD_DONATIONS,
+  GUILD_QUESTS,
+  GUILD_SHOP,
   HEROES,
   HERO_BY_ID,
   HERO_MAX_LEVEL,
+  HERO_SHARD_COST,
+  LEAGUES,
+  TROPHY_LOSS,
+  TROPHY_WIN,
+  competitionBoard,
+  competitionTier,
+  eventBonus,
+  eventForDate,
+  guildLevel,
   heroCooldown,
   heroPower,
   heroUpgradeCost,
+  leagueFor,
+  nextLeague,
+  type ChipId,
 } from "../game/data";
 
 /**
@@ -230,6 +285,11 @@ export function Home({
   const heroMaxed = lv >= HERO_MAX_LEVEL;
   const canClaim = save.lastDaily !== todayStr();
   const day = nextDailyStreak(save);
+  const [claim, setClaim] = useState<ClaimData | null>(null);
+  const liveEv = eventForDate();
+  const shards = save.heroShards[hero.id] || 0;
+  const league = leagueFor(save.trophies);
+  const nextL = nextLeague(save.trophies);
 
   const doUpgrade = () => {
     if (heroMaxed) {
@@ -248,17 +308,78 @@ export function Home({
     return ok;
   };
 
-  const claim = () => {
-    const got = claimDailyReward(save);
-    if (!got) {
+  /**
+   * Daily claim. The reward is rolled once inside `mutate` so the loot the
+   * animation shows is exactly the loot that was banked (chests roll random
+   * contents, so rolling twice would desync the UI from the save).
+   */
+  const doClaim = () => {
+    if (!canClaim) {
       sfx.error();
-      return push("Already claimed today — come back tomorrow", "#ff4d5e");
+      return push("Already claimed — the next day unlocks at 07:00", "#ff4d5e");
+    }
+    // roll on a clone first so the animation shows exactly what gets banked
+    const g = claimDailyReward(cloneSave(save));
+    if (!g) {
+      sfx.error();
+      return push("Already claimed — the next day unlocks at 07:00", "#ff4d5e");
     }
     mutate((s) => {
-      claimDailyReward(s);
+      if (s.lastDaily === todayStr()) return;
+      grantLoot(s, g.loot);
+      s.dailyStreak = g.day;
+      s.lastDaily = todayStr();
     });
     sfx.chest();
-    push(`Day ${got.day}: ${got.label}`, got.color);
+    setClaim({
+      title: `DAY ${g.day}`,
+      subtitle: g.label,
+      lines: g.lines,
+      color: g.color,
+      chest: g.chests.length > 0,
+      chestCount: g.chests.reduce((a, c) => a + c.n, 0),
+    });
+  };
+
+  /** the once-a-day bonus attached to whatever event is live */
+  const doEventClaim = () => {
+    if (!eventClaimable(save)) {
+      sfx.error();
+      return push("Event bonus already taken today", "#ff4d5e");
+    }
+    const draft = cloneSave(save);
+    const loot = claimEventBonus(draft);
+    if (!loot) return;
+    mutate((s) => {
+      if (s.lastEvent === todayStr()) return;
+      grantLoot(s, loot);
+      s.lastEvent = todayStr();
+    });
+    sfx.chest();
+    setClaim({
+      title: liveEv.name.toUpperCase(),
+      subtitle: `${liveEv.tagline} event bonus`,
+      lines: lootLines(loot),
+      color: liveEv.color,
+      chest: liveEv.id === "chestbox",
+      chestCount: 2,
+    });
+  };
+
+  const doShardLevel = () => {
+    if (lv >= HERO_MAX_LEVEL) {
+      sfx.error();
+      return push(`${hero.name} is already max level`, "#ff4d5e");
+    }
+    if (shards < HERO_SHARD_COST) {
+      sfx.error();
+      return push(`Need ${HERO_SHARD_COST} ${hero.name} shards — open Heroes Chests`, "#ff4d5e");
+    }
+    mutate((s) => {
+      levelHeroWithShards(s, hero.id);
+    });
+    sfx.gem();
+    push(`${hero.name} reached Lv ${lv + 1} with shards`, hero.color);
   };
 
   return (
@@ -373,17 +494,76 @@ export function Home({
         />
       </div>
 
+      {/* TODAY'S EVENT */}
+      <div className="tile event-card live relative p-3" data-testid="today-event" style={{ borderColor: liveEv.color + "77" }}>
+        <div className="relative flex flex-wrap items-center gap-3">
+          <EventGlyph id={liveEv.id} color={liveEv.color} size={46} />
+          <div className="min-w-[200px] flex-1">
+            <div className="flex items-center gap-2">
+              <span className="live-dot" style={{ background: liveEv.color }} />
+              <span className="text-[10px] font-bold tracking-[0.3em] text-[var(--dim)]">LIVE TODAY · {liveEv.tagline.toUpperCase()}</span>
+            </div>
+            <div className="font-disp text-xl leading-none" style={{ color: liveEv.color }}>
+              {liveEv.name}
+            </div>
+            <div className="mt-1 text-[11.5px] font-bold text-[#8effc4]">{liveEv.perk}</div>
+          </div>
+          <button className="cta-banner shrink-0 px-4 py-2.5 text-[13px]" data-testid="event-claim" disabled={!eventClaimable(save)} onClick={doEventClaim}>
+            {eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED"}
+          </button>
+        </div>
+      </div>
+
+      {/* TROPHY STANDING */}
+      <div className="tile relative flex flex-wrap items-center gap-3 p-3" data-testid="trophy-card">
+        <div className="frame-gold grid h-[58px] w-[58px] shrink-0 place-items-center" style={{ borderColor: league.color }}>
+          <TrophyIcon size={34} color={league.color} />
+        </div>
+        <div className="min-w-[180px] flex-1">
+          <div className="text-[10px] font-bold tracking-[0.3em] text-[var(--dim)]">LADDER</div>
+          <div className="font-disp text-xl leading-none" style={{ color: league.color }}>
+            {league.name} · <span className="num">{save.trophies.toLocaleString()}</span> 🏆
+          </div>
+          <div className="mt-1 text-[11.5px] font-semibold text-[var(--dim)]">
+            Victory <span className="font-bold text-[#3dff8e]">+{TROPHY_WIN}</span> · Defeat{" "}
+            <span className="font-bold text-[#ff4d5e]">-{TROPHY_LOSS}</span>
+            {nextL ? ` · ${(nextL.min - save.trophies).toLocaleString()} to ${nextL.name}` : " · top league reached"}
+          </div>
+          {nextL && (
+            <div className="bar-track mt-1.5">
+              <div
+                className="bar-fill"
+                style={{
+                  width: `${Math.max(4, Math.min(100, ((save.trophies - league.min) / Math.max(1, nextL.min - league.min)) * 100))}%`,
+                  background: `linear-gradient(90deg, ${league.color}, ${nextL.color})`,
+                }}
+              />
+            </div>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className="pill-dark text-[11px] text-[var(--dim)]">
+            BEST <span className="num">{save.bestTrophies.toLocaleString()}</span>
+          </span>
+          <span className="pill-dark text-[11px] text-[var(--dim)]">
+            STREAK <span className="num">{save.streak}</span>
+          </span>
+        </div>
+      </div>
+
       {/* DAILY REWARDS */}
       <div className="tile relative p-3" data-testid="daily-rewards">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="font-disp text-xl text-[#ffcf4d]">Daily Rewards</div>
             <div className="text-[12px] font-semibold text-[var(--dim)]">
-              Streak {save.dailyStreak}/7 · claiming today opens day {day}. Miss a day and the streak restarts.
+              Streak {save.dailyStreak}/7 · claiming now opens day {day}. Resets every day at{" "}
+              <span className="font-bold text-[#ffcf4d]">07:00</span> — next in{" "}
+              <span className="font-bold text-[var(--cyan)]">{resetCountdown()}</span>. Miss a day and the streak restarts.
             </div>
           </div>
-          <button className="cta-banner shrink-0 px-5 py-2.5 text-[14px]" data-testid="daily-claim" disabled={!canClaim} onClick={claim}>
-            {canClaim ? `CLAIM DAY ${day}` : "CLAIMED · TOMORROW"}
+          <button className="cta-banner shrink-0 px-5 py-2.5 text-[14px]" data-testid="daily-claim" disabled={!canClaim} onClick={doClaim}>
+            {canClaim ? `CLAIM DAY ${day}` : "CLAIMED · 07:00"}
           </button>
         </div>
         <div className="mt-2 grid grid-cols-4 gap-2 sm:grid-cols-7">
@@ -392,12 +572,18 @@ export function Home({
             const done = n < day || (n === save.dailyStreak && !canClaim);
             const next = n === day && canClaim;
             return (
-              <div key={n} className={`day-tile relative flex flex-col items-center gap-1 p-2 ${next ? "next" : done ? "done" : ""}`}>
+              <div
+                key={n}
+                className={`day-tile relative flex flex-col items-center gap-1 p-2 ${next ? "next" : done ? "done" : ""}`}
+                style={next ? { borderColor: r.accent } : undefined}
+              >
                 <span className={`badge-num ${next ? "" : "dim"}`}>{n}</span>
-                <div className="flex h-8 items-center gap-1">
-                  {r.gems ? <GemIcon size={22} /> : r.tokens ? <TokenIcon size={22} /> : r.frags ? <TowerIcon def={TOWERS[0]} size={24} /> : <CoinIcon size={22} />}
+                <div className="flex h-9 items-center gap-1">
+                  <DailyIcon reward={r} />
                 </div>
-                <span className="text-center text-[9.5px] font-bold leading-tight text-[var(--dim)]">{r.label}</span>
+                <span className="text-center text-[9.5px] font-bold leading-tight" style={{ color: next ? r.accent : "var(--dim)" }}>
+                  {r.label}
+                </span>
                 {done && <span className="absolute right-1 top-1 text-[12px] text-[#3dff8e]">✓</span>}
               </div>
             );
@@ -422,7 +608,117 @@ export function Home({
           Lineup weak — visit Towers
         </button>
       )}
+
+      {/* chip + shard inventory strip */}
+      <div className="relative flex flex-wrap items-center justify-center gap-2 pb-2">
+        {CHIPS.map((c) => (
+          <span key={c.id} className="pill-dark text-[11px]" style={{ borderColor: c.color + "66", color: c.color }} title={c.desc}>
+            <ChipIcon id={c.id} size={18} />
+            {c.short} <span className="num">{save.chips[c.id] || 0}</span>
+          </span>
+        ))}
+        <span className="pill-dark text-[11px]" style={{ borderColor: hero.color + "66", color: hero.color }}>
+          <ShardIcon size={16} color={hero.color} />
+          {hero.name} shards <span className="num">{shards}</span>
+        </span>
+        <button className="btn px-3 py-1 text-[11px]" disabled={shards < HERO_SHARD_COST || lv >= HERO_MAX_LEVEL} onClick={doShardLevel}>
+          Level with {HERO_SHARD_COST} shards
+        </button>
+      </div>
+
+      {claim && <RewardClaim data={claim} onClose={() => setClaim(null)} />}
     </div>
+  );
+}
+
+/** calendar tile icon chosen from the reward's `icon` hint */
+function DailyIcon({ reward }: { reward: (typeof DAILY_REWARDS)[number] }) {
+  switch (reward.icon) {
+    case "gem":
+      return <GemIcon size={26} />;
+    case "token":
+      return <TokenIcon size={26} />;
+    case "chip":
+      return (
+        <span className="flex items-center">
+          <ChipIcon id="basic" size={22} />
+          <ChipIcon id="advanced" size={22} />
+        </span>
+      );
+    case "chest":
+      return <MiniChest color={reward.accent} size={30} n={reward.chests?.reduce((a, c) => a + c.n, 0) || 1} />;
+    case "frag":
+      return <TowerIcon def={TOWERS.find((t) => t.rarity === "legendary") || TOWERS[0]} size={26} />;
+    default:
+      return <CoinIcon size={26} />;
+  }
+}
+
+function MiniChest({ color, size = 28, n = 1 }: { color: string; size?: number; n?: number }) {
+  return (
+    <span className="relative inline-flex">
+      <svg width={size} height={size} viewBox="0 0 90 90">
+        <rect x="12" y="34" width="66" height="40" rx="6" fill="#3a2a12" stroke={color} strokeWidth="5" />
+        <path d="M12 42c0-14 14-22 33-22s33 8 33 22v6H12z" fill="#5c451f" stroke={color} strokeWidth="5" />
+        <rect x="38" y="36" width="14" height="20" rx="3" fill={color} />
+      </svg>
+      {n > 1 && (
+        <span className="absolute -right-1.5 -top-1 rounded bg-black/80 px-1 text-[9px] font-bold" style={{ color }}>
+          ×{n}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** little glyph per event, drawn inline so there are still no image assets */
+export function EventGlyph({ id, color, size = 40 }: { id: string; color: string; size?: number }) {
+  const common = { fill: "none", stroke: color, strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <circle cx="12" cy="12" r="11" fill={color + "18"} stroke={color + "66"} strokeWidth="1" />
+      {id === "luck" && (
+        <g {...common}>
+          <path d="M12 6c2.2 0 3 1.6 3 2.8 0 2.4-3 2.2-3 5.2" />
+          <path d="M9 9c0-2 1.3-3 3-3" />
+          <circle cx="12" cy="17.5" r="0.9" fill={color} />
+          <path d="M6.5 7.5 5 6M17.5 7.5 19 6" />
+        </g>
+      )}
+      {id === "chestbox" && (
+        <g {...common}>
+          <rect x="5" y="10" width="14" height="8" rx="1.5" />
+          <path d="M5 12.5c0-3 3-4.5 7-4.5s7 1.5 7 4.5" />
+          <path d="M11 10h2v4h-2z" fill={color} />
+        </g>
+      )}
+      {id === "trophy" && (
+        <g {...common}>
+          <path d="M8.5 5h7v3.5a3.5 3.5 0 0 1-7 0z" />
+          <path d="M8.5 6H6v1a2.6 2.6 0 0 0 2.5 2.6M15.5 6H18v1a2.6 2.6 0 0 1-2.5 2.6" />
+          <path d="M10.6 12h2.8l-.4 2.4H15V17H9v-2.6h2.1z" />
+        </g>
+      )}
+      {id === "items" && (
+        <g {...common}>
+          <path d="M12 5.5 17.5 8.5v6L12 17.5 6.5 14.5v-6z" />
+          <path d="M6.5 8.5 12 11.5l5.5-3M12 11.5v6" />
+        </g>
+      )}
+      {id === "mineshaft" && (
+        <g {...common}>
+          <path d="M6 16.5 13.5 9" />
+          <path d="M11 6.5c2.5-1 5 .5 6 2.2-1.8.3-2.6 1-3.2 2-1.1-1.6-1.9-2.9-2.8-4.2z" />
+          <path d="M5 18.5h5" />
+        </g>
+      )}
+      {id === "lightning" && (
+        <g {...common}>
+          <path d="M13 4.5 8 13h3.5L10.5 19.5 16 11h-3.5z" fill={color + "44"} />
+          <path d="M4.5 9A3.5 3.5 0 0 1 8 6" />
+        </g>
+      )}
+    </svg>
   );
 }
 
@@ -472,98 +768,662 @@ function ModeCard({
   );
 }
 
-export function Specials() {
+/**
+ * The Specials hub. Two tabs: the weekday event rotation and the weekly trophy
+ * competition ladder.
+ */
+export function Specials({
+  save,
+  mutate,
+  push,
+}: {
+  save: SaveData;
+  mutate: (fn: (s: SaveData) => void) => void;
+  push: (m: string, c?: string) => void;
+}) {
+  const [tab, setTab] = useState<"events" | "competition">("events");
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto scroll-thin pr-1">
-      <div className="panel relative overflow-hidden p-5" style={{ borderColor: "#6b2fb0" }}>
-        <div className="absolute inset-0 opacity-30" style={{ background: "radial-gradient(600px 160px at 30% 0%, rgba(196,77,255,.5), transparent 70%)" }} />
-        <div className="relative">
-          <div className="font-disp text-2xl text-[#c44dff]">Season 3 · Arcane Siege</div>
-          <p className="mt-1 max-w-lg text-[15px] font-semibold text-[var(--dim)]">
-            Ranked arena, seasonal towers and guild wars are being forged. Check back soon, commander.
-          </p>
-          <span className="btn mt-3 inline-block cursor-not-allowed px-4 py-1 text-xs opacity-50">Coming Soon</span>
-        </div>
+    <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1">
+      <div className="flex items-center gap-2">
+        <button className={`tab-btn ${tab === "events" ? "on" : ""}`} onClick={() => { sfx.click(); setTab("events"); }}>
+          EVENTS
+        </button>
+        <button className={`tab-btn ${tab === "competition" ? "on" : ""}`} data-testid="tab-competition" onClick={() => { sfx.click(); setTab("competition"); }}>
+          COMPETITION
+        </button>
+        <span className="ml-auto text-[11px] font-bold tracking-widest text-[var(--dim)]">RESETS 07:00 · {resetCountdown()}</span>
       </div>
-      <div className="tile p-5">
-        <div className="font-disp text-xl text-[#ffcf4d]">Daily Rewards moved home</div>
-        <p className="mt-1 text-sm font-semibold text-[var(--dim)]">
-          The 7-day streak calendar now lives on the Command Center — claim it there before you deploy.
-        </p>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        {[
-          { t: "Frost Festival", d: "Icestorm-themed events and double freeze chests.", c: "#35e0ff" },
-          { t: "Blaze Trials", d: "Inferno gauntlet for Hellstorm specialists.", c: "#ff7a3d" },
-        ].map((e) => (
-          <div key={e.t} className="panel p-4" style={{ borderColor: e.c + "55" }}>
-            <div className="font-disp text-lg" style={{ color: e.c }}>{e.t}</div>
-            <p className="mt-1 text-sm font-semibold text-[var(--dim)]">{e.d}</p>
-            <span className="mt-2 inline-block rounded-md border border-[var(--line2)] px-2 py-0.5 text-[11px] font-bold tracking-widest text-[var(--dim)]">
-              COMING SOON
-            </span>
-          </div>
-        ))}
-      </div>
+      {tab === "events" ? <EventsPanel save={save} mutate={mutate} push={push} /> : <CompetitionPanel save={save} mutate={mutate} push={push} />}
     </div>
   );
 }
 
-const GUILDS = [
-  { name: "Arcane Vanguard", members: 84, power: 12480, color: "#ffb324" },
-  { name: "Storm Callers", members: 61, power: 9310, color: "#35e0ff" },
-  { name: "Ember Pact", members: 47, power: 7050, color: "#ff4d5e" },
-];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-export function Guild({ push }: { push: (m: string, c?: string) => void }) {
-  const [joined, setJoined] = useState<string | null>(null);
-  const lines = [
+/** the seven-day event rotation, with the live one pinned to the top */
+function EventsPanel({
+  save,
+  mutate,
+  push,
+}: {
+  save: SaveData;
+  mutate: (fn: (s: SaveData) => void) => void;
+  push: (m: string, c?: string) => void;
+}) {
+  const [claim, setClaim] = useState<ClaimData | null>(null);
+  const live = eventForDate();
+  const today = new Date().getDay();
+
+  const doClaim = () => {
+    if (!eventClaimable(save)) {
+      sfx.error();
+      return push("Event bonus already taken today", "#ff4d5e");
+    }
+    const draft = cloneSave(save);
+    const loot = claimEventBonus(draft);
+    if (!loot) return;
+    mutate((s) => {
+      if (s.lastEvent === todayStr()) return;
+      grantLoot(s, loot);
+      s.lastEvent = todayStr();
+    });
+    sfx.chest();
+    setClaim({
+      title: live.name.toUpperCase(),
+      subtitle: `${live.tagline} event bonus`,
+      lines: lootLines(loot),
+      color: live.color,
+      chest: live.id === "chestbox",
+      chestCount: 2,
+    });
+  };
+
+  return (
+    <>
+      <div className="panel event-card live relative overflow-hidden p-5" style={{ borderColor: live.color + "88" }} data-testid="event-live">
+        <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(620px 180px at 25% 0%, ${live.color}66, transparent 70%)` }} />
+        <div className="relative flex flex-wrap items-start gap-4">
+          <EventGlyph id={live.id} color={live.color} size={76} />
+          <div className="min-w-[220px] flex-1">
+            <div className="flex items-center gap-2">
+              <span className="live-dot" style={{ background: live.color }} />
+              <span className="text-[10px] font-bold tracking-[0.32em] text-[var(--dim)]">LIVE NOW · {live.tagline.toUpperCase()}</span>
+            </div>
+            <div className="font-disp text-3xl leading-none" style={{ color: live.color }}>
+              {live.name}
+            </div>
+            <p className="mt-1.5 max-w-lg text-[14px] font-semibold text-[var(--dim)]">{live.desc}</p>
+            <div className="mt-2 inline-block rounded-lg border px-2.5 py-1 text-[12px] font-bold" style={{ borderColor: live.color + "66", color: live.color }}>
+              {live.perk}
+            </div>
+          </div>
+          <button className="cta-banner shrink-0 px-5 py-3 text-[14px]" disabled={!eventClaimable(save)} onClick={doClaim}>
+            {eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED TODAY"}
+          </button>
+        </div>
+      </div>
+
+      <div className="text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">WEEKLY ROTATION</div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {WEEKDAYS.map((name, day) => {
+          const ev = EVENTS.find((e) => e.days.includes(day))!;
+          const on = day === today;
+          const b = eventBonus(ev.id);
+          return (
+            <div
+              key={name}
+              className={`tile flex items-start gap-3 p-3 ${on ? "event-card live" : ""}`}
+              style={{ borderColor: on ? ev.color : ev.color + "33", opacity: on ? 1 : 0.82 }}
+            >
+              <EventGlyph id={ev.id} color={ev.color} size={42} />
+              <div className="min-w-0 flex-1">
+                <div className="text-[10px] font-bold tracking-[0.26em] text-[var(--dim)]">{name.toUpperCase()}{on ? " · TODAY" : ""}</div>
+                <div className="font-disp text-lg leading-none" style={{ color: ev.color }}>
+                  {ev.name}
+                </div>
+                <p className="mt-1 text-[11.5px] font-semibold leading-snug text-[var(--dim)]">{ev.desc}</p>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {b.goldMul !== 1 && <span className="pill-dark text-[10px] text-[#ffcf4d]">×{b.goldMul} GOLD</span>}
+                  {b.gemMul !== 1 && <span className="pill-dark text-[10px] text-[#35e0ff]">×{b.gemMul} GEMS</span>}
+                  {b.trophyWin > 0 && <span className="pill-dark text-[10px] text-[#ff4fd8]">+{b.trophyWin} 🏆</span>}
+                  {b.chestPriceMul !== 1 && <span className="pill-dark text-[10px] text-[#3dff8e]">-{Math.round((1 - b.chestPriceMul) * 100)}% CHESTS</span>}
+                  {b.chipDrop && <span className="pill-dark text-[10px] text-[#8fe9ff]">CHIP DROPS</span>}
+                  {b.fragBias > 0 && <span className="pill-dark text-[10px] text-[#ffb324]">RARE LUCK</span>}
+                  {b.hpMul !== 1 && <span className="pill-dark text-[10px] text-[#ff4d5e]">+{Math.round((b.hpMul - 1) * 100)}% ENEMY HP</span>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {claim && <RewardClaim data={claim} onClose={() => setClaim(null)} />}
+    </>
+  );
+}
+
+/** weekly trophy ladder with a payout the player collects once per week */
+function CompetitionPanel({
+  save,
+  mutate,
+  push,
+}: {
+  save: SaveData;
+  mutate: (fn: (s: SaveData) => void) => void;
+  push: (m: string, c?: string) => void;
+}) {
+  const [claim, setClaim] = useState<ClaimData | null>(null);
+  const week = weekStr();
+  const board = useMemo(() => competitionBoard(save.trophies, week), [save.trophies, week]);
+  const rank = board.findIndex((r) => r.name === "You") + 1;
+  const tier = competitionTier(rank);
+  const claimed = compClaimed(save);
+  const league = leagueFor(save.trophies);
+
+  const doClaim = () => {
+    if (!tier) {
+      sfx.error();
+      return push("Reach the top 50 to earn a payout", "#ff4d5e");
+    }
+    if (claimed) {
+      sfx.error();
+      return push("This week's payout is already collected", "#ff4d5e");
+    }
+    mutate((s) => {
+      claimCompetition(s, tier.gems, tier.gold, tier.chips);
+    });
+    sfx.chest();
+    setClaim({
+      title: tier.label.toUpperCase(),
+      subtitle: `Week ${week} · rank #${rank}`,
+      color: tier.color,
+      chest: true,
+      lines: lootLines({
+        gold: tier.gold,
+        gems: tier.gems,
+        tokens: 0,
+        frags: [],
+        chips: tier.chips,
+        heroShards: [],
+      }),
+    });
+  };
+
+  // show the player plus their neighbours instead of all 61 rows
+  const window = board.slice(Math.max(0, rank - 6), Math.max(12, rank + 5));
+
+  return (
+    <>
+      <div className="panel relative overflow-hidden p-5" style={{ borderColor: league.color + "88" }} data-testid="competition">
+        <div className="absolute inset-0 opacity-25" style={{ background: `radial-gradient(620px 180px at 70% 0%, ${league.color}66, transparent 70%)` }} />
+        <div className="relative flex flex-wrap items-center gap-4">
+          <div className="trophy-pop frame-gold grid h-[86px] w-[86px] shrink-0 place-items-center" style={{ borderColor: league.color }}>
+            <TrophyIcon size={52} color={league.color} />
+          </div>
+          <div className="min-w-[200px] flex-1">
+            <div className="text-[10px] font-bold tracking-[0.3em] text-[var(--dim)]">WEEKLY COMPETITION · {week}</div>
+            <div className="font-disp text-3xl leading-none" style={{ color: league.color }}>
+              Rank #{rank}
+            </div>
+            <div className="mt-1 text-[13px] font-bold text-[var(--dim)]">
+              {league.name} league · <span className="num text-[var(--txt)]">{save.trophies.toLocaleString()}</span> trophies ·{" "}
+              {tier ? <span style={{ color: tier.color }}>{tier.label} payout</span> : "outside the payout bracket"}
+            </div>
+          </div>
+          <button className="cta-banner shrink-0 px-5 py-3 text-[14px]" data-testid="comp-claim" disabled={!tier || claimed} onClick={doClaim}>
+            {claimed ? "COLLECTED" : tier ? "COLLECT PAYOUT" : "TOP 50 ONLY"}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {COMPETITION_TIERS.map((t) => (
+          <div
+            key={t.label}
+            className="tile p-2 text-center"
+            style={{ borderColor: rank <= t.rank ? t.color : "var(--line)", opacity: rank <= t.rank ? 1 : 0.6 }}
+          >
+            <div className="font-disp text-[15px]" style={{ color: t.color }}>
+              {t.label}
+            </div>
+            <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[10.5px] font-bold text-[var(--dim)]">
+              <span className="inline-flex items-center gap-0.5 text-[#35e0ff]"><GemIcon size={13} />{t.gems}</span>
+              <span className="inline-flex items-center gap-0.5 text-[#ffcf4d]"><CoinIcon size={13} />{t.gold.toLocaleString()}</span>
+              {(Object.keys(t.chips) as ChipId[]).map((k) => (
+                <span key={k} className="inline-flex items-center gap-0.5">
+                  <ChipIcon id={k} size={13} />
+                  {t.chips[k]}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">STANDINGS</div>
+      <div className="tile divide-y divide-[var(--line)] p-1" data-testid="ladder">
+        {window.map((r) => {
+          const pos = board.indexOf(r) + 1;
+          const me = r.name === "You";
+          return (
+            <div key={r.name} className={`ladder-row flex items-center gap-3 rounded-lg border border-transparent px-3 py-2 ${me ? "me" : ""}`}>
+              <span className="w-8 shrink-0 text-center font-disp text-[15px]" style={{ color: pos <= 3 ? "#ffcf4d" : "var(--dim)" }}>
+                {pos}
+              </span>
+              <span className="h-7 w-7 shrink-0 rounded-lg" style={{ background: `linear-gradient(135deg, ${leagueFor(r.trophies).color}, #171038)`, border: `1px solid ${leagueFor(r.trophies).color}66` }} />
+              <span className="min-w-0 flex-1 truncate text-[13px] font-bold" style={{ color: me ? "#ffcf4d" : "var(--txt)" }}>
+                {me ? "You" : r.name}
+                <span className="ml-1.5 text-[10.5px] font-semibold text-[var(--dim)]">{r.guild}</span>
+              </span>
+              <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-bold" style={{ color: leagueFor(r.trophies).color }}>
+                <TrophyIcon size={15} color={leagueFor(r.trophies).color} />
+                {r.trophies.toLocaleString()}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex flex-wrap gap-1.5 pb-3">
+        {LEAGUES.map((l) => (
+          <span key={l.name} className="pill-dark text-[10.5px]" style={{ borderColor: l.color + "55", color: save.trophies >= l.min ? l.color : "var(--dim)" }}>
+            {l.name} <span className="num">{l.min.toLocaleString()}</span>
+          </span>
+        ))}
+      </div>
+      {claim && <RewardClaim data={claim} onClose={() => setClaim(null)} />}
+    </>
+  );
+}
+
+// ---------- guild ----------
+
+const GUILD_CHATTER: Record<string, [string, string][]> = {
+  vanguard: [
     ["Kael", "Anyone farming endless waves tonight?"],
     ["Mira", "Just hit Awakening II on my Lightning Princess."],
     ["Torin", "Power Plant next to a Chrono Spire is broken. In a good way."],
-  ] as const;
-  return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col gap-4 overflow-y-auto scroll-thin pr-1">
-      <div className="panel p-5" style={{ borderColor: joined ? "#ffb32466" : undefined }}>
-        <div className="font-disp text-2xl text-[#ffcf4d]">Guild Hall</div>
-        <p className="text-sm font-semibold text-[var(--dim)]">
-          {joined ? `You are a member of ${joined}.` : "Join a guild to share war chests and compare endless records."}
-        </p>
-        <div className="mt-3 space-y-2">
-          {GUILDS.map((g) => (
-            <div key={g.name} className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-2.5">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-lg" style={{ background: `linear-gradient(135deg, ${g.color}, #171038)`, border: `1px solid ${g.color}` }} />
-                <div>
-                  <div className="font-bold tracking-wide" style={{ color: g.color }}>{g.name}</div>
-                  <div className="text-xs font-semibold text-[var(--dim)]">{g.members} members · {g.power.toLocaleString()} power</div>
+  ],
+  storm: [
+    ["Vesper", "Storm day doubles gems — do not sleep on Sunday."],
+    ["Lumen", "Thunder God at Lv 10 clears wave 20 on its own."],
+    ["Rhen", "Donated the war chest, we are two levels off the next perk."],
+  ],
+  ember: [
+    ["Volkan", "Burn comp only run. Who is in?"],
+    ["Sable", "Trophy day is tomorrow, bank your wins."],
+    ["Brann", "Hellstorm + Toxic Sprayer melts the Rift Overlord."],
+  ],
+  null: [
+    ["Nyx", "Guild chest gave me four advanced chips. Null perk is real."],
+    ["Oryx", "We are rank 1 on the weekly board again."],
+    ["Quill", "Reminder: three donations a day, every day."],
+  ],
+};
+
+/**
+ * Reworked Guild hall: real membership stored in the save, a contribution
+ * level with perks, daily donations, a free daily guild chest, a coin-funded
+ * guild store, weekly war objectives and a roster.
+ */
+export function Guild({
+  save,
+  mutate,
+  push,
+}: {
+  save: SaveData;
+  mutate: (fn: (s: SaveData) => void) => void;
+  push: (m: string, c?: string) => void;
+}) {
+  const [tab, setTab] = useState<"hall" | "store" | "war">("hall");
+  const [claim, setClaim] = useState<ClaimData | null>(null);
+  const [msg, setMsg] = useState("");
+  const [chat, setChat] = useState<[string, string][]>([]);
+  const guild = save.guild.id ? GUILDS.find((g) => g.id === save.guild.id) || null : null;
+  const lvl = guildLevel(save.guild.xp);
+
+  const roster = useMemo(() => {
+    if (!guild) return [];
+    const board = competitionBoard(save.trophies, weekStr());
+    return board
+      .filter((r) => r.guild === guild.name || r.name === "You")
+      .slice(0, 12)
+      .map((r) => ({ ...r, me: r.name === "You" }));
+  }, [guild, save.trophies]);
+
+  const doJoin = (id: string) => {
+    const g = GUILDS.find((x) => x.id === id)!;
+    if (save.trophies < g.trophyReq) {
+      sfx.error();
+      return push(`${g.name} requires ${g.trophyReq.toLocaleString()} trophies`, "#ff4d5e");
+    }
+    mutate((s) => {
+      joinGuild(s, id);
+    });
+    sfx.gem();
+    push(`Welcome to ${g.name}!`, g.color);
+  };
+
+  const doLeave = () => {
+    mutate((s) => leaveGuild(s));
+    sfx.click();
+    push("You left the guild", "#ff4d5e");
+  };
+
+  const doDonate = (id: string) => {
+    const tier = GUILD_DONATIONS.find((d) => d.id === id)!;
+    if (donationsLeft(save) <= 0) {
+      sfx.error();
+      return push("No donations left today — resets at 07:00", "#ff4d5e");
+    }
+    if (save.gold < tier.gold) {
+      sfx.error();
+      return push(`Need ${tier.gold.toLocaleString()} gold`, "#ff4d5e");
+    }
+    mutate((s) => {
+      donateToGuild(s, tier.gold, tier.xp, tier.coins);
+    });
+    sfx.coin();
+    push(`+${tier.xp} guild XP · +${tier.coins} guild coins`, guild?.color || "#ffcf4d");
+  };
+
+  const doChest = () => {
+    if (!guildChestReady(save)) {
+      sfx.error();
+      return push("Guild chest already opened today", "#ff4d5e");
+    }
+    const draft = cloneSave(save);
+    const loot = claimGuildChest(draft);
+    if (!loot) return;
+    mutate((s) => {
+      if (s.guild.lastChest === todayStr()) return;
+      grantLoot(s, loot);
+      s.guild.lastChest = todayStr();
+      bumpQuest(s, "chests", 1);
+    });
+    sfx.chest();
+    setClaim({ title: "GUILD CHEST", subtitle: guild?.name || "Daily supply drop", color: guild?.color || "#3dff8e", chest: true, lines: lootLines(loot) });
+  };
+
+  const doBuy = (itemId: string) => {
+    const item = GUILD_SHOP.find((i) => i.id === itemId)!;
+    if (save.guild.coins < item.coins) {
+      sfx.error();
+      return push(`Need ${item.coins} guild coins`, "#ff4d5e");
+    }
+    mutate((s) => {
+      buyGuildItem(s, item);
+    });
+    sfx.buy();
+    push(`${item.name} redeemed`, item.color);
+  };
+
+  const doQuest = (id: string) => {
+    const q = GUILD_QUESTS.find((x) => x.id === id)!;
+    if (questProgress(save, id) < q.need || questDone(save, id)) {
+      sfx.error();
+      return push("Objective not ready", "#ff4d5e");
+    }
+    mutate((s) => {
+      claimQuest(s, id);
+    });
+    sfx.gem();
+    push(`${q.name} complete · +${q.coins} coins`, guild?.color || "#ffcf4d");
+  };
+
+  const send = () => {
+    const text = msg.trim();
+    if (!text) return;
+    setChat((c) => [...c, ["You", text]]);
+    setMsg("");
+    sfx.click();
+    const pool = GUILD_CHATTER[guild?.id || "vanguard"];
+    const reply = pool[Math.floor(Math.random() * pool.length)];
+    setTimeout(() => setChat((c) => [...c, reply]), 700);
+  };
+
+  if (!guild) {
+    return (
+      <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1" data-testid="guild">
+        <div className="panel p-5">
+          <div className="flex items-center gap-3">
+            <GuildIcon size={38} />
+            <div>
+              <div className="font-disp text-2xl text-[#ffcf4d]">Guild Hall</div>
+              <p className="text-sm font-semibold text-[var(--dim)]">
+                Join a guild to unlock a daily supply chest, the coin store, weekly war objectives and a shared roster.
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {GUILDS.map((g) => {
+            const locked = save.trophies < g.trophyReq;
+            return (
+              <div key={g.id} className="tile p-3" style={{ borderColor: g.color + (locked ? "33" : "88") }}>
+                <div className="flex items-center gap-3">
+                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg" style={{ background: `linear-gradient(135deg, ${g.color}, #171038)`, border: `1px solid ${g.color}` }}>
+                    <span className="font-disp text-[13px] text-[#0b0722]">{g.tag}</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-disp text-lg leading-none" style={{ color: g.color }}>
+                      {g.name}
+                    </div>
+                    <div className="text-[11px] font-bold text-[var(--dim)]">
+                      {g.members} members · {g.power.toLocaleString()} power
+                    </div>
+                  </div>
                 </div>
+                <p className="mt-1.5 text-[12px] font-semibold italic text-[var(--dim)]">“{g.motto}”</p>
+                <div className="mt-1.5 text-[11.5px] font-bold" style={{ color: g.color }}>
+                  PERK · {g.perk}
+                </div>
+                <button className={`btn mt-2 w-full py-2 text-[13px] ${locked ? "" : "btn-gold"}`} disabled={locked} onClick={() => doJoin(g.id)}>
+                  {locked ? `Needs ${g.trophyReq.toLocaleString()} 🏆 (you have ${save.trophies.toLocaleString()})` : "Join Guild"}
+                </button>
               </div>
-              <button
-                className="btn px-4 py-1.5 text-xs"
-                disabled={joined === g.name}
-                onClick={() => {
-                  setJoined(g.name);
-                  sfx.gem();
-                  push(`Invitation accepted — welcome to ${g.name}!`, g.color);
-                }}
-              >
-                {joined === g.name ? "Joined" : "Join"}
+            );
+          })}
+        </div>
+        <div className="h-2 shrink-0" />
+      </div>
+    );
+  }
+
+  const left = donationsLeft(save);
+
+  return (
+    <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1" data-testid="guild">
+      {/* banner */}
+      <div className="panel relative overflow-hidden p-4" style={{ borderColor: guild.color + "99" }}>
+        <div className="absolute inset-0 opacity-25" style={{ background: `radial-gradient(600px 160px at 20% 0%, ${guild.color}77, transparent 70%)` }} />
+        <div className="relative flex flex-wrap items-center gap-3">
+          <div className="grid h-[62px] w-[62px] shrink-0 place-items-center rounded-xl" style={{ background: `linear-gradient(135deg, ${guild.color}, #171038)`, border: `2px solid ${guild.color}` }}>
+            <span className="font-disp text-lg text-[#0b0722]">{guild.tag}</span>
+          </div>
+          <div className="min-w-[200px] flex-1">
+            <div className="font-disp text-2xl leading-none" style={{ color: guild.color }}>
+              {guild.name}
+            </div>
+            <div className="text-[11.5px] font-bold text-[var(--dim)]">
+              Guild Lv {lvl.level} · {guild.members} members · PERK: <span style={{ color: guild.color }}>{guild.perk}</span>
+            </div>
+            <div className="bar-track mt-1.5">
+              <div className="bar-fill" style={{ width: `${lvl.need ? Math.min(100, (lvl.into / lvl.need) * 100) : 100}%`, background: `linear-gradient(90deg, ${guild.color}, #fff6)` }} />
+            </div>
+            <div className="mt-0.5 text-[10.5px] font-bold text-[var(--dim)]">
+              {lvl.need ? `${lvl.into.toLocaleString()} / ${lvl.need.toLocaleString()} contribution XP` : "MAX GUILD LEVEL"}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <span className="pill-dark text-[11px]" style={{ borderColor: guild.color + "66", color: guild.color }}>
+              <GuildIcon size={15} color={guild.color} /> <span className="num">{save.guild.coins.toLocaleString()}</span> coins
+            </span>
+            <button className="btn px-3 py-1 text-[11px]" onClick={doLeave}>
+              Leave
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2">
+        {(["hall", "store", "war"] as const).map((t) => (
+          <button key={t} className={`tab-btn ${tab === t ? "on" : ""}`} onClick={() => { sfx.click(); setTab(t); }}>
+            {t === "hall" ? "HALL" : t === "store" ? "COIN STORE" : "GUILD WAR"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "hall" && (
+        <>
+          {/* daily chest + donations */}
+          <div className="tile flex flex-wrap items-center gap-3 p-3">
+            <MiniChest color={guild.color} size={46} />
+            <div className="min-w-[180px] flex-1">
+              <div className="font-disp text-lg" style={{ color: guild.color }}>
+                Daily Guild Chest
+              </div>
+              <div className="text-[11.5px] font-semibold text-[var(--dim)]">
+                Chips, gold and fragments from the guild vault. Refills at 07:00 ({resetCountdown()}).
+              </div>
+            </div>
+            <button className="cta-banner shrink-0 px-4 py-2.5 text-[13px]" data-testid="guild-chest" disabled={!guildChestReady(save)} onClick={doChest}>
+              {guildChestReady(save) ? "OPEN CHEST" : "OPENED"}
+            </button>
+          </div>
+
+          <div className="tile p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="font-disp text-lg text-[#ffcf4d]">Donations</div>
+              <span className="pill-dark text-[11px] text-[var(--dim)]">
+                {left}/{GUILD_DONATIONS_PER_DAY} LEFT TODAY
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {GUILD_DONATIONS.map((d) => (
+                <button
+                  key={d.id}
+                  className="tile tile-hover p-2.5 text-left disabled:opacity-50"
+                  disabled={left <= 0 || save.gold < d.gold}
+                  onClick={() => doDonate(d.id)}
+                >
+                  <div className="font-disp text-[15px] text-[var(--txt)]">{d.label}</div>
+                  <div className="mt-0.5 inline-flex items-center gap-1 text-[12px] font-bold text-[#ffcf4d]">
+                    <CoinIcon size={14} /> {d.gold.toLocaleString()}
+                  </div>
+                  <div className="text-[11px] font-bold text-[#8effc4]">
+                    +{d.xp} XP · +{d.coins} coins
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* roster */}
+          <div className="tile p-3">
+            <div className="font-disp text-lg text-[#ffcf4d]">Roster</div>
+            <div className="mt-1.5 divide-y divide-[var(--line)]">
+              {roster.map((r) => (
+                <div key={r.name} className={`ladder-row flex items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 ${r.me ? "me" : ""}`}>
+                  <span className="h-7 w-7 shrink-0 rounded-lg" style={{ background: `linear-gradient(135deg, ${leagueFor(r.trophies).color}, #171038)`, border: `1px solid ${leagueFor(r.trophies).color}66` }} />
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-bold" style={{ color: r.me ? "#ffcf4d" : "var(--txt)" }}>
+                    {r.name}
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-[12.5px] font-bold" style={{ color: leagueFor(r.trophies).color }}>
+                    <TrophyIcon size={14} color={leagueFor(r.trophies).color} />
+                    {r.trophies.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* chat */}
+          <div className="tile p-3">
+            <div className="font-disp text-lg text-[var(--cyan)]">Guild Chat</div>
+            <div className="mt-1.5 max-h-48 space-y-1 overflow-y-auto scroll-thin text-[14px] font-semibold">
+              {[...GUILD_CHATTER[guild.id], ...chat].map(([n, m], i) => (
+                <div key={`${n}-${i}`}>
+                  <span style={{ color: n === "You" ? "#ffcf4d" : "var(--cyan)" }}>{n}:</span>{" "}
+                  <span className="text-[var(--txt)]">{m}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex gap-2">
+              <input
+                className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-black/40 px-3 py-2 text-[13px] font-semibold text-[var(--txt)] outline-none focus:border-[var(--cyan)]"
+                placeholder="Message the guild…"
+                value={msg}
+                maxLength={120}
+                onChange={(e) => setMsg(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && send()}
+              />
+              <button className="btn btn-cyan px-4 py-2 text-[13px]" onClick={send}>
+                Send
               </button>
             </div>
-          ))}
+          </div>
+        </>
+      )}
+
+      {tab === "store" && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {GUILD_SHOP.map((item) => {
+            const afford = save.guild.coins >= item.coins;
+            return (
+              <div key={item.id} className="tile p-3" style={{ borderColor: item.color + "55" }}>
+                <div className="font-disp text-lg" style={{ color: item.color }}>
+                  {item.name}
+                </div>
+                <p className="mt-0.5 text-[12px] font-semibold text-[var(--dim)]">{item.desc}</p>
+                <button className={`btn mt-2 w-full py-2 text-[13px] ${afford ? "btn-gold" : ""}`} disabled={!afford} onClick={() => doBuy(item.id)}>
+                  <span className="inline-flex items-center gap-1.5">
+                    <GuildIcon size={14} color={afford ? "#0b0722" : item.color} /> {item.coins} coins
+                  </span>
+                </button>
+              </div>
+            );
+          })}
+          <div className="sm:col-span-2 text-[11.5px] font-semibold text-[var(--dim)]">
+            Guild coins come from donations, war objectives and the daily chest. You have{" "}
+            <span className="font-bold" style={{ color: guild.color }}>
+              {save.guild.coins.toLocaleString()}
+            </span>
+            .
+          </div>
         </div>
-      </div>
-      <div className="panel p-5">
-        <div className="font-disp text-lg text-[#35e0ff]">Guild Chat</div>
-        <div className="mt-2 space-y-1.5 text-[15px] font-semibold">
-          {lines.map(([n, m]) => (
-            <div key={n}>
-              <span className="text-[var(--cyan)]">{n}:</span> <span className="text-[var(--txt)]">{m}</span>
-            </div>
-          ))}
+      )}
+
+      {tab === "war" && (
+        <div className="flex flex-col gap-2">
+          <div className="text-[11.5px] font-bold tracking-widest text-[var(--dim)]">WEEKLY OBJECTIVES · {weekStr()}</div>
+          {GUILD_QUESTS.map((q) => {
+            const have = questProgress(save, q.id);
+            const done = questDone(save, q.id);
+            const ready = have >= q.need && !done;
+            return (
+              <div key={q.id} className="tile flex flex-wrap items-center gap-3 p-3" style={{ borderColor: ready ? "#3dff8e" : undefined }}>
+                <div className="min-w-[180px] flex-1">
+                  <div className="font-disp text-[16px] text-[var(--txt)]">{q.name}</div>
+                  <div className="text-[11.5px] font-semibold text-[var(--dim)]">
+                    {q.desc} · +{q.xp} XP · +{q.coins} coins
+                  </div>
+                  <div className="bar-track mt-1.5">
+                    <div className="bar-fill" style={{ width: `${Math.min(100, (have / q.need) * 100)}%`, background: ready ? "#3dff8e" : guild.color }} />
+                  </div>
+                  <div className="mt-0.5 text-[10.5px] font-bold text-[var(--dim)]">
+                    {Math.min(have, q.need)} / {q.need}
+                  </div>
+                </div>
+                <button className={`btn shrink-0 px-4 py-2 text-[12px] ${ready ? "btn-gold" : ""}`} disabled={!ready} onClick={() => doQuest(q.id)}>
+                  {done ? "CLAIMED" : ready ? "CLAIM" : "IN PROGRESS"}
+                </button>
+              </div>
+            );
+          })}
         </div>
-      </div>
+      )}
+
+      <div className="h-2 shrink-0" />
+      {claim && <RewardClaim data={claim} onClose={() => setClaim(null)} />}
     </div>
   );
 }
@@ -644,6 +1504,7 @@ export function SettingsModal({
             </div>
             <button
               className={`toggle ${save[key] ? "on" : ""}`}
+              data-testid={`toggle-${key}`}
               aria-pressed={!!save[key]}
               onClick={() => {
                 mutate((s) => { s[key] = !s[key] as never; });

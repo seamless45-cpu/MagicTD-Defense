@@ -180,7 +180,7 @@ export default function App() {
           </div>
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <CurrencyBar gold={save.gold} gems={save.gems} tokens={save.tokens} />
+          <CurrencyBar gold={save.gold} gems={save.gems} tokens={save.tokens} trophies={save.trophies} />
           <button
             className="relative shrink-0 rounded-lg border border-[var(--line)] bg-black/40 p-2 text-[var(--dim)] transition hover:text-[var(--txt)]"
             onClick={() => {
@@ -210,8 +210,8 @@ export default function App() {
         )}
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}
         {screen === "towers" && <Towers save={save} mutate={mutate} push={push} />}
-        {screen === "specials" && <Specials />}
-        {screen === "guild" && <Guild push={push} />}
+        {screen === "specials" && <Specials save={save} mutate={mutate} push={push} />}
+        {screen === "guild" && <Guild save={save} mutate={mutate} push={push} />}
       </div>
 
       {/* bottom nav */}
