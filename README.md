@@ -295,3 +295,37 @@ GitHub Pages serves this branch's root (`https://seamless45-cpu.github.io/MagicT
 Because the game is a single self-contained file, publishing is just: `npm run build` and commit
 `index.html`. The boot guard in the HTML means that if the published file is ever wrong (for
 example the dev template gets served), the page explains the failure instead of going blank.
+
+## Daily tasks, upgrade animations, FX overhaul and reworked skills
+
+**Daily tasks** — eight objectives (play, win, waves, kills, skill casts, upgrades,
+chests, gold spent) reset at 07:00 with the rest of the daily content. Each pays
+gold + gems and banks points toward three milestone caches (30 / 60 / 100 pts,
+topping out at "Perfect Day": two legendary chests, 1000 gems and elite chips).
+They live on a new **TASKS** tab in Specials, and unclaimed rewards raise a badge
+on the Specials nav button so you never miss one.
+
+**Upgrade animations** — levelling a tower or hero now plays a full ceremony: a
+light burst with expanding rings, a radial ray fan, flying confetti chips, the
+level counter physically flipping from the old number to the new one, and the
+stats that actually changed rolling in beneath with before → after deltas. In
+battle, summoning, point gains and Ascent All each throw a rarity-coloured
+flourish — hex runes, a light pillar and climbing chevrons — with Ascent All
+staggering one per tower so the whole board lights up in a wave.
+
+**FX overhaul** — the particle system gained shockwaves, radial glows, spinning
+shards, four-point sparkles, drifting embers and velocity-stretched sparks, all
+composited additively so overlapping effects burn to white. On top of that:
+screen flashes, camera punch-zoom, chromatic aberration, hit-stop, and a
+vignette that pulses through a hero cast.
+
+**Reworked skills** — every hero ultimate is now a timed, multi-phase cast with
+an on-screen banner tracking its phases:
+
+| Hero | Ultimate | What it does |
+| --- | --- | --- |
+| Nova | **Singularity** | Tears a rift that drags and stuns the field, drops three meteors, then collapses for damage scaled by how many enemies it caught |
+| Glacier | **Absolute Zero** | Encases everything in ice (doubling damage taken) and shatters it, hitting hardest on enemies that are already hurt |
+| Ember | **Firestorm** | Walks a barrage of meteors across the lane with compounding burn, leaving lava pools behind |
+| Overdrive | **Time Dilation** | Slams time to 40%, overcharges every tower and fires free guaranteed-crit volleys |
+| Thunder | **Storm Sovereign** | Rolls a chaining bolt front down the lane, marks survivors with static that re-arcs on death, then lands a Sovereign Strike pillar |

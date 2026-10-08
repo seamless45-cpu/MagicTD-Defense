@@ -103,6 +103,10 @@ describe("MagicTD app shell", () => {
     expect(document.body.textContent).toContain("Ascent All");
 
     click(byText("button", "Specials")!);
+    // Specials opens on the daily tasks tab
+    await waitFor(() => document.querySelector('[data-testid="daily-tasks"]'), "tasks tab");
+    expect(document.body.textContent).toContain("DAILY TASKS");
+    click(document.querySelector('[data-testid="tab-events"]') as HTMLElement);
     await waitFor(() => byText("div", "WEEKLY ROTATION"), "specials screen");
     // the weekday event rotation is listed in full
     ["Luck Hunting", "Chest Box", "Trophy Competition", "Items Finding", "Mineshaft", "Survive Lightning"].forEach((n) =>

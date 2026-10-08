@@ -1,6 +1,10 @@
 import {
   CHEST_BY_ID,
   DAILY_RESET_HOUR,
+  DAILY_TASKS,
+  TASK_BY_ID,
+  TASK_MILESTONES,
+  TASK_POINTS_TOTAL,
   DAILY_REWARDS,
   GIFT_CODES,
   GUILD_BY_ID,
@@ -22,7 +26,19 @@ import {
   type GiftCode,
   type GuildShopItem,
   type Rarity,
+  type TaskId,
 } from "./data";
+
+export interface TaskState {
+  /** game-day stamp the progress belongs to */
+  day: string;
+  /** task id -> progress */
+  prog: Partial<Record<TaskId, number>>;
+  /** task ids already cashed in today */
+  claimed: TaskId[];
+  /** milestone indices already cashed in today */
+  milestones: number[];
+}
 
 export interface GuildState {
   /** id of the guild the player belongs to, or null */
@@ -67,6 +83,8 @@ export interface SaveData {
   guild: GuildState;
   /** game-day stamp of the last claimed daily event bonus */
   lastEvent: string;
+  /** daily objectives, reset with the 07:00 game-day */
+  tasks: TaskState;
   best: number;
   bestEndless: number;
   wins: number;
@@ -110,6 +128,10 @@ export function emptyChips(): Record<ChipId, number> {
   return { basic: 0, advanced: 0, elite: 0 };
 }
 
+export function emptyTasks(day = ""): TaskState {
+  return { day, prog: {}, claimed: [], milestones: [] };
+}
+
 export function emptyGuild(): GuildState {
   return { id: null, xp: 0, coins: 0, lastDonate: "", donatesToday: 0, lastChest: "", quests: {}, questsDone: [] };
 }
@@ -132,6 +154,7 @@ export function defaultSave(): SaveData {
     compClaimed: [],
     guild: emptyGuild(),
     lastEvent: "",
+    tasks: emptyTasks(),
     best: 0,
     bestEndless: 0,
     wins: 0,
@@ -172,6 +195,10 @@ function normalise(s: SaveData): SaveData {
   s.guild.quests = s.guild.quests && typeof s.guild.quests === "object" ? s.guild.quests : {};
   s.guild.questsDone = Array.isArray(s.guild.questsDone) ? s.guild.questsDone.map(String) : [];
   if (s.guild.id && !GUILD_BY_ID[s.guild.id]) s.guild.id = null;
+  s.tasks = { ...emptyTasks(), ...(s.tasks && typeof s.tasks === "object" ? s.tasks : {}) };
+  s.tasks.prog = s.tasks.prog && typeof s.tasks.prog === "object" ? s.tasks.prog : {};
+  s.tasks.claimed = Array.isArray(s.tasks.claimed) ? (s.tasks.claimed as TaskId[]) : [];
+  s.tasks.milestones = Array.isArray(s.tasks.milestones) ? s.tasks.milestones.map(Number) : [];
   s.streak = Math.max(0, Number.isFinite(s.streak) ? s.streak : 0);
   s.dailyStreak = Number.isFinite(s.dailyStreak) ? Math.max(0, Math.min(7, s.dailyStreak)) : 0;
   s.redeemed = Array.isArray(s.redeemed) ? s.redeemed.map(String) : [];
@@ -328,6 +355,10 @@ export interface ChestLoot {
   heroShards: { id: string; n: number }[];
 }
 
+export function emptyLootPublic(): ChestLoot {
+  return emptyLoot();
+}
+
 function emptyLoot(): ChestLoot {
   return { gold: 0, gems: 0, tokens: 0, frags: [], chips: {}, heroShards: [] };
 }
@@ -467,6 +498,83 @@ function rarityBias(rarity?: Rarity): number {
   if (rarity === "decent") return 0.2;
   return 0;
 }
+
+// ---------- daily tasks ----------
+/**
+ * Task progress is stamped with the game-day it belongs to; reading it after
+ * 07:00 the next day transparently wipes the board. Call this before touching
+ * `s.tasks` so a stale day can never leak progress or claims forward.
+ */
+export function rollTasks(s: SaveData): TaskState {
+  const day = todayStr();
+  if (s.tasks.day !== day) s.tasks = emptyTasks(day);
+  return s.tasks;
+}
+
+export function bumpTask(s: SaveData, id: TaskId, n = 1) {
+  if (n <= 0) return;
+  const t = rollTasks(s);
+  t.prog[id] = (t.prog[id] || 0) + n;
+}
+
+export function taskProgress(s: SaveData, id: TaskId): number {
+  return s.tasks.day === todayStr() ? s.tasks.prog[id] || 0 : 0;
+}
+
+export function taskComplete(s: SaveData, id: TaskId): boolean {
+  return taskProgress(s, id) >= TASK_BY_ID[id].need;
+}
+
+export function taskClaimed(s: SaveData, id: TaskId): boolean {
+  return s.tasks.day === todayStr() && s.tasks.claimed.includes(id);
+}
+
+/** total task points banked today (only claimed tasks count toward milestones) */
+export function taskPoints(s: SaveData): number {
+  if (s.tasks.day !== todayStr()) return 0;
+  return s.tasks.claimed.reduce((a, id) => a + (TASK_BY_ID[id]?.points || 0), 0);
+}
+
+export function tasksRemaining(s: SaveData): number {
+  return DAILY_TASKS.filter((t) => !taskClaimed(s, t.id)).length;
+}
+
+/** how many tasks are sitting completed and unclaimed — drives the nav badge */
+export function tasksReady(s: SaveData): number {
+  return (
+    DAILY_TASKS.filter((t) => taskComplete(s, t.id) && !taskClaimed(s, t.id)).length +
+    TASK_MILESTONES.filter((m, i) => taskPoints(s) >= m.points && !milestoneClaimed(s, i)).length
+  );
+}
+
+export function claimTask(s: SaveData, id: TaskId): ChestLoot | null {
+  rollTasks(s);
+  if (!taskComplete(s, id) || taskClaimed(s, id)) return null;
+  const t = TASK_BY_ID[id];
+  const loot: ChestLoot = { ...emptyLootPublic(), gold: t.gold, gems: t.gems };
+  grantLoot(s, loot);
+  s.tasks.claimed = [...s.tasks.claimed, id];
+  return loot;
+}
+
+export function milestoneClaimed(s: SaveData, idx: number): boolean {
+  return s.tasks.day === todayStr() && s.tasks.milestones.includes(idx);
+}
+
+export function claimMilestone(s: SaveData, idx: number): ChestLoot | null {
+  rollTasks(s);
+  const m = TASK_MILESTONES[idx];
+  if (!m || milestoneClaimed(s, idx) || taskPoints(s) < m.points) return null;
+  let loot: ChestLoot = { ...emptyLootPublic(), gems: m.gems, chips: { ...m.chips } };
+  m.chests.forEach((c) => {
+    for (let i = 0; i < c.n; i++) loot = mergeLoot(loot, rollChest(c.id));
+  });
+  grantLoot(s, loot);
+  s.tasks.milestones = [...s.tasks.milestones, idx];
+  return loot;
+}
+
+export const TASK_TOTAL_POINTS = TASK_POINTS_TOTAL;
 
 // ---------- trophies ----------
 export function addTrophies(s: SaveData, n: number): number {

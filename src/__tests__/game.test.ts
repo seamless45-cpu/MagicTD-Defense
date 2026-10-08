@@ -1,5 +1,9 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import {
+  DAILY_TASKS,
+  TASK_BY_ID,
+  TASK_POINTS_TOTAL,
+  TASK_MILESTONES,
   TOWERS,
   TOWER_BY_ID,
   roundHp,
@@ -57,6 +61,16 @@ import {
   ZOOM_MAX,
   ZOOM_MIN,
   redeemGiftCode,
+  bumpTask,
+  taskProgress,
+  taskComplete,
+  taskClaimed,
+  taskPoints,
+  tasksReady,
+  tasksRemaining,
+  claimTask,
+  claimMilestone,
+  milestoneClaimed,
 } from "../game/save";
 
 describe("tower data", () => {
@@ -930,5 +944,154 @@ describe("save migration", () => {
     c.guild.coins = 5;
     expect(s.chips.basic).toBe(0);
     expect(s.guild.coins).toBe(0);
+  });
+});
+
+// ---------- daily tasks ----------
+describe("daily tasks", () => {
+  const fresh = () => {
+    const s = defaultSave();
+    s.tasks = { day: todayStr(), prog: {}, claimed: [], milestones: [] };
+    return s;
+  };
+
+  it("exposes eight tasks worth 100 points in total", () => {
+    expect(DAILY_TASKS).toHaveLength(8);
+    expect(DAILY_TASKS.reduce((a, t) => a + t.points, 0)).toBe(TASK_POINTS_TOTAL);
+    expect(TASK_POINTS_TOTAL).toBe(100);
+    // every task id resolves through the lookup map
+    DAILY_TASKS.forEach((t) => expect(TASK_BY_ID[t.id]).toBe(t));
+  });
+
+  it("accumulates progress and only completes at the required amount", () => {
+    const s = fresh();
+    const need = TASK_BY_ID.kills.need;
+    bumpTask(s, "kills", need - 1);
+    expect(taskProgress(s, "kills")).toBe(need - 1);
+    expect(taskComplete(s, "kills")).toBe(false);
+    bumpTask(s, "kills", 1);
+    expect(taskComplete(s, "kills")).toBe(true);
+  });
+
+  it("ignores non-positive bumps", () => {
+    const s = fresh();
+    bumpTask(s, "play", 0);
+    bumpTask(s, "play", -5);
+    expect(taskProgress(s, "play")).toBe(0);
+  });
+
+  it("pays a task exactly once", () => {
+    const s = fresh();
+    bumpTask(s, "play", TASK_BY_ID.play.need);
+    const gold = s.gold;
+    const loot = claimTask(s, "play");
+    expect(loot).not.toBeNull();
+    expect(s.gold).toBe(gold + TASK_BY_ID.play.gold);
+    expect(taskClaimed(s, "play")).toBe(true);
+    // a second claim is refused and pays nothing
+    expect(claimTask(s, "play")).toBeNull();
+    expect(s.gold).toBe(gold + TASK_BY_ID.play.gold);
+  });
+
+  it("refuses to pay an incomplete task", () => {
+    const s = fresh();
+    expect(claimTask(s, "win")).toBeNull();
+  });
+
+  it("only counts claimed tasks toward the point total", () => {
+    const s = fresh();
+    bumpTask(s, "play", 999);
+    expect(taskPoints(s)).toBe(0);
+    claimTask(s, "play");
+    expect(taskPoints(s)).toBe(TASK_BY_ID.play.points);
+  });
+
+  it("gates milestones behind their point threshold", () => {
+    const s = fresh();
+    expect(claimMilestone(s, 0)).toBeNull();
+    // claim enough tasks to clear the first milestone
+    for (const t of DAILY_TASKS) {
+      if (taskPoints(s) >= TASK_MILESTONES[0].points) break;
+      bumpTask(s, t.id, t.need);
+      claimTask(s, t.id);
+    }
+    const gems = s.gems;
+    const loot = claimMilestone(s, 0);
+    expect(loot).not.toBeNull();
+    expect(s.gems).toBeGreaterThan(gems);
+    expect(milestoneClaimed(s, 0)).toBe(true);
+    expect(claimMilestone(s, 0)).toBeNull();
+  });
+
+  it("clearing every task reaches the perfect-day milestone", () => {
+    const s = fresh();
+    DAILY_TASKS.forEach((t) => {
+      bumpTask(s, t.id, t.need);
+      claimTask(s, t.id);
+    });
+    expect(taskPoints(s)).toBe(TASK_POINTS_TOTAL);
+    expect(tasksRemaining(s)).toBe(0);
+    expect(claimMilestone(s, TASK_MILESTONES.length - 1)).not.toBeNull();
+  });
+
+  it("resets progress and claims when the day rolls over", () => {
+    const s = fresh();
+    bumpTask(s, "play", 3);
+    claimTask(s, "play");
+    s.tasks.day = "1999-01-01";
+    expect(taskProgress(s, "play")).toBe(0);
+    expect(taskClaimed(s, "play")).toBe(false);
+    expect(taskPoints(s)).toBe(0);
+    bumpTask(s, "play", 1);
+    expect(s.tasks.day).toBe(todayStr());
+    expect(taskProgress(s, "play")).toBe(1);
+  });
+
+  it("counts ready tasks and milestones for the nav badge", () => {
+    const s = fresh();
+    expect(tasksReady(s)).toBe(0);
+    bumpTask(s, "play", TASK_BY_ID.play.need);
+    bumpTask(s, "win", TASK_BY_ID.win.need);
+    expect(tasksReady(s)).toBe(2);
+    claimTask(s, "play");
+    claimTask(s, "win");
+    // both tasks are banked; the 30-point milestone is now the thing waiting
+    expect(tasksReady(s)).toBe(1);
+    claimMilestone(s, 0);
+    expect(tasksReady(s)).toBe(0);
+  });
+
+  it("survives a save that has no task block at all", () => {
+    const raw = defaultSave() as unknown as Record<string, unknown>;
+    delete raw.tasks;
+    const s = importSave(JSON.stringify(raw));
+    expect(s.tasks.prog).toEqual({});
+    expect(() => bumpTask(s, "play", 1)).not.toThrow();
+    expect(taskProgress(s, "play")).toBe(1);
+  });
+});
+
+// ---------- reworked hero skills ----------
+describe("hero skills", () => {
+  it("gives every hero a named multi-phase ultimate", () => {
+    HEROES.forEach((h) => {
+      expect(h.skillName.length).toBeGreaterThan(2);
+      expect(h.phases.length).toBeGreaterThanOrEqual(2);
+      expect(h.effects.length).toBeGreaterThanOrEqual(2);
+      expect(h.castTime).toBeGreaterThan(0);
+      // phases are ordered and all land inside the cast window
+      let prev = -1;
+      h.phases.forEach((p) => {
+        expect(p.at).toBeGreaterThanOrEqual(prev);
+        expect(p.at).toBeLessThanOrEqual(h.castTime);
+        prev = p.at;
+      });
+    });
+  });
+
+  it("keeps hero ids unique and resolvable", () => {
+    const ids = HEROES.map((h) => h.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    ids.forEach((id) => expect(HERO_BY_ID[id].id).toBe(id));
   });
 });

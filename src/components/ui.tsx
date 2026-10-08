@@ -802,3 +802,153 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
     </div>
   );
 }
+
+// ---------- upgrade ceremony ----------
+
+export interface UpgradeData {
+  /** what levelled up */
+  title: string;
+  kind: "tower" | "hero";
+  /** the thing's art */
+  tower?: TowerDef;
+  heroKind?: string;
+  color: string;
+  fromLv: number;
+  toLv: number;
+  /** stat deltas to roll in under the level flip */
+  stats?: { label: string; from: string; to: string }[];
+  /** extra caption, e.g. "MAX LEVEL" */
+  note?: string;
+}
+
+/**
+ * The upgrade flourish: a light burst, a ring of rays, flying chips, the level
+ * counter physically flipping from the old number to the new one, and the
+ * changed stats rolling in underneath. Shown whenever a tower or hero gains a
+ * level from the menus.
+ */
+export function UpgradeCeremony({ data, onClose }: { data: UpgradeData; onClose: () => void }) {
+  const rays = useMemo(() => Array.from({ length: 14 }, (_, i) => i), []);
+  const chips = useMemo(
+    () =>
+      Array.from({ length: 22 }, (_, i) => {
+        const a = (i / 22) * Math.PI * 2 + Math.random() * 0.4;
+        const dist = 90 + Math.random() * 150;
+        return {
+          id: i,
+          dx: Math.cos(a) * dist,
+          dy: Math.sin(a) * dist - 30,
+          rot: `${Math.round((Math.random() - 0.5) * 720)}deg`,
+          size: 4 + Math.random() * 8,
+          color: [data.color, "#ffffff", "#ffcf4d", "#35e0ff"][i % 4],
+          round: i % 3 === 0,
+          delay: Math.random() * 0.25,
+        };
+      }),
+    [data.color]
+  );
+
+  // the ceremony is short and self-dismissing, but any input closes it early
+  useEffect(() => {
+    const t = setTimeout(onClose, 2100);
+    const h = () => onClose();
+    window.addEventListener("keydown", h);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener("keydown", h);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="upg-root fixed inset-0 z-[95] flex items-center justify-center p-4" data-testid="upgrade-ceremony" onPointerDown={onClose}>
+      <div className="relative flex flex-col items-center" onPointerDown={(e) => e.stopPropagation()}>
+        {/* rays + burst rings behind the art */}
+        <div className="relative grid place-items-center" style={{ width: 240, height: 240 }}>
+          <span className="upg-burst" style={{ borderColor: data.color }} />
+          <span className="upg-burst" style={{ borderColor: "#ffffff", animationDelay: "0.14s" }} />
+          <span className="upg-burst" style={{ borderColor: data.color, animationDelay: "0.28s" }} />
+          {rays.map((i) => (
+            <span
+              key={i}
+              className="upg-ray"
+              style={{
+                background: `linear-gradient(to top, ${data.color}, transparent)`,
+                transform: `translate(-50%, -100%) rotate(${(i / rays.length) * 360}deg)`,
+                transformOrigin: "50% 100%",
+                animationDelay: `${i * 0.012}s`,
+              }}
+            />
+          ))}
+          {chips.map((c) => (
+            <span
+              key={c.id}
+              className="upg-chip"
+              style={
+                {
+                  width: c.size,
+                  height: c.size,
+                  background: c.color,
+                  borderRadius: c.round ? "50%" : 2,
+                  animationDelay: `${c.delay}s`,
+                  "--dx": `${c.dx}px`,
+                  "--dy": `${c.dy}px`,
+                  "--rot": c.rot,
+                } as React.CSSProperties
+              }
+            />
+          ))}
+          <div className="upg-core relative grid place-items-center">
+            {data.tower ? (
+              <TowerIcon def={data.tower} size={118} />
+            ) : (
+              <HeroIcon kind={(data.heroKind as never) || "nuke"} size={118} color={data.color} />
+            )}
+          </div>
+        </div>
+
+        <div className="font-disp -mt-3 text-center text-[28px] leading-none" style={{ color: data.color, textShadow: `0 0 26px ${data.color}` }}>
+          {data.title}
+        </div>
+        <div className="mt-0.5 text-[11px] font-bold tracking-[0.4em] text-[var(--dim)]">
+          {data.note || "LEVEL UP"}
+        </div>
+
+        {/* the level counter flipping over */}
+        <div className="relative mt-2 flex items-center gap-3" style={{ perspective: 600 }}>
+          <span className="upg-oldlv font-disp absolute left-0 right-0 text-center text-[42px] leading-none text-[var(--dim)]">
+            {data.fromLv}
+          </span>
+          <span
+            className="upg-newlv font-disp text-[52px] leading-none"
+            data-testid="upgrade-level"
+            style={{ color: data.color, textShadow: `0 0 30px ${data.color}` }}
+          >
+            {data.toLv}
+          </span>
+        </div>
+
+        {/* stat deltas */}
+        {!!data.stats?.length && (
+          <div className="mt-3 w-[260px] space-y-1">
+            {data.stats.map((st, i) => (
+              <div
+                key={st.label}
+                className="upg-statrow flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/55 px-3 py-1.5"
+                style={{ animationDelay: `${0.45 + i * 0.1}s` }}
+              >
+                <span className="text-[11.5px] font-bold text-[var(--dim)]">{st.label}</span>
+                <span className="flex items-center gap-1.5 text-[12.5px] font-bold">
+                  <span className="text-[var(--dim)] line-through opacity-70">{st.from}</span>
+                  <span style={{ color: data.color }}>→</span>
+                  <span className="upg-delta" style={{ color: "#3dff8e", animationDelay: `${0.6 + i * 0.1}s` }}>
+                    {st.to}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

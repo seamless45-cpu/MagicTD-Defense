@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SaveData } from "../game/save";
-import { bumpQuest, grantLoot, lootLines, rollChest, type ChestLoot } from "../game/save";
+import { bumpQuest, bumpTask, grantLoot, lootLines, rollChest, type ChestLoot } from "../game/save";
 import { sfx } from "../game/audio";
 import { CHESTS, CHIPS, HERO_BY_ID, TOWERS, TOWER_BY_ID, RARITY, eventBonus, eventForDate, type Rarity } from "../game/data";
 import { ChipIcon, CoinIcon, ClaimChest, GemIcon, Modal, RewardClaim, ShardIcon, TokenIcon, TowerIcon, type ClaimData } from "../components/ui";
@@ -53,6 +53,8 @@ export default function Shop({
       if (c.gem === 1) s.gems -= cost;
       else s.gold -= cost;
       bumpQuest(s, "chests", 1);
+      bumpTask(s, "chests", 1);
+      if (c.gem !== 1) bumpTask(s, "spend", cost);
     });
     setOpening(id);
     setStage("closed");
@@ -68,6 +70,7 @@ export default function Shop({
     }
     sfx.buy();
     mutate((s) => {
+      bumpTask(s, "spend", fragCost);
       s.gold -= fragCost;
       s.frags[picked.id] = (s.frags[picked.id] || 0) + fragQty;
     });

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { addChips, applyBattleTrophies, bumpQuest, clampZoom, heroLevel } from "../game/save";
+import { addChips, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, heroLevel } from "../game/save";
 import { sfx } from "../game/audio";
 import {
   TOWERS,
@@ -38,6 +38,7 @@ import {
   OVERDRIVE_TIME,
   SLOW_VULN,
   RUN_SHOP,
+  ROMAN,
   eventBonus,
   eventForDate,
   leagueFor,
@@ -122,6 +123,16 @@ function pathPos(d: number) {
   return WPX[WPX.length - 1];
 }
 
+/**
+ * An enemy's real position: its place along the path, plus any lateral offset
+ * the Singularity pull has dragged it to. Everything that targets, draws or
+ * measures an enemy goes through this, so skill displacement is consistent.
+ */
+function enemyPos(e: { d: number; ox: number; oy: number }) {
+  const p = pathPos(e.d);
+  return { x: p.x + e.ox, y: p.y + e.oy };
+}
+
 // ---------- entity types ----------
 interface Enemy {
   id: number;
@@ -153,6 +164,16 @@ interface Enemy {
   enraged: boolean;
   /** boss bar flash timer when a skill fires */
   cast: number;
+  /** ---------- skill state ---------- */
+  /** Absolute Zero: seconds left encased in ice (doubles damage taken) */
+  encased: number;
+  /** Storm Sovereign: seconds left marked with static (re-arcs on death) */
+  mark: number;
+  /** Singularity: seconds left being dragged toward the rift */
+  pulled: number;
+  /** lateral offset from the path, used by the singularity pull */
+  ox: number;
+  oy: number;
 }
 interface BT {
   uid: number;
@@ -220,7 +241,66 @@ interface Bolt {
   w: number;
   color: string;
 }
-interface Part { x: number; y: number; vx: number; vy: number; life: number; max: number; size: number; color: string; kind: "spark" | "ring" | "smoke" }
+interface Part {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  max: number;
+  size: number;
+  color: string;
+  kind: "spark" | "ring" | "smoke" | "glow" | "shard" | "shock" | "star" | "ember";
+  /** rotation + spin, used by shards and stars */
+  rot?: number;
+  spin?: number;
+  /** gravity multiplier */
+  grav?: number;
+  /** drag per second */
+  drag?: number;
+  /** additive blending */
+  add?: boolean;
+}
+
+/** a persistent ground effect left behind by a hero ultimate */
+interface Zone {
+  x: number;
+  y: number;
+  r: number;
+  life: number;
+  max: number;
+  kind: "lava" | "frost" | "rift";
+  color: string;
+  /** damage per second dealt to anything inside */
+  dps: number;
+  /** slow applied while inside */
+  slow: number;
+  /** animation seed */
+  seed: number;
+}
+
+/** one scheduled beat of a hero cast timeline */
+interface Cast {
+  at: number;
+  run: () => void;
+}
+
+/** the active hero ultimate, drawn as an overlay while it resolves */
+interface ActiveSkill {
+  heroId: string;
+  name: string;
+  color: string;
+  color2: string;
+  kind: HeroKind;
+  /** seconds elapsed and total */
+  t: number;
+  total: number;
+  /** current phase caption */
+  phase: string;
+  /** singularity anchor, when the skill uses one */
+  sx: number;
+  sy: number;
+}
 interface FT { x: number; y: number; txt: string; color: string; size: number; life: number; crit: boolean }
 
 interface G {
@@ -270,6 +350,28 @@ interface G {
   bossIntro: number;
   shake: number;
   redFlash: number;
+  /** persistent ground effects (lava pools, frost fields, the singularity) */
+  zones: Zone[];
+  /** queued beats of the running hero cast */
+  casts: Cast[];
+  /** the hero ultimate currently resolving */
+  skill: ActiveSkill | null;
+  /** full-screen colour flash: { color, life, max } */
+  flash: { color: string; life: number; max: number } | null;
+  /** simulation time scale — Time Dilation and impact hit-stop drive this */
+  timeScale: number;
+  /** seconds of hit-stop left (freezes the sim for punch on big hits) */
+  hitStop: number;
+  /** radial zoom punch 0..1, decays every frame */
+  punch: number;
+  /** chromatic aberration strength 0..1 */
+  chroma: number;
+  /** hero ultimates cast this run — banked into the daily task on collect */
+  skillCasts: number;
+  /** waves cleared this run — banked into the daily task on collect */
+  wavesCleared: number;
+  /** an upgrade/ascend flourish playing on the board */
+  levelFx: { x: number; y: number; color: string; label: string; t: number; total: number; tier: number }[];
   tokensAwarded: boolean;
   final: null | {
     won: boolean;
@@ -341,6 +443,17 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     bossIntro: 0,
     shake: 0,
     redFlash: 0,
+    zones: [],
+    casts: [],
+    skill: null,
+    flash: null,
+    timeScale: 1,
+    hitStop: 0,
+    punch: 0,
+    chroma: 0,
+    levelFx: [],
+    skillCasts: 0,
+    wavesCleared: 0,
     tokensAwarded: false,
     final: null,
   };
@@ -500,6 +613,132 @@ export default function Battle({
       g.parts.push({ x, y, vx: 0, vy: 0, life: 0.45, max: 0.45, size, color, kind: "ring" });
     };
 
+    // ---------- the upgraded FX kit ----------
+    const PART_CAP = 620;
+    const pushPart = (p: Part) => {
+      if (g.parts.length > PART_CAP) g.parts.shift();
+      g.parts.push(p);
+    };
+
+    /** a thick shockwave that expands and thins out — the workhorse impact ring */
+    const shock = (x: number, y: number, color: string, size: number, life = 0.55) => {
+      pushPart({ x, y, vx: 0, vy: 0, life, max: life, size, color, kind: "shock", add: true });
+    };
+
+    /** a soft additive light blob, the glue that makes everything else glow */
+    const glow = (x: number, y: number, color: string, size: number, life = 0.4) => {
+      if (!fxOn()) return;
+      pushPart({ x, y, vx: 0, vy: 0, life, max: life, size, color, kind: "glow", add: true });
+    };
+
+    /** spinning triangular debris with gravity — used for shatter / crit impacts */
+    const shards = (x: number, y: number, color: string, n: number, spd = 220) => {
+      if (!fxOn()) n = Math.min(n, 4);
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const v = spd * (0.4 + Math.random() * 0.9);
+        pushPart({
+          x, y,
+          vx: Math.cos(a) * v,
+          vy: Math.sin(a) * v - 90,
+          life: 0.55 + Math.random() * 0.5,
+          max: 1.05,
+          size: 3 + Math.random() * 4,
+          color,
+          kind: "shard",
+          rot: Math.random() * Math.PI * 2,
+          spin: (Math.random() - 0.5) * 16,
+          grav: 1,
+          drag: 1.2,
+        });
+      }
+    };
+
+    /** four-point sparkle stars that drift upward — the "magic" layer */
+    const stars = (x: number, y: number, color: string, n: number, spread = 40) => {
+      if (!fxOn()) n = Math.min(n, 3);
+      for (let i = 0; i < n; i++) {
+        pushPart({
+          x: x + (Math.random() - 0.5) * spread,
+          y: y + (Math.random() - 0.5) * spread,
+          vx: (Math.random() - 0.5) * 40,
+          vy: -30 - Math.random() * 70,
+          life: 0.6 + Math.random() * 0.6,
+          max: 1.2,
+          size: 4 + Math.random() * 6,
+          color,
+          kind: "star",
+          rot: Math.random() * Math.PI,
+          spin: (Math.random() - 0.5) * 6,
+          add: true,
+        });
+      }
+    };
+
+    /** rising embers, for fire effects */
+    const embers = (x: number, y: number, color: string, n: number) => {
+      if (!fxOn()) n = Math.min(n, 3);
+      for (let i = 0; i < n; i++) {
+        pushPart({
+          x: x + (Math.random() - 0.5) * 30,
+          y: y + (Math.random() - 0.5) * 16,
+          vx: (Math.random() - 0.5) * 50,
+          vy: -50 - Math.random() * 90,
+          life: 0.7 + Math.random() * 0.7,
+          max: 1.4,
+          size: 2 + Math.random() * 3,
+          color,
+          kind: "ember",
+          grav: -0.25,
+          drag: 0.6,
+          add: true,
+        });
+      }
+    };
+
+    /** full-screen colour wash */
+    const flash = (color: string, life = 0.3) => {
+      if (!fxOn()) return;
+      g.flash = { color, life, max: life };
+    };
+
+    /** freeze the sim briefly so a big hit lands with weight */
+    const hitStop = (sec: number) => {
+      if (!saveRef.current.shakeFx) return;
+      g.hitStop = Math.max(g.hitStop, sec);
+    };
+
+    /** camera zoom punch + chromatic split, both decay on their own */
+    const punch = (n: number, chroma = 0) => {
+      if (!saveRef.current.shakeFx) return;
+      g.punch = Math.min(1, g.punch + n);
+      g.chroma = Math.min(1, g.chroma + chroma);
+    };
+
+    /** drop a persistent ground effect */
+    const addZone = (z: Omit<Zone, "seed">) => {
+      if (g.zones.length > 26) g.zones.shift();
+      g.zones.push({ ...z, seed: Math.random() * 100 });
+    };
+
+    /** queue a beat of the running cast timeline */
+    const schedule = (at: number, run: () => void) => {
+      g.casts.push({ at: g.t + at, run });
+    };
+
+    /** the level-up / ascend flourish that plays over a tower */
+    const levelFlourish = (x: number, y: number, color: string, label: string, tier = 1) => {
+      if (g.levelFx.length > 8) g.levelFx.shift();
+      g.levelFx.push({ x, y, color, label, t: 0, total: 1.25, tier });
+      shock(x, y, color, 30, 0.7);
+      shock(x, y, "#ffffff", 20, 0.45);
+      glow(x, y, color, 70, 0.6);
+      stars(x, y, color, 10, 54);
+      shards(x, y, color, tier >= 2 ? 14 : 8, 200);
+      punch(tier >= 2 ? 0.5 : 0.3, tier >= 2 ? 0.4 : 0.2);
+      hitStop(tier >= 2 ? 0.06 : 0.03);
+    };
+
     const summonCost = () => spCost(g.spSpend);
     /** ascent has its own price ladder so summoning never price-gouges upgrades */
     const ascCost = () => spCost(g.ascSpend);
@@ -563,9 +802,37 @@ export default function Battle({
       g.kills++;
       g.sp += e.spv;
       g.gold += e.gold;
-      const p = pathPos(e.d);
-      burst(p.x, p.y, ENEMY_TYPES[e.type].color, 14, 200);
-      ring(p.x, p.y, ENEMY_TYPES[e.type].color, 26);
+      const p = enemyPos(e);
+      const et = ENEMY_TYPES[e.type];
+      // death now pops: a shock ring, hot core glow and spinning debris
+      burst(p.x, p.y, et.color, 14, 200);
+      shock(p.x, p.y, et.color, isBossType(e.type) ? 44 : 20, isBossType(e.type) ? 0.8 : 0.45);
+      glow(p.x, p.y, et.accent, isBossType(e.type) ? 110 : 34, 0.4);
+      shards(p.x, p.y, et.color, isBossType(e.type) ? 24 : 7, isBossType(e.type) ? 360 : 200);
+      if (isBossType(e.type)) {
+        flash(et.color, 0.22);
+        punch(0.7, 0.5);
+        hitStop(0.08);
+        stars(p.x, p.y, et.accent, 14, 120);
+      }
+      // Storm Sovereign: a marked death re-arcs its static into nearby enemies
+      if (e.mark > 0) {
+        const now2 = performance.now();
+        const near = g.enemies
+          .filter((o) => !o.dead && o.id !== e.id)
+          .map((o) => ({ o, dist: Math.hypot(enemyPos(o).x - p.x, enemyPos(o).y - p.y) }))
+          .filter((x) => x.dist < 180)
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, 3);
+        near.forEach(({ o }) => {
+          const op = enemyPos(o);
+          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y, op.x, op.y, "#fff6a8", 2.2, 0.26, now2));
+          o.mark = Math.max(o.mark, 3);
+          dealDamage(o, (70 + 22 * g.round), { color: "#ffe14d" });
+          glow(op.x, op.y, "#ffe14d", 30, 0.3);
+        });
+        if (near.length) addText(p.x, p.y - 36, "STATIC ARC", "#ffe14d", 13, true);
+      }
     };
 
     const dealDamage = (e: Enemy, raw: number, opt: { alwaysCrit?: boolean; tw?: BT; color?: string }) => {
@@ -579,6 +846,7 @@ export default function Battle({
       let dmg = raw * (1 - e.armor);
       if (e.ward > 0) dmg *= 0.45; // boss Bulwark
       if (e.slowT > 0) dmg *= 1 + SLOW_VULN; // chilled enemies shatter easier
+      if (e.encased > 0) dmg *= 2; // Absolute Zero: ice doubles everything that lands
       if (opt.tw?.def.id === "hellstorm") {
         const tier = saveRef.current.awn["hellstorm"]?.[0] || 0;
         if (tier > 0) {
@@ -597,7 +865,7 @@ export default function Battle({
       // crits are the loudest thing on screen: heavy number + shockwave + shake
       const critTier = crit ? (dmg / Math.max(1, e.max) >= 0.5 ? 3 : dmg > 400 ? 2 : 1) : 0;
       e.hp -= dmg;
-      const p = pathPos(e.d);
+      const p = enemyPos(e);
       if (crit) {
         // starburst: gold sparks fly out, a shockwave ring snaps open
         burst(p.x, p.y, critTier >= 3 ? "#fff2b0" : "#ffd23f", critTier >= 3 ? 26 : critTier === 2 ? 18 : 12, critTier >= 3 ? 340 : 250);
@@ -645,7 +913,7 @@ export default function Battle({
       let superbolt = false;
       if (tier1 > 0 && Math.random() < t.def.awk1!.chance[tier1 - 1]) superbolt = true;
       shown.forEach((e) => {
-        const ep = pathPos(e.d);
+        const ep = enemyPos(e);
         if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, topY, ep.x, ep.y, superbolt ? "#fff2b0" : "#ffe86b", superbolt ? 4 : 2.4, 0.28, now));
         dealDamage(e, dmgBase, { tw: t, color: "#ffe86b" });
       });
@@ -665,7 +933,7 @@ export default function Battle({
         const k = lo + Math.floor(Math.random() * (hi - lo + 1));
         for (let i = 0; i < k; i++) {
           const e = shown[Math.floor(Math.random() * shown.length)];
-          const ep = pathPos(e.d);
+          const ep = enemyPos(e);
           if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, topY, ep.x, ep.y, "#9ff3ff", 3.4, 0.34, now));
           dealDamage(e, dmgBase * 0.8, { tw: t, color: "#9ff3ff" });
         }
@@ -709,7 +977,7 @@ export default function Battle({
       const extra = tier2 > 0 && Math.random() < t.def.awk2!.chance[tier2 - 1] ? t.def.awk2!.mult[tier2 - 1] : 0;
       g.enemies.forEach((e) => {
         if (e.dead) return;
-        const ep = pathPos(e.d);
+        const ep = enemyPos(e);
         ring(ep.x, ep.y, nova ? "#ffffff" : "#ffd76a", 40);
         dealDamage(e, dmg * power, { alwaysCrit: nova, tw: t, color: "#ffb324" });
         if (!e.dead) {
@@ -746,7 +1014,7 @@ export default function Battle({
             .slice(0, t.def.multi || 3);
           const list = others.length ? others : [target];
           list.forEach((e) => {
-            const tp = pathPos(e.d);
+            const tp = enemyPos(e);
             push({ speed: 620, kind: "swarm" }, tp, e);
           });
           break;
@@ -856,7 +1124,7 @@ export default function Battle({
             .slice(0, t.def.multi || 4);
           const list = others.length ? others : [target];
           list.forEach((e) => {
-            const tp = pathPos(e.d);
+            const tp = enemyPos(e);
             push({ speed: 480, blast: radius, blastDmg: 0.7, kind: "cannon" }, tp, e);
           });
           break;
@@ -895,7 +1163,7 @@ export default function Battle({
         g.shake = fxShake(5);
         g.enemies.forEach((e) => {
           if (e.dead) return;
-          const ep = pathPos(e.d);
+          const ep = enemyPos(e);
           if (Math.hypot(ep.x - pos.x, ep.y - pos.y) <= radius) dealDamage(e, pr.dmg * pr.fireball!, { alwaysCrit: true, tw: pr.tw, color: "#ff7a3d" });
         });
         return;
@@ -953,7 +1221,7 @@ export default function Battle({
           g.shake = fxShake(2);
           g.enemies.forEach((e) => {
             if (e.dead || e.id === target.id) return;
-            const ep = pathPos(e.d);
+            const ep = enemyPos(e);
             if (Math.hypot(ep.x - pos.x, ep.y - pos.y) <= blastR)
               dealDamage(e, blastBase, { tw: pr.tw, color: "#ff9d4d" });
           });
@@ -986,7 +1254,7 @@ export default function Battle({
         const now = performance.now();
         const others = g.enemies.filter((e) => !e.dead && e.id !== target.id).sort((a, b) => b.d - a.d).slice(0, pr.chain);
         others.forEach((e) => {
-          const ep = pathPos(e.d);
+          const ep = enemyPos(e);
           if (g.bolts.length < 36) g.bolts.push(randBolt(from.x, from.y, ep.x, ep.y, "#7fe9ff", 1.6, 0.16, now));
           dealDamage(e, pr.dmg * 0.9, { tw: pr.tw, color: "#7fe9ff" });
           from = ep;
@@ -1019,7 +1287,7 @@ export default function Battle({
         const targets = g.enemies.filter((e) => !e.dead).sort((x, y) => y.d - x.d).slice(0, beams);
         const now = performance.now();
         targets.forEach((e, i) => {
-          const ep = pathPos(e.d);
+          const ep = enemyPos(e);
           if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#ff7a3d", Math.max(1.5, 3.5 - i * 0.05), 0.4, now));
           dealDamage(e, 800 * towerPower(b), { tw: b, color: "#ff7a3d" });
         });
@@ -1090,7 +1358,7 @@ export default function Battle({
           ring(W / 2, H / 2, "#ff9d4d", 520);
           g.enemies.forEach((e) => {
             if (e.dead) return;
-            const p = pathPos(e.d);
+            const p = enemyPos(e);
             ring(p.x, p.y, "#ffb324", 60);
             dealDamage(e, e.max * 0.25, { color: "#ff9d4d" });
           });
@@ -1101,95 +1369,296 @@ export default function Battle({
     };
     shopRef.current = buyShopItem;
 
+    /**
+     * Hero ultimates, reworked. Each one is a timeline: the cast is scheduled
+     * across `castTime` seconds via `schedule()`, so effects unfold in beats
+     * (wind-up, main event, payoff) instead of resolving in a single frame.
+     * Every skill also leaves a real secondary mechanic on the field.
+     */
     const hero = () => {
       if (g.heroCd > 0 || g.final) return;
       const hero = HERO_BY_ID[g.heroId] || HERO_BY_ID.nova;
       const lv = g.heroLv;
       const power = heroPower(lv);
       g.heroCd = heroCooldown(hero.cd, lv);
+      g.skillCasts++;
       sfx.hero();
-      g.shake = fxShake(9);
-      const now = performance.now();
       const kind: HeroKind = hero.kind;
+      const alive = () => g.enemies.filter((e) => !e.dead);
 
-      if (kind === "overdrive") {
-        // no damage: supercharge every tower for a while
-        g.odT = OVERDRIVE_TIME * power;
-        for (const t of g.towers) {
-          if (!t.cell) continue;
-          const p = cellCenter(t.cell.c, t.cell.r);
-          ring(p.x, p.y, "#3dff8e", 52);
-          addText(p.x, p.y - 44, "OVERDRIVE", "#3dff8e", 12, true);
+      // the busiest stretch of lane — where screen-wide skills centre themselves
+      const hotspot = () => {
+        const live = alive();
+        if (!live.length) return { x: W / 2, y: H / 2, d: PATH_LEN * 0.5 };
+        let best = live[0];
+        let bestN = -1;
+        for (const e of live) {
+          const n = live.filter((o) => Math.abs(o.d - e.d) < 120).length;
+          if (n > bestN) {
+            bestN = n;
+            best = e;
+          }
         }
-        addText(W / 2, H / 2 - 60, "OVERDRIVE!", "#3dff8e", 26, true);
+        const p = pathPos(best.d);
+        return { x: p.x, y: p.y, d: best.d };
+      };
+
+      // --- shared cast opening: banner, rune circle, shockwave, screen wash ---
+      const spot = hotspot();
+      g.skill = {
+        heroId: hero.id,
+        name: hero.skillName,
+        color: hero.color,
+        color2: hero.color2,
+        kind,
+        t: 0,
+        total: hero.castTime,
+        phase: hero.phases[0].label,
+        sx: spot.x,
+        sy: spot.y,
+      };
+      hero.phases.slice(1).forEach((ph) => schedule(ph.at, () => {
+        if (g.skill) g.skill.phase = ph.label;
+      }));
+      g.shake = fxShake(10);
+      punch(0.45, 0.35);
+      flash(hero.color, 0.26);
+      shock(spot.x, spot.y, hero.color, 40, 0.8);
+      shock(spot.x, spot.y, "#ffffff", 24, 0.5);
+      glow(spot.x, spot.y, hero.color, 120, 0.7);
+      stars(spot.x, spot.y, hero.color2, 16, 140);
+
+      if (kind === "nuke") {
+        // ===== SINGULARITY: open a rift, drag the field in, then collapse it =====
+        const pullT = 1.9 + 0.12 * lv;
+        addZone({ x: spot.x, y: spot.y, r: 150, life: pullT, max: pullT, kind: "rift", color: hero.color, dps: 24 * power, slow: 0.55 });
+        alive().forEach((e) => {
+          e.pulled = pullT;
+          e.stun = Math.max(e.stun, pullT);
+        });
+        // three meteors crash in while the rift holds
+        for (let i = 0; i < 3; i++) {
+          schedule(0.45 + i * 0.42, () => {
+            const a = (i / 3) * Math.PI * 2 + 0.7;
+            const mx = spot.x + Math.cos(a) * 120;
+            const my = spot.y + Math.sin(a) * 70;
+            shock(mx, my, hero.color2, 30, 0.5);
+            glow(mx, my, hero.color2, 70, 0.4);
+            shards(mx, my, hero.color2, 10, 240);
+            g.shake = fxShake(5);
+            alive().forEach((e) => {
+              const ep = enemyPos(e);
+              if (Math.hypot(ep.x - mx, ep.y - my) < 110) dealDamage(e, (110 + 30 * g.round) * power, { color: hero.color2 });
+            });
+          });
+        }
+        schedule(pullT, () => {
+          // collapse: damage scales with how many got dragged in
+          const caught = alive().filter((e) => Math.hypot(enemyPos(e).x - spot.x, enemyPos(e).y - spot.y) < 190);
+          const mul = 1 + Math.min(1.5, caught.length * 0.08);
+          const dmg = (320 + 80 * g.round) * power * mul;
+          caught.forEach((e) => {
+            e.pulled = 0;
+            e.stun = Math.max(e.stun, 1.1);
+            dealDamage(e, dmg, { alwaysCrit: true, color: hero.color });
+          });
+          alive().forEach((e) => (e.pulled = 0));
+          flash("#ffffff", 0.22);
+          g.shake = fxShake(14);
+          punch(1, 0.8);
+          hitStop(0.1);
+          for (let i = 0; i < 4; i++) shock(spot.x, spot.y, i % 2 ? hero.color : "#ffffff", 30 + i * 18, 0.8 + i * 0.12);
+          glow(spot.x, spot.y, hero.color, 200, 0.8);
+          shards(spot.x, spot.y, hero.color2, 30, 420);
+          stars(spot.x, spot.y, "#ffffff", 20, 160);
+          addText(spot.x, spot.y - 70, `×${caught.length} CAUGHT`, hero.color, 20, true);
+          sfx.hero();
+        });
+        addText(W / 2, H / 2 - 110, "SINGULARITY", hero.color, 30, true);
         return;
       }
 
       if (kind === "freeze") {
-        const dur = 4 * power;
-        g.enemies.forEach((e) => {
-          if (e.dead) return;
+        // ===== ABSOLUTE ZERO: encase, amplify, then shatter =====
+        const dur = 1.6 + 0.4 * lv * 0.5;
+        alive().forEach((e, i) => {
           e.frozen = Math.max(e.frozen, dur);
-          e.slow = Math.max(e.slow, 0.5);
-          e.slowT = Math.max(e.slowT, 8);
-          const p = pathPos(e.d);
-          ring(p.x, p.y, "#35e0ff", 46);
-          burst(p.x, p.y, "#9fe8ff", 10, 120);
+          e.encased = Math.max(e.encased, dur);
+          e.slow = Math.max(e.slow, 0.6);
+          e.slowT = Math.max(e.slowT, 10);
+          const ep = enemyPos(e);
+          schedule(Math.min(0.45, i * 0.012), () => {
+            shock(ep.x, ep.y, hero.color, 26, 0.45);
+            glow(ep.x, ep.y, hero.color2, 36, 0.5);
+            stars(ep.x, ep.y, "#ffffff", 3, 26);
+          });
         });
-        addText(W / 2, H / 2 - 60, "DEEP FREEZE", "#35e0ff", 26, true);
+        // frost fields left on the lane
+        for (let i = 0; i < 3; i++) {
+          const d = ((i + 0.5) / 3) * PATH_LEN;
+          const p = pathPos(d);
+          addZone({ x: p.x, y: p.y, r: 92, life: 9, max: 9, kind: "frost", color: hero.color, dps: 10 * power, slow: 0.5 });
+        }
+        schedule(1.6, () => {
+          // shatter: the more health they are missing, the harder it hits
+          flash(hero.color2, 0.24);
+          g.shake = fxShake(13);
+          punch(0.9, 0.6);
+          hitStop(0.09);
+          alive().forEach((e) => {
+            if (e.encased <= 0) return;
+            const missing = 1 - e.hp / e.max;
+            const dmg = (180 + 50 * g.round) * power * (1 + missing * 2.2 * (1 + lv * 0.08));
+            const ep = enemyPos(e);
+            e.encased = 0;
+            dealDamage(e, dmg, { alwaysCrit: true, color: hero.color2 });
+            shards(ep.x, ep.y, hero.color2, 14, 300);
+            shock(ep.x, ep.y, "#ffffff", 24, 0.5);
+          });
+          addText(W / 2, H / 2 - 60, "SHATTER!", hero.color2, 30, true);
+          sfx.freeze();
+        });
+        addText(W / 2, H / 2 - 110, "ABSOLUTE ZERO", hero.color, 30, true);
         sfx.freeze();
         return;
       }
 
-      if (kind === "thunder") {
-        // bolts walk the lane: a strike every ~70px of path, chaining nearby enemies
-        const bolts = 5 + Math.round(lv * 1.4);
-        const dmg = (170 + 45 * g.round) * power;
-        for (let i = 0; i < bolts; i++) {
-          const d = ((i + 0.5) / bolts) * PATH_LEN;
-          const p = pathPos(d);
-          const hit: typeof g.enemies = [];
-          for (const e of g.enemies) {
-            if (e.dead) continue;
-            const ep = pathPos(e.d);
-            if (Math.hypot(ep.x - p.x, ep.y - p.y) <= 96) hit.push(e);
-          }
-          for (const e of hit) {
-            e.stun = Math.max(e.stun, 0.45);
-            dealDamage(e, dmg, { alwaysCrit: true, color: hero.color });
-          }
-          // arcs between everything this bolt caught
-          for (let k = 1; k < hit.length; k++) {
-            const a = pathPos(hit[k - 1].d);
-            const b = pathPos(hit[k].d);
-            if (g.bolts.length < 36) g.bolts.push(randBolt(a.x, a.y, b.x, b.y, "#fff6a8", 1.6, 0.28, now));
-          }
-          if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, -40, p.x, p.y, hero.color, 5, 0.4, now + i * 10));
-          ring(p.x, p.y, hero.color, 54);
-          burst(p.x, p.y, "#fff6a8", 8, 150);
+      if (kind === "burn") {
+        // ===== FIRESTORM: a walking meteor barrage that floods the lane with lava =====
+        const shots = 9 + lv;
+        const dmg = (140 + 42 * g.round) * power;
+        for (let i = 0; i < shots; i++) {
+          schedule(0.3 + i * (1.7 / shots), () => {
+            const d = ((i + 0.5) / shots) * PATH_LEN;
+            const p = pathPos(d);
+            // the meteor itself
+            shock(p.x, p.y, hero.color, 34, 0.55);
+            shock(p.x, p.y, hero.color2, 20, 0.35);
+            glow(p.x, p.y, hero.color2, 80, 0.45);
+            embers(p.x, p.y, hero.color2, 10);
+            shards(p.x, p.y, hero.color, 8, 220);
+            g.shake = fxShake(4);
+            if (i % 3 === 0) punch(0.2, 0.1);
+            alive().forEach((e) => {
+              const ep = enemyPos(e);
+              if (Math.hypot(ep.x - p.x, ep.y - p.y) > 120) return;
+              dealDamage(e, dmg, { color: hero.color });
+              if (!e.dead) {
+                // burn now compounds instead of overwriting
+                e.burnDps = e.burnDps + dmg * 0.22;
+                e.burnT = Math.max(e.burnT, 9 * power);
+              }
+            });
+          });
         }
-        addText(W / 2, H / 2 - 60, "THUNDER GOD!", hero.color, 26, true);
+        schedule(2.1, () => {
+          // lava flood along the hottest third of the lane
+          flash(hero.color, 0.22);
+          g.shake = fxShake(10);
+          punch(0.7, 0.4);
+          for (let i = 0; i < 5; i++) {
+            const d = ((i + 0.5) / 5) * PATH_LEN;
+            const p = pathPos(d);
+            addZone({ x: p.x, y: p.y, r: 80, life: 10, max: 10, kind: "lava", color: hero.color, dps: (34 + 9 * g.round) * power, slow: 0.2 });
+            embers(p.x, p.y, hero.color2, 8);
+          }
+          addText(W / 2, H / 2 - 60, "LAVA FLOOD", hero.color2, 28, true);
+        });
+        addText(W / 2, H / 2 - 110, "FIRESTORM", hero.color, 30, true);
         return;
       }
 
-      const dmg = (kind === "burn" ? 200 : 250) * power + 60 * g.round;
-      g.enemies.forEach((e) => {
-        if (e.dead) return;
-        const p = pathPos(e.d);
-        if (kind === "burn") {
-          dealDamage(e, dmg, { color: hero.color });
-          if (!e.dead) {
-            e.burnDps = Math.max(e.burnDps, dmg * 0.35);
-            e.burnT = Math.max(e.burnT, 8 * power);
-          }
-        } else {
-          e.stun = Math.max(e.stun, 1.2);
-          dealDamage(e, dmg, { alwaysCrit: true, color: hero.color });
+      if (kind === "overdrive") {
+        // ===== TIME DILATION: slow the world, supercharge towers, free volley =====
+        const dur = OVERDRIVE_TIME * power + lv * 0.2;
+        g.odT = dur;
+        g.timeScale = 0.4;
+        flash(hero.color, 0.3);
+        schedule(0.35, () => {
+          g.timeScale = 1;
+        });
+        g.towers.forEach((t, i) => {
+          if (!t.cell) return;
+          const p = cellCenter(t.cell.c, t.cell.r);
+          schedule(0.1 + i * 0.07, () => {
+            shock(p.x, p.y, hero.color, 34, 0.6);
+            glow(p.x, p.y, hero.color2, 56, 0.5);
+            stars(p.x, p.y, hero.color2, 6, 40);
+            addText(p.x, p.y - 44, "OVERCHARGED", hero.color, 12, true);
+          });
+        });
+        // free overcharged volleys at the toughest targets
+        const volleys = 1 + Math.floor(lv / 3);
+        for (let v = 0; v < volleys; v++) {
+          schedule(1.2 + v * 0.28, () => {
+            const live = alive().sort((a, b) => b.hp - a.hp);
+            if (!live.length) return;
+            g.towers.forEach((t, i) => {
+              if (!t.cell) return;
+              const tp = cellCenter(t.cell.c, t.cell.r);
+              const e = live[i % live.length];
+              const ep = enemyPos(e);
+              if (g.bolts.length < 44) g.bolts.push(randBolt(tp.x, tp.y, ep.x, ep.y, hero.color2, 3, 0.26, performance.now()));
+              dealDamage(e, (90 + 26 * g.round) * power, { alwaysCrit: true, color: hero.color, tw: t });
+              glow(ep.x, ep.y, hero.color, 40, 0.3);
+            });
+            g.shake = fxShake(6);
+            punch(0.3, 0.2);
+          });
         }
-        ring(p.x, p.y, hero.color, 50);
+        addText(W / 2, H / 2 - 110, "TIME DILATION", hero.color, 30, true);
+        return;
+      }
+
+      // ===== STORM SOVEREIGN: a bolt front walks the lane and marks everything =====
+      const bolts = 8 + Math.round(lv * 1.6);
+      const chains = 2 + Math.floor(lv / 2);
+      const dmg = (150 + 42 * g.round) * power;
+      for (let i = 0; i < bolts; i++) {
+        schedule(0.25 + i * (1.5 / bolts), () => {
+          const d = ((i + 0.5) / bolts) * PATH_LEN;
+          const p = pathPos(d);
+          const now2 = performance.now();
+          const hit = alive().filter((e) => {
+            const ep = enemyPos(e);
+            return Math.hypot(ep.x - p.x, ep.y - p.y) <= 110;
+          });
+          hit.slice(0, chains + 4).forEach((e) => {
+            e.stun = Math.max(e.stun, 0.5);
+            e.mark = Math.max(e.mark, 6);
+            dealDamage(e, dmg, { alwaysCrit: true, color: hero.color });
+          });
+          for (let k = 1; k < Math.min(hit.length, chains + 1); k++) {
+            const a = enemyPos(hit[k - 1]);
+            const b = enemyPos(hit[k]);
+            if (g.bolts.length < 44) g.bolts.push(randBolt(a.x, a.y, b.x, b.y, hero.color2, 2, 0.26, now2));
+          }
+          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, -40, p.x, p.y, hero.color, 6, 0.42, now2 + i * 8));
+          shock(p.x, p.y, hero.color, 34, 0.5);
+          glow(p.x, p.y, hero.color2, 70, 0.35);
+          stars(p.x, p.y, "#ffffff", 4, 40);
+          g.shake = fxShake(4);
+        });
+      }
+      schedule(1.8, () => {
+        // sovereign strike: one huge pillar on the densest cluster
+        const sp = hotspot();
+        flash(hero.color2, 0.26);
+        g.shake = fxShake(14);
+        punch(0.9, 0.7);
+        hitStop(0.08);
+        for (let i = 0; i < 3; i++) shock(sp.x, sp.y, i % 2 ? hero.color : "#ffffff", 34 + i * 22, 0.7);
+        glow(sp.x, sp.y, hero.color2, 170, 0.7);
+        if (g.bolts.length < 44) g.bolts.push(randBolt(sp.x, -60, sp.x, sp.y, "#ffffff", 12, 0.6, performance.now()));
+        alive().forEach((e) => {
+          const ep = enemyPos(e);
+          if (Math.hypot(ep.x - sp.x, ep.y - sp.y) > 200) return;
+          e.mark = Math.max(e.mark, 6);
+          dealDamage(e, dmg * 2.4, { alwaysCrit: true, color: hero.color2 });
+        });
+        addText(sp.x, sp.y - 70, "SOVEREIGN STRIKE", hero.color2, 22, true);
       });
-      if (g.bolts.length < 36) g.bolts.push(randBolt(W / 2, -30, W / 2, H / 2, hero.color, 8, 0.5, now));
-      addText(W / 2, H / 2 - 60, kind === "burn" ? "EMBERSTORM" : "NOVA BLAST", hero.color, 24, true);
+      addText(W / 2, H / 2 - 110, "STORM SOVEREIGN", hero.color, 30, true);
     };
     heroRef.current = hero;
 
@@ -1235,8 +1704,8 @@ export default function Battle({
           owner: "you", atkMul: 1,
         });
         const p = cellCenter(cell.c, cell.r);
-        ring(p.x, p.y, RARITY[def.rarity].color, 46);
-        burst(p.x, p.y, RARITY[def.rarity].color, 12);
+        levelFlourish(p.x, p.y, RARITY[def.rarity].color, "DEPLOYED", def.rarity === "legendary" ? 3 : 1);
+        burst(p.x, p.y, RARITY[def.rarity].color, 14);
         sfx.summon();
         toastRef.current(`${def.name} deployed!`, RARITY[def.rarity].color);
         g.sp -= cost;
@@ -1257,8 +1726,7 @@ export default function Battle({
       sfx.point();
       if (t.cell) {
         const p = cellCenter(t.cell.c, t.cell.r);
-        addText(p.x, p.y - 42, "+1 PT", ptColor(t.points), 14, true);
-        burst(p.x, p.y, ptColor(t.points), 8, 90);
+        levelFlourish(p.x, p.y, ptColor(t.points), `+1 PT · ${t.points}/${MAX_POINTS}`, t.points >= MAX_POINTS ? 3 : 1);
       }
       toastRef.current(`${t.def.name} gained a point (${t.points}/${MAX_POINTS})`, ptColor(t.points));
     };
@@ -1283,12 +1751,17 @@ export default function Battle({
       // every copy of the tower stays in lockstep
       for (const t of family) t.bLv = lv;
       sfx.ascend();
-      for (const t of open) {
-        if (!t.cell) continue;
+      // ascent flourish: a light pillar per tower, staggered so a mass ascend
+      // reads as a wave rolling across the board
+      flash("#35e0ff", 0.18);
+      open.forEach((t, i) => {
+        if (!t.cell) return;
         const p = cellCenter(t.cell.c, t.cell.r);
-        ring(p.x, p.y, "#35e0ff", 44);
-        addText(p.x, p.y - 40, `ASCENT Lv${lv}`, "#35e0ff", 13, true);
-      }
+        schedule(i * 0.07, () => {
+          levelFlourish(p.x, p.y, "#35e0ff", `ASCENT ${ROMAN[lv] || lv}`, lv >= MAX_BATTLE_LEVEL ? 3 : 2);
+          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y - 220, p.x, p.y, "#b9f4ff", 5, 0.4, performance.now()));
+        });
+      });
       toastRef.current(
         open.length > 1
           ? `All ${open.length} ${src.def.name} towers ascended to Lv ${lv}`
@@ -1310,8 +1783,25 @@ export default function Battle({
         p.x += p.vx * dt;
         p.y += p.vy * dt;
         if (p.kind === "spark") p.vy += 260 * dt;
+        if (p.grav) p.vy += 420 * p.grav * dt;
+        if (p.drag) {
+          const k = Math.max(0, 1 - p.drag * dt);
+          p.vx *= k;
+          p.vy *= k;
+        }
+        if (p.spin) p.rot = (p.rot || 0) + p.spin * dt;
       }
       g.parts = g.parts.filter((p) => p.life > 0);
+
+      // screen flash + camera punch + chromatic split all decay on their own
+      if (g.flash) {
+        g.flash.life -= dt;
+        if (g.flash.life <= 0) g.flash = null;
+      }
+      g.punch = Math.max(0, g.punch - dt * 3.4);
+      g.chroma = Math.max(0, g.chroma - dt * 2.6);
+      for (const l of g.levelFx) l.t += dt;
+      g.levelFx = g.levelFx.filter((l) => l.t < l.total);
       for (const t of g.texts) {
         t.life -= dt;
         t.y -= 34 * dt;
@@ -1319,12 +1809,33 @@ export default function Battle({
       g.texts = g.texts.filter((t) => t.life > 0);
     };
 
-    const update = (dt: number) => {
+    const update = (rawDt: number) => {
+      // hit-stop freezes the simulation for a few frames on heavy impacts, and
+      // Time Dilation scales the whole world down — both leave FX running.
+      if (g.hitStop > 0) {
+        g.hitStop = Math.max(0, g.hitStop - rawDt);
+        updateFx(rawDt);
+        return;
+      }
+      const dt = rawDt * g.timeScale;
       g.t += dt;
       g.shake = Math.max(0, g.shake - dt * 30);
       g.redFlash = Math.max(0, g.redFlash - dt * 2);
       g.heroCd = Math.max(0, g.heroCd - dt);
       g.odT = Math.max(0, g.odT - dt);
+
+      // ---- hero cast timeline: fire every beat whose moment has arrived ----
+      if (g.casts.length) {
+        const due = g.casts.filter((c) => c.at <= g.t);
+        if (due.length) {
+          g.casts = g.casts.filter((c) => c.at > g.t);
+          due.forEach((c) => c.run());
+        }
+      }
+      if (g.skill) {
+        g.skill.t += rawDt;
+        if (g.skill.t >= g.skill.total) g.skill = null;
+      }
 
       if (g.final) {
         updateFx(dt);
@@ -1366,6 +1877,7 @@ export default function Battle({
             slow: 0, slowT: 0, burnT: 0, burnDps: 0,
             summonCd: BOSS_SUMMON_CD, blinkCd: BOSS_BLINK_CD, wardCd: BOSS_WARD_CD, ward: 0,
             enraged: false, cast: 0,
+            encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
           });
           // a boss walks in with a cutscene — the sim holds until it finishes
           if (boss && g.bossIntro !== g.round) {
@@ -1378,6 +1890,7 @@ export default function Battle({
         if (!g.spawnQ.length && g.enemies.length === 0) {
           const bonus = 40 + 10 * g.round;
           g.sp += bonus;
+          g.wavesCleared++;
           // gold + gem payouts were buffed 40% (REWARD_MUL) in the balance patch
           g.gold += reward(bonus / 2);
           if (g.mode !== "endless" && g.round >= g.maxRounds) {
@@ -1413,13 +1926,13 @@ export default function Battle({
             e.ward = Math.max(e.ward, 1.2);
             e.cast = 1.2;
             g.bossCast = { skill: "Blood Frenzy", tell: `${ENEMY_TYPES[e.type].name} ${BOSS_SKILLS[3].tell}`, color: BOSS_SKILLS[3].color, t: 2.2 };
-            burst(pathPos(e.d).x, pathPos(e.d).y, "#ff4d5e", 22, 240);
+            burst(enemyPos(e).x, enemyPos(e).y, "#ff4d5e", 22, 240);
             sfx.leak();
           }
           e.summonCd -= dt;
           if (e.summonCd <= 0) {
             e.summonCd = BOSS_SUMMON_CD;
-            const ep = pathPos(e.d);
+            const ep = enemyPos(e);
             const et0 = ENEMY_TYPES[0];
             const nSum = 2 + (g.round >= 16 ? 1 : 0);
             for (let i = 0; i < nSum; i++) {
@@ -1431,6 +1944,7 @@ export default function Battle({
                 spv: 4 + g.round, dead: false, wob: Math.random() * 7,
                 slow: 0, slowT: 0, burnT: 0, burnDps: 0,
                 summonCd: 0, blinkCd: 0, wardCd: 0, ward: 0, enraged: false, cast: 0,
+                encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
               });
               ring(ep.x, ep.y, "#c44dff", 30 + i * 8);
             }
@@ -1441,9 +1955,9 @@ export default function Battle({
           e.blinkCd -= dt;
           if (e.blinkCd <= 0) {
             e.blinkCd = BOSS_BLINK_CD;
-            const from = pathPos(e.d);
+            const from = enemyPos(e);
             e.d = Math.min(e.d + 120, PATH_LEN - 4);
-            const to = pathPos(e.d);
+            const to = enemyPos(e);
             ring(from.x, from.y, "#35e0ff", 26);
             ring(to.x, to.y, "#35e0ff", 34);
             burst(to.x, to.y, "#35e0ff", 14, 200);
@@ -1460,11 +1974,59 @@ export default function Battle({
           }
         }
         if (e.slowT > 0) e.slowT -= dt;
+        // ---------- skill status effects ----------
+        e.encased = Math.max(0, e.encased - dt);
+        e.mark = Math.max(0, e.mark - dt);
+        if (e.pulled > 0) {
+          // Singularity: drag the enemy sideways toward the rift anchor
+          e.pulled -= dt;
+          const rift = g.zones.find((z) => z.kind === "rift");
+          if (rift) {
+            const ep = enemyPos(e);
+            const dx = rift.x - ep.x;
+            const dy = rift.y - ep.y;
+            const dist = Math.max(1, Math.hypot(dx, dy));
+            const pull = Math.min(dist, 300 * dt);
+            e.ox += (dx / dist) * pull;
+            e.oy += (dy / dist) * pull;
+            if (Math.random() < dt * 8) {
+              const sp2 = enemyPos(e);
+              pushPart({ x: sp2.x, y: sp2.y, vx: (dx / dist) * 120, vy: (dy / dist) * 120, life: 0.3, max: 0.3, size: 3, color: "#ff4fd8", kind: "glow", add: true });
+            }
+          }
+          if (e.pulled <= 0) e.pulled = 0;
+        } else if (e.ox !== 0 || e.oy !== 0) {
+          // ease back onto the lane once the pull ends
+          const k = Math.max(0, 1 - dt * 3);
+          e.ox *= k;
+          e.oy *= k;
+          if (Math.abs(e.ox) < 0.4 && Math.abs(e.oy) < 0.4) {
+            e.ox = 0;
+            e.oy = 0;
+          }
+        }
+        // ---------- ground zones (lava / frost / rift) ----------
+        if (g.zones.length) {
+          const zp = enemyPos(e);
+          for (const z of g.zones) {
+            if (Math.hypot(zp.x - z.x, zp.y - z.y) > z.r) continue;
+            if (z.dps > 0) {
+              e.hp -= z.dps * dt;
+              if (z.kind === "lava" && Math.random() < dt * 4) embers(zp.x, zp.y, "#ffd23f", 1);
+            }
+            if (z.slow > 0) {
+              e.slow = Math.max(e.slow, z.slow);
+              e.slowT = Math.max(e.slowT, 0.3);
+            }
+          }
+          if (e.hp <= 0 && !e.dead) killReward(e);
+          if (e.dead) continue;
+        }
         if (e.burnT > 0) {
           e.burnT -= dt;
           e.hp -= e.burnDps * dt;
           if (Math.random() < dt * 6) {
-            const bp = pathPos(e.d);
+            const bp = enemyPos(e);
             if (g.parts.length < 380)
               g.parts.push({ x: bp.x, y: bp.y, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30, life: 0.4, max: 0.4, size: 3, color: "#ff7a3d", kind: "spark" });
           }
@@ -1482,6 +2044,11 @@ export default function Battle({
           g.shake = fxShake(8);
           sfx.leak();
         }
+      }
+      // zones age out; the rift collapses with the Singularity timeline
+      if (g.zones.length) {
+        for (const z of g.zones) z.life -= dt;
+        g.zones = g.zones.filter((z) => z.life > 0);
       }
       g.enemies = g.enemies.filter((e) => !e.dead);
       if (g.lives <= 0) {
@@ -1525,7 +2092,7 @@ export default function Battle({
         const strength = Math.min(0.8, (t.def.slow || 0) + (t.def.upSlow || 0) * (t.menuLv - 1) + (t.def.ascSlow || 0) * (t.bLv - 1) + 0.02 * t.points);
         for (const e of g.enemies) {
           if (e.dead) continue;
-          const ep = pathPos(e.d);
+          const ep = enemyPos(e);
           if (Math.hypot(ep.x - cp.x, ep.y - cp.y) <= t.def.slowAura) {
             e.slow = Math.max(e.slow, strength);
             e.slowT = Math.max(e.slowT, 0.35);
@@ -1564,7 +2131,7 @@ export default function Battle({
             let best = -1;
             for (const e of g.enemies) {
               if (e.dead) continue;
-              const ep = pathPos(e.d);
+              const ep = enemyPos(e);
               if (Math.hypot(ep.x - p.x, ep.y - p.y) <= RANGE && e.d > best) {
                 best = e.d;
                 target = e;
@@ -2159,7 +2726,7 @@ export default function Battle({
      * plates, robes and staff, warlord axe, overlord rift crown).
      */
     const drawEnemy = (e: Enemy, now: number) => {
-      const p = pathPos(e.d);
+      const p = enemyPos(e);
       const et = ENEMY_TYPES[e.type];
       // facing: sample a point slightly ahead on the path
       const ahead = pathPos(e.d + 6);
@@ -2595,6 +3162,69 @@ export default function Battle({
           ctx.globalAlpha = 1;
         }
       }
+      // Absolute Zero: a faceted ice block with a bright rim and inner glint
+      if (e.encased > 0) {
+        const R2 = et.r + 7;
+        ctx.save();
+        ctx.globalAlpha = 0.72;
+        const ice = ctx.createLinearGradient(0, -R2, 0, R2);
+        ice.addColorStop(0, "#eafdff");
+        ice.addColorStop(0.5, "#8fe4ff");
+        ice.addColorStop(1, "#3fa9d8");
+        ctx.fillStyle = ice;
+        ctx.beginPath();
+        for (let i = 0; i < 7; i++) {
+          const a = (i / 7) * Math.PI * 2 - Math.PI / 2;
+          const rr = R2 * (i % 2 === 0 ? 1.05 : 0.86);
+          const px = Math.cos(a) * rr;
+          const py = Math.sin(a) * rr;
+          i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1.6;
+        ctx.stroke();
+        // internal fractures
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 1;
+        for (let i = 0; i < 3; i++) {
+          const a = (i / 3) * Math.PI * 2 + e.wob;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a) * R2 * 0.2, Math.sin(a) * R2 * 0.2);
+          ctx.lineTo(Math.cos(a + 0.6) * R2 * 0.85, Math.sin(a + 0.6) * R2 * 0.85);
+          ctx.stroke();
+        }
+        // glint sweeping across the block
+        ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 220 + e.wob);
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.ellipse(-R2 * 0.3, -R2 * 0.45, R2 * 0.26, R2 * 0.1, -0.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      // Storm Sovereign: orbiting static arcs on marked enemies
+      if (e.mark > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.strokeStyle = "#ffe14d";
+        ctx.lineWidth = 1.6;
+        ctx.globalAlpha = 0.55 + 0.35 * Math.sin(now / 70 + e.wob);
+        for (let i = 0; i < 3; i++) {
+          const a0 = now / 240 + (i / 3) * Math.PI * 2;
+          ctx.beginPath();
+          for (let k = 0; k <= 5; k++) {
+            const a = a0 + (k / 5) * 1.3;
+            const rr = (et.r + 9) * (1 + (k % 2 ? 0.1 : -0.08));
+            const px = Math.cos(a) * rr;
+            const py = Math.sin(a) * rr * 0.75;
+            k === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
       if (e.frozen > 0) {
         ctx.globalAlpha = 0.5;
         ctx.fillStyle = "#9fe8ff";
@@ -2818,6 +3448,13 @@ export default function Battle({
       ctx.clearRect(0, 0, W, H);
       ctx.save();
       if (g.shake > 0.3 && fxOn()) ctx.translate((Math.random() - 0.5) * g.shake, (Math.random() - 0.5) * g.shake);
+      // camera punch: a quick zoom toward the centre that eases back out
+      if (g.punch > 0.01) {
+        const sc = 1 + g.punch * 0.045;
+        ctx.translate(W / 2, H / 2);
+        ctx.scale(sc, sc);
+        ctx.translate(-W / 2, -H / 2);
+      }
 
       const bg = ctx.createLinearGradient(0, 0, 0, H);
       bg.addColorStop(0, "#0d0827");
@@ -2891,6 +3528,101 @@ export default function Battle({
         ctx.restore();
       }
 
+      // ---------- ground zones, drawn under everything that stands on them ----------
+      for (const z of g.zones) {
+        const life = Math.max(0, Math.min(1, z.life / z.max));
+        const fade = Math.min(1, life * 3); // quick fade-out at the end
+        const tt = now / 1000 + z.seed;
+        ctx.save();
+        if (z.kind === "rift") {
+          // singularity: a collapsing well with an accretion disc
+          const grow = Math.min(1, (z.max - z.life) * 3);
+          const r = z.r * (0.4 + grow * 0.6) * (0.9 + Math.sin(tt * 7) * 0.04);
+          ctx.globalCompositeOperation = "lighter";
+          const halo = ctx.createRadialGradient(z.x, z.y, r * 0.1, z.x, z.y, r);
+          halo.addColorStop(0, "transparent");
+          halo.addColorStop(0.55, z.color + "55");
+          halo.addColorStop(0.82, z.color + "cc");
+          halo.addColorStop(1, "transparent");
+          ctx.globalAlpha = fade;
+          ctx.fillStyle = halo;
+          ctx.beginPath();
+          ctx.arc(z.x, z.y, r, 0, Math.PI * 2);
+          ctx.fill();
+          // spiralling accretion arms
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 1.6;
+          for (let a = 0; a < 5; a++) {
+            ctx.globalAlpha = fade * 0.5;
+            ctx.beginPath();
+            for (let k = 0; k <= 22; k++) {
+              const f = k / 22;
+              const ang = tt * 3.2 + (a / 5) * Math.PI * 2 + f * 3.4;
+              const rr = r * (1 - f * 0.92);
+              const px = z.x + Math.cos(ang) * rr;
+              const py = z.y + Math.sin(ang) * rr * 0.62;
+              k === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+          }
+          ctx.globalCompositeOperation = "source-over";
+          // the void core
+          ctx.globalAlpha = fade;
+          ctx.fillStyle = "#06000f";
+          ctx.beginPath();
+          ctx.arc(z.x, z.y, r * 0.22 * (1 + Math.sin(tt * 9) * 0.06), 0, Math.PI * 2);
+          ctx.fill();
+        } else if (z.kind === "lava") {
+          // molten pool: a wobbling blob with a bright crust and rising heat
+          ctx.globalAlpha = fade * 0.75;
+          const pool = ctx.createRadialGradient(z.x, z.y, 0, z.x, z.y, z.r);
+          pool.addColorStop(0, "#ffd23f");
+          pool.addColorStop(0.45, z.color);
+          pool.addColorStop(1, "#5a1200");
+          ctx.fillStyle = pool;
+          ctx.beginPath();
+          for (let i = 0; i <= 26; i++) {
+            const a = (i / 26) * Math.PI * 2;
+            const wob = 1 + Math.sin(a * 3 + tt * 2.4) * 0.07 + Math.sin(a * 5 - tt * 1.7) * 0.05;
+            const px = z.x + Math.cos(a) * z.r * wob;
+            const py = z.y + Math.sin(a) * z.r * 0.5 * wob;
+            i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+          }
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = fade * (0.35 + 0.2 * Math.sin(tt * 4));
+          ctx.strokeStyle = "#ffd23f";
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.globalCompositeOperation = "source-over";
+        } else {
+          // frost field: a pale disc with crystal spokes
+          ctx.globalAlpha = fade * 0.5;
+          const fr = ctx.createRadialGradient(z.x, z.y, 0, z.x, z.y, z.r);
+          fr.addColorStop(0, "#ffffff");
+          fr.addColorStop(0.5, z.color + "aa");
+          fr.addColorStop(1, "transparent");
+          ctx.fillStyle = fr;
+          ctx.beginPath();
+          ctx.ellipse(z.x, z.y, z.r, z.r * 0.52, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = fade * 0.75;
+          ctx.strokeStyle = "#dffaff";
+          ctx.lineWidth = 1.6;
+          for (let i = 0; i < 8; i++) {
+            const a = (i / 8) * Math.PI * 2 + tt * 0.25;
+            const rr = z.r * (0.45 + 0.4 * Math.abs(Math.sin(i * 1.7 + tt)));
+            ctx.beginPath();
+            ctx.moveTo(z.x, z.y);
+            ctx.lineTo(z.x + Math.cos(a) * rr, z.y + Math.sin(a) * rr * 0.52);
+            ctx.stroke();
+          }
+        }
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+
       for (const t of g.towers) {
         if (t.cell) drawTowerAt(t, cellCenter(t.cell.c, t.cell.r).x, cellCenter(t.cell.c, t.cell.r).y, now, false);
       }
@@ -2920,9 +3652,12 @@ export default function Battle({
         ctx.globalAlpha = 1;
       }
 
-      // particles
-      for (const p of g.parts) {
+      // ---------- particles ----------
+      // Everything flagged `add` is drawn in a second additive pass so glows,
+      // shockwaves and sparkles stack into hot white cores instead of muddying.
+      const drawPart = (p: Part) => {
         const al = Math.max(0, p.life / p.max);
+        const t = 1 - al; // 0 -> 1 over the particle's life
         if (p.kind === "ring") {
           ctx.globalAlpha = al * 0.8;
           ctx.strokeStyle = p.color;
@@ -2930,6 +3665,75 @@ export default function Battle({
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size * (1.6 - al * 0.6), 0, Math.PI * 2);
           ctx.stroke();
+        } else if (p.kind === "shock") {
+          // thick leading edge that expands fast then eases out and thins
+          const ease = 1 - Math.pow(1 - t, 3);
+          const r = p.size * (0.35 + ease * 2.4);
+          ctx.globalAlpha = al * al * 0.95;
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = Math.max(0.6, 7 * al * al);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          // inner hairline chasing the main ring
+          ctx.globalAlpha = al * 0.5;
+          ctx.lineWidth = Math.max(0.4, 2 * al);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r * 0.78, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (p.kind === "glow") {
+          const r = p.size * (0.7 + t * 0.7);
+          const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+          gr.addColorStop(0, p.color);
+          gr.addColorStop(0.35, p.color + "88");
+          gr.addColorStop(1, "transparent");
+          ctx.globalAlpha = al * 0.85;
+          ctx.fillStyle = gr;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.fill();
+        } else if (p.kind === "shard") {
+          ctx.globalAlpha = al;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot || 0);
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.moveTo(0, -p.size);
+          ctx.lineTo(p.size * 0.72, p.size * 0.7);
+          ctx.lineTo(-p.size * 0.72, p.size * 0.7);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        } else if (p.kind === "star") {
+          // four-point sparkle: two crossed spikes plus a hot core
+          const sc = al * (0.6 + Math.sin(t * Math.PI) * 0.8);
+          ctx.globalAlpha = al;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rot || 0);
+          ctx.fillStyle = p.color;
+          const L = p.size * 2.1 * sc;
+          const Wd = p.size * 0.28 * sc;
+          ctx.beginPath();
+          ctx.moveTo(0, -L);
+          ctx.quadraticCurveTo(Wd, -Wd, L, 0);
+          ctx.quadraticCurveTo(Wd, Wd, 0, L);
+          ctx.quadraticCurveTo(-Wd, Wd, -L, 0);
+          ctx.quadraticCurveTo(-Wd, -Wd, 0, -L);
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.globalAlpha = al * 0.9;
+          ctx.beginPath();
+          ctx.arc(0, 0, p.size * 0.26 * sc, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        } else if (p.kind === "ember") {
+          ctx.globalAlpha = al * (0.6 + 0.4 * Math.sin(p.life * 22));
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * al, 0, Math.PI * 2);
+          ctx.fill();
         } else if (p.kind === "smoke") {
           ctx.globalAlpha = al * 0.4;
           ctx.fillStyle = p.color;
@@ -2937,10 +3741,89 @@ export default function Battle({
           ctx.arc(p.x, p.y, p.size * (2 - al), 0, Math.PI * 2);
           ctx.fill();
         } else {
+          // sparks stretch along their velocity so fast debris reads as streaks
+          const sp = Math.hypot(p.vx, p.vy);
           ctx.globalAlpha = al;
           ctx.fillStyle = p.color;
-          ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+          if (sp > 120) {
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(Math.atan2(p.vy, p.vx));
+            const len = Math.min(16, p.size + sp * 0.03);
+            ctx.fillRect(-len, -p.size / 2, len + p.size, p.size);
+            ctx.restore();
+          } else {
+            ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+          }
         }
+      };
+      for (const p of g.parts) if (!p.add) drawPart(p);
+      ctx.globalCompositeOperation = "lighter";
+      for (const p of g.parts) if (p.add) drawPart(p);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+
+      // ---------- upgrade / ascend flourishes ----------
+      for (const l of g.levelFx) {
+        const t = l.t / l.total;
+        const ease = 1 - Math.pow(1 - t, 3);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        // rising column of light
+        const colH = 150 * ease;
+        const cg = ctx.createLinearGradient(l.x, l.y, l.x, l.y - colH);
+        cg.addColorStop(0, l.color + "cc");
+        cg.addColorStop(1, "transparent");
+        ctx.globalAlpha = (1 - t) * 0.8;
+        ctx.fillStyle = cg;
+        ctx.fillRect(l.x - 20 - l.tier * 5, l.y - colH, 40 + l.tier * 10, colH);
+        // expanding hex rune rings, one per tier
+        for (let k = 0; k < l.tier; k++) {
+          const rt = Math.max(0, Math.min(1, (t - k * 0.12) * 1.6));
+          if (rt <= 0) continue;
+          const r = 22 + rt * (54 + k * 16);
+          ctx.globalAlpha = (1 - rt) * 0.9;
+          ctx.strokeStyle = k === 0 ? "#ffffff" : l.color;
+          ctx.lineWidth = 3 * (1 - rt) + 0.6;
+          ctx.beginPath();
+          for (let i = 0; i <= 6; i++) {
+            const a = (i / 6) * Math.PI * 2 + t * 2 + k;
+            const px = l.x + Math.cos(a) * r;
+            const py = l.y + Math.sin(a) * r * 0.55;
+            i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+          }
+          ctx.stroke();
+        }
+        // chevrons climbing the column
+        ctx.globalAlpha = (1 - t) * 0.9;
+        ctx.strokeStyle = l.color;
+        ctx.lineWidth = 3;
+        for (let k = 0; k < 3; k++) {
+          const ct = (t * 1.6 + k / 3) % 1;
+          const cy = l.y - ct * 120;
+          ctx.globalAlpha = (1 - ct) * (1 - t) * 0.9;
+          ctx.beginPath();
+          ctx.moveTo(l.x - 14, cy + 8);
+          ctx.lineTo(l.x, cy);
+          ctx.lineTo(l.x + 14, cy + 8);
+          ctx.stroke();
+        }
+        ctx.globalCompositeOperation = "source-over";
+        // the label, punching in then floating up
+        const pop = 1 + 0.5 * Math.max(0, 1 - t * 6);
+        ctx.globalAlpha = Math.min(1, (1 - t) * 2.2);
+        ctx.save();
+        ctx.translate(l.x, l.y - 46 - ease * 26);
+        ctx.scale(pop, pop);
+        ctx.textAlign = "center";
+        ctx.font = "800 15px Rajdhani, sans-serif";
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.strokeText(l.label, 0, 0);
+        ctx.fillStyle = l.color;
+        ctx.fillText(l.label, 0, 0);
+        ctx.restore();
+        ctx.restore();
       }
       ctx.globalAlpha = 1;
 
@@ -3002,9 +3885,46 @@ export default function Battle({
       }
 
       ctx.restore();
+
+      // ---------- full-screen post pass ----------
+      // chromatic aberration: re-stamp the frame twice, offset and tinted, in
+      // additive mode. Cheap, and it makes every big hit feel like it shoved
+      // the camera.
+      if (g.chroma > 0.02 && fxOn()) {
+        const off = g.chroma * 6;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = g.chroma * 0.3;
+        ctx.fillStyle = "#ff0040";
+        ctx.fillRect(-off, 0, W, H);
+        ctx.fillStyle = "#00e5ff";
+        ctx.fillRect(off, 0, W, H);
+        ctx.restore();
+      }
+      if (g.flash) {
+        const a = Math.max(0, g.flash.life / g.flash.max);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = a * a * 0.55;
+        ctx.fillStyle = g.flash.color;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
+      }
       if (g.redFlash > 0) {
         ctx.fillStyle = `rgba(255,40,60,${g.redFlash * 0.22})`;
         ctx.fillRect(0, 0, W, H);
+      }
+      // vignette pulse while a hero ultimate is resolving
+      if (g.skill) {
+        const k = Math.sin((g.skill.t / g.skill.total) * Math.PI);
+        const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
+        vg.addColorStop(0, "transparent");
+        vg.addColorStop(1, g.skill.color);
+        ctx.save();
+        ctx.globalAlpha = k * 0.34;
+        ctx.fillStyle = vg;
+        ctx.fillRect(0, 0, W, H);
+        ctx.restore();
       }
     };
 
@@ -3139,6 +4059,12 @@ export default function Battle({
         if (f.won) bumpQuest(s, "wins", 1);
       }
       bumpQuest(s, "runs", 1);
+      // daily tasks
+      bumpTask(s, "play", 1);
+      bumpTask(s, "waves", f.rounds);
+      bumpTask(s, "kills", g.kills);
+      bumpTask(s, "skill", g.skillCasts);
+      if (mode === "battle" && f.won) bumpTask(s, "win", 1);
     });
     sfx.coin();
     onExit();
@@ -3542,6 +4468,43 @@ export default function Battle({
       )}
 
       {/* BOSS CUTSCENE — the wave holds while the boss makes an entrance */}
+      {/* hero ultimate banner — slides in, holds, and tracks the cast phases */}
+      {g?.skill && (
+        <div className="pointer-events-none absolute inset-x-0 top-[18%] z-[60] flex flex-col items-center" data-testid="skill-banner">
+          <div
+            className="skill-banner relative px-8 py-2"
+            style={{
+              borderColor: g.skill.color,
+              background: `linear-gradient(90deg, transparent, ${g.skill.color}33 20%, ${g.skill.color}55 50%, ${g.skill.color}33 80%, transparent)`,
+            }}
+          >
+            <span className="skill-banner-sweep absolute inset-0" />
+            <span
+              className="font-disp relative block text-center text-[34px] leading-none tracking-wide"
+              style={{ color: "#fff", textShadow: `0 0 10px ${g.skill.color}, 0 0 34px ${g.skill.color}, 0 2px 0 #000` }}
+            >
+              {g.skill.name}
+            </span>
+          </div>
+          <div
+            key={g.skill.phase}
+            className="skill-phase mt-2 text-[13px] font-bold tracking-[0.42em]"
+            style={{ color: g.skill.color2, textShadow: `0 0 12px ${g.skill.color}` }}
+          >
+            {g.skill.phase}
+          </div>
+          <div className="skill-bar mt-2" style={{ borderColor: g.skill.color + "66" }}>
+            <span
+              className="skill-bar-fill"
+              style={{
+                width: `${Math.min(100, (g.skill.t / g.skill.total) * 100)}%`,
+                background: `linear-gradient(90deg, ${g.skill.color}, #fff)`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {g?.cut && (
         <div
           data-testid="boss-cutscene"

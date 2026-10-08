@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
+import { bumpTask } from "../game/save";
 import { sfx } from "../game/audio";
 import {
   TOWERS,
@@ -15,7 +16,7 @@ import {
   towerStatRows,
   type TowerDef,
 } from "../game/data";
-import { Ceremony, CoinIcon, GemIcon, TokenIcon, TowerIcon, type CeremonyData } from "../components/ui";
+import { Ceremony, CoinIcon, GemIcon, TokenIcon, TowerIcon, UpgradeCeremony, type CeremonyData, type UpgradeData } from "../components/ui";
 
 interface Drag {
   id: string;
@@ -140,6 +141,8 @@ export default function Towers({
     addLineup(id);
   };
 
+  const [upg, setUpg] = useState<UpgradeData | null>(null);
+
   const canShake = (id: string) => {
     setShakeCard(id);
     setTimeout(() => setShakeCard(null), 350);
@@ -156,10 +159,29 @@ export default function Towers({
       return deny(`Need ${gold} gold + ${fr} ${def.name} fragments`);
     }
     sfx.coin();
+    // capture the before/after stats so the flourish can show the real deltas
+    const before = towerStatRows(def, Math.max(1, lv));
+    const after = towerStatRows(def, lv + 1);
     mutate((s) => {
       s.gold -= gold;
       s.frags[def.id] -= fr;
       s.levels[def.id] += 1;
+      bumpTask(s, "upgrade", 1);
+      bumpTask(s, "spend", gold);
+    });
+    sfx.awaken();
+    setUpg({
+      title: def.name,
+      kind: "tower",
+      tower: def,
+      color: RARITY[def.rarity].color,
+      fromLv: lv,
+      toLv: lv + 1,
+      note: lv + 1 === MAX_MENU_LEVEL ? "MAX LEVEL" : "LEVEL UP",
+      stats: after
+        .map((r, i) => ({ label: r.label, from: before[i]?.value ?? r.value, to: r.value }))
+        .filter((r) => r.from !== r.to)
+        .slice(0, 4),
     });
     push(`${def.name} upgraded to Lv ${lv + 1}`, "#ffcf4d");
     if (lv + 1 === MAX_MENU_LEVEL) {
@@ -408,6 +430,7 @@ export default function Towers({
         />
       )}
 
+      {upg && <UpgradeCeremony data={upg} onClose={() => setUpg(null)} />}
       {ceremony && <Ceremony data={ceremony} onClose={() => setCeremony(null)} />}
     </div>
   );

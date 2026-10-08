@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import type { ClaimData } from "../components/ui";
+import type { ClaimData, UpgradeData } from "../components/ui";
+import type { DailyTask } from "../game/data";
+import { DAILY_TASKS, TASK_MILESTONES, TASK_POINTS_TOTAL } from "../game/data";
+import {
+  claimMilestone,
+  claimTask,
+  milestoneClaimed,
+  taskClaimed,
+  taskComplete,
+  taskPoints,
+  taskProgress,
+  tasksReady,
+  tasksRemaining,
+} from "../game/save";
 import {
   todayStr,
   clearSave,
@@ -49,6 +62,7 @@ import {
   TokenIcon,
   TowerIcon,
   TrophyIcon,
+  UpgradeCeremony,
 } from "../components/ui";
 import {
   TOWERS,
@@ -286,10 +300,26 @@ export function Home({
   const canClaim = save.lastDaily !== todayStr();
   const day = nextDailyStreak(save);
   const [claim, setClaim] = useState<ClaimData | null>(null);
+  const [upg, setUpg] = useState<UpgradeData | null>(null);
   const liveEv = eventForDate();
   const shards = save.heroShards[hero.id] || 0;
   const league = leagueFor(save.trophies);
   const nextL = nextLeague(save.trophies);
+
+  /** build the level-up flourish payload for the hero's new level */
+  const heroUpgData = (from: number, note: string): UpgradeData => ({
+    title: hero.name,
+    kind: "hero",
+    heroKind: hero.kind,
+    color: hero.color,
+    fromLv: from,
+    toLv: from + 1,
+    note: from + 1 >= HERO_MAX_LEVEL ? "MAX LEVEL" : note,
+    stats: [
+      { label: "Skill power", from: `${Math.round(heroPower(from) * 100)}%`, to: `${Math.round(heroPower(from + 1) * 100)}%` },
+      { label: "Cooldown", from: `${heroCooldown(hero.cd, from).toFixed(0)}s`, to: `${heroCooldown(hero.cd, from + 1).toFixed(0)}s` },
+    ],
+  });
 
   const doUpgrade = () => {
     if (heroMaxed) {
@@ -303,7 +333,8 @@ export function Home({
       sfx.error();
       return push(`Need ${cost} gold to upgrade ${hero.name}`, "#ff4d5e");
     }
-    sfx.buy();
+    sfx.awaken();
+    setUpg(heroUpgData(lv, "LEVEL UP"));
     push(`${hero.name} reached Lv ${lv + 1}`, hero.color);
     return ok;
   };
@@ -378,7 +409,8 @@ export function Home({
     mutate((s) => {
       levelHeroWithShards(s, hero.id);
     });
-    sfx.gem();
+    sfx.awaken();
+    setUpg(heroUpgData(lv, "SHARD ASCENSION"));
     push(`${hero.name} reached Lv ${lv + 1} with shards`, hero.color);
   };
 
@@ -626,6 +658,7 @@ export function Home({
         </button>
       </div>
 
+      {upg && <UpgradeCeremony data={upg} onClose={() => setUpg(null)} />}
       {claim && <RewardClaim data={claim} onClose={() => setClaim(null)} />}
     </div>
   );
@@ -781,11 +814,20 @@ export function Specials({
   mutate: (fn: (s: SaveData) => void) => void;
   push: (m: string, c?: string) => void;
 }) {
-  const [tab, setTab] = useState<"events" | "competition">("events");
+  const [tab, setTab] = useState<"tasks" | "events" | "competition">("tasks");
+  const ready = tasksReady(save);
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1">
       <div className="flex items-center gap-2">
-        <button className={`tab-btn ${tab === "events" ? "on" : ""}`} onClick={() => { sfx.click(); setTab("events"); }}>
+        <button
+          className={`tab-btn relative ${tab === "tasks" ? "on" : ""}`}
+          data-testid="tab-tasks"
+          onClick={() => { sfx.click(); setTab("tasks"); }}
+        >
+          TASKS
+          {ready > 0 && <span className="badge-ping">{ready}</span>}
+        </button>
+        <button className={`tab-btn ${tab === "events" ? "on" : ""}`} data-testid="tab-events" onClick={() => { sfx.click(); setTab("events"); }}>
           EVENTS
         </button>
         <button className={`tab-btn ${tab === "competition" ? "on" : ""}`} data-testid="tab-competition" onClick={() => { sfx.click(); setTab("competition"); }}>
@@ -793,7 +835,157 @@ export function Specials({
         </button>
         <span className="ml-auto text-[11px] font-bold tracking-widest text-[var(--dim)]">RESETS 07:00 · {resetCountdown()}</span>
       </div>
-      {tab === "events" ? <EventsPanel save={save} mutate={mutate} push={push} /> : <CompetitionPanel save={save} mutate={mutate} push={push} />}
+      {tab === "tasks" ? (
+        <TasksPanel save={save} mutate={mutate} push={push} />
+      ) : tab === "events" ? (
+        <EventsPanel save={save} mutate={mutate} push={push} />
+      ) : (
+        <CompetitionPanel save={save} mutate={mutate} push={push} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Daily tasks. Eight objectives reset at 07:00 alongside the rest of the daily
+ * content; each pays gold + gems on claim and banks points toward three
+ * escalating milestone caches.
+ */
+function TasksPanel({
+  save,
+  mutate,
+  push,
+}: {
+  save: SaveData;
+  mutate: (fn: (s: SaveData) => void) => void;
+  push: (m: string, c?: string) => void;
+}) {
+  const [claim, setClaim] = useState<ClaimData | null>(null);
+  const pts = taskPoints(save);
+  const pct = Math.min(100, (pts / TASK_POINTS_TOTAL) * 100);
+
+  const doClaim = (t: DailyTask) => {
+    // roll on a draft so the loot is available synchronously for the overlay,
+    // then commit through mutate with the claimed-guard doing the real work
+    const draft = cloneSave(save);
+    const loot = claimTask(draft, t.id);
+    if (!loot) {
+      sfx.error();
+      return push("Task not complete yet", "#ff4d5e");
+    }
+    mutate((s) => {
+      claimTask(s, t.id);
+    });
+    sfx.chest();
+    setClaim({ title: t.name.toUpperCase(), subtitle: `+${t.points} task points`, lines: lootLines(loot), color: t.color });
+  };
+
+  const doMilestone = (idx: number) => {
+    const m = TASK_MILESTONES[idx];
+    const draft = cloneSave(save);
+    const loot = claimMilestone(draft, idx);
+    if (!loot) {
+      sfx.error();
+      return push(`Need ${m.points} task points`, "#ff4d5e");
+    }
+    mutate((s) => {
+      claimMilestone(s, idx);
+    });
+    sfx.ceremony();
+    setClaim({ title: m.label.toUpperCase(), subtitle: `${m.points} task points reached`, lines: lootLines(loot), color: "#ffcf4d", chest: true, chestCount: 2 });
+  };
+
+  return (
+    <div className="flex flex-col gap-3" data-testid="daily-tasks">
+      {/* milestone track */}
+      <div className="tile tile-gold holo p-3">
+        <div className="flex items-end justify-between">
+          <div>
+            <div className="text-[11px] font-bold tracking-[0.3em] text-[#ffcf4d]">DAILY TASKS</div>
+            <div className="font-disp text-2xl leading-none text-white">
+              <span className="num" style={{ color: "#ffcf4d" }}>{pts}</span>
+              <span className="text-[var(--dim)]"> / {TASK_POINTS_TOTAL} PTS</span>
+            </div>
+          </div>
+          <div className="text-right text-[11px] font-bold text-[var(--dim)]">
+            {tasksRemaining(save)} TASKS LEFT
+          </div>
+        </div>
+        <div className="task-bar mt-2">
+          <span className="task-bar-fill" style={{ width: `${pct}%`, background: "linear-gradient(90deg,#ffb324,#ffe9a8)" }} />
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {TASK_MILESTONES.map((m, i) => {
+            const hit = pts >= m.points;
+            const got = milestoneClaimed(save, i);
+            return (
+              <button
+                key={m.points}
+                className={`milestone-node tile flex flex-col items-center gap-1 p-2 ${hit && !got ? "ready" : ""} ${hit ? "hit" : ""}`}
+                data-testid={`milestone-${i}`}
+                disabled={!hit || got}
+                style={{ opacity: got ? 0.5 : 1, borderColor: hit ? "#ffcf4d" : undefined }}
+                onClick={() => doMilestone(i)}
+              >
+                <MiniChest size={34} color={hit ? "#ffcf4d" : "#5a5f87"} />
+                <span className="text-[11px] font-bold" style={{ color: hit ? "#ffcf4d" : "var(--dim)" }}>
+                  {m.points} PTS
+                </span>
+                <span className="text-[10.5px] font-semibold text-[var(--dim)]">{got ? "CLAIMED" : m.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* the task list */}
+      {DAILY_TASKS.map((t) => {
+        const prog = Math.min(t.need, taskProgress(save, t.id));
+        const done = taskComplete(save, t.id);
+        const got = taskClaimed(save, t.id);
+        return (
+          <div
+            key={t.id}
+            className={`task-row tile flex items-center gap-3 p-3 ${done && !got ? "ready" : ""} ${got ? "done" : ""}`}
+            data-testid={`task-${t.id}`}
+            style={{ borderColor: done && !got ? "#3dff8e" : undefined }}
+          >
+            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border" style={{ borderColor: t.color + "66", background: t.color + "1c" }}>
+              <span className="font-disp text-[17px]" style={{ color: t.color }}>
+                {Math.round((prog / t.need) * 100)}
+              </span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2">
+                <span className="font-disp text-[17px] leading-none" style={{ color: t.color }}>{t.name}</span>
+                <span className="text-[11px] font-bold text-[var(--dim)]">+{t.points} PTS</span>
+              </div>
+              <div className="truncate text-[12px] font-semibold text-[var(--dim)]">{t.desc}</div>
+              <div className="task-bar mt-1.5">
+                <span
+                  className="task-bar-fill"
+                  style={{ width: `${(prog / t.need) * 100}%`, background: `linear-gradient(90deg,${t.color},#ffffff)` }}
+                />
+              </div>
+              <div className="mt-1 flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">
+                <span className="num">{prog.toLocaleString()} / {t.need.toLocaleString()}</span>
+                <span className="inline-flex items-center gap-1"><CoinIcon size={13} />{t.gold.toLocaleString()}</span>
+                <span className="inline-flex items-center gap-1"><GemIcon size={13} />{t.gems}</span>
+              </div>
+            </div>
+            <button
+              className={`shrink-0 px-4 py-2 text-[13px] ${done && !got ? "cta-banner" : "btn-ghost"}`}
+              data-testid={`task-claim-${t.id}`}
+              disabled={!done || got}
+              onClick={() => doClaim(t)}
+            >
+              {got ? "DONE" : done ? "CLAIM" : "GO"}
+            </button>
+          </div>
+        );
+      })}
+
+      {claim && <RewardClaim data={claim} onClose={() => setClaim(null)} />}
     </div>
   );
 }

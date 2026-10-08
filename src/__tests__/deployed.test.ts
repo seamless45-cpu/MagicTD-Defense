@@ -74,6 +74,15 @@ describe("published build (index.html)", () => {
     // the deployed bundle carries this update: the 12-tower arsenal, the run shop,
     // party rally, the tower preview and the awakening ceremony
     const markers = [
+      // daily tasks + reworked skills ship in the bundle
+      "DAILY TASKS",
+      "Perfect Day",
+      "Supply Cache",
+      "SINGULARITY",
+      "ABSOLUTE ZERO",
+      "FIRESTORM",
+      "TIME DILATION",
+      "STORM SOVEREIGN",
       "Battle Shop",
       "FRAGMENT EXCHANGE",
       "Master Volume",

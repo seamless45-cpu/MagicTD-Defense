@@ -772,62 +772,154 @@ export const ENDLESS_ROUNDS = 0;
 // ---------- heroes ----------
 export type HeroKind = "nuke" | "freeze" | "burn" | "overdrive" | "thunder";
 
+/** a single beat of a hero's cast timeline, used by the battle renderer */
+export interface SkillPhase {
+  /** seconds after the cast starts */
+  at: number;
+  label: string;
+}
+
 export interface HeroDef {
   id: string;
   name: string;
   color: string;
+  /** secondary colour for the skill's effects */
+  color2: string;
   cd: number;
   kind: HeroKind;
   desc: string;
   /** shown in the hero card once the ability is levelled up */
   scaling: string;
+  /** the ultimate's display name */
+  skillName: string;
+  /** how long the cast sequence runs for */
+  castTime: number;
+  /** the beats of the cast, called out in the arena as it unfolds */
+  phases: SkillPhase[];
+  /** bullet list of exactly what the ultimate does */
+  effects: string[];
 }
 
+/**
+ * Reworked hero ultimates. Every skill is now a multi-phase, timeline-driven
+ * sequence with a real secondary mechanic (singularity pull, shatter damage,
+ * lava pools, time dilation, static marks) instead of a single instant hit.
+ */
 export const HEROES: HeroDef[] = [
   {
     id: "nova",
     name: "Nova",
     color: "#ff4fd8",
+    color2: "#9d4bff",
     cd: 25,
     kind: "nuke",
-    desc: "Screen-wide detonation: heavy damage and a brief stun on every enemy.",
-    scaling: "+30% blast damage per level",
+    skillName: "SINGULARITY",
+    castTime: 2.6,
+    desc: "Tears open a singularity that drags the whole field into one point, then collapses it.",
+    scaling: "+30% collapse damage and +0.12s pull per level",
+    phases: [
+      { at: 0, label: "RIFT OPENS" },
+      { at: 0.5, label: "EVENT HORIZON" },
+      { at: 1.9, label: "COLLAPSE!" },
+    ],
+    effects: [
+      "Opens a singularity on the busiest stretch of lane",
+      "Pulls every enemy toward it for 1.9s and holds them there",
+      "Collapses for massive damage, scaled up by how many were caught",
+      "Three meteors crash down during the pull",
+    ],
   },
   {
     id: "glacier",
     name: "Glacier",
     color: "#35e0ff",
+    color2: "#b9f4ff",
     cd: 30,
     kind: "freeze",
-    desc: "Flash-freezes every enemy solid for 4s, then leaves them chilled and slowed.",
-    scaling: "+0.4s freeze per level",
+    skillName: "ABSOLUTE ZERO",
+    castTime: 2.2,
+    desc: "Encases the field in ice, then shatters it — the more health they are missing, the harder they break.",
+    scaling: "+0.4s encase and +8% shatter damage per level",
+    phases: [
+      { at: 0, label: "FROST FRONT" },
+      { at: 0.45, label: "ENCASED" },
+      { at: 1.6, label: "SHATTER!" },
+    ],
+    effects: [
+      "Flash-freezes and encases every enemy solid",
+      "Encased enemies take +100% damage from all sources",
+      "Shatter wave at the end scales with their missing health",
+      "Leaves three frost zones that chill anything crossing them",
+    ],
   },
   {
     id: "ember",
     name: "Ember",
     color: "#ff7a3d",
+    color2: "#ffd23f",
     cd: 30,
     kind: "burn",
-    desc: "Ignites the whole field: heavy damage plus a long burning wound.",
-    scaling: "+30% burn damage per level",
+    skillName: "FIRESTORM",
+    castTime: 2.8,
+    desc: "Walks a meteor barrage down the lane and floods it with lava that keeps burning.",
+    scaling: "+1 meteor and +30% burn damage per level",
+    phases: [
+      { at: 0, label: "SKY IGNITES" },
+      { at: 0.35, label: "BARRAGE" },
+      { at: 2.1, label: "LAVA FLOOD" },
+    ],
+    effects: [
+      "Rains a walking meteor barrage along the whole path",
+      "Each impact detonates for splash damage and stacks burn",
+      "Leaves lava pools that keep burning anything standing in them",
+      "Burn stacks now compound instead of overwriting",
+    ],
   },
   {
     id: "overdrive",
     name: "Overdrive",
     color: "#3dff8e",
+    color2: "#8effc4",
     cd: 35,
     kind: "overdrive",
-    desc: "Supercharges every tower: +150% attack speed and +50% damage for 8s.",
-    scaling: "+1s overdrive per level",
+    skillName: "TIME DILATION",
+    castTime: 1.8,
+    desc: "Slams the world into slow motion while every tower fires a free overcharged volley.",
+    scaling: "+1s dilation and +1 free volley per level",
+    phases: [
+      { at: 0, label: "TIME FRACTURES" },
+      { at: 0.4, label: "DILATION" },
+      { at: 1.2, label: "FREE VOLLEY" },
+    ],
+    effects: [
+      "Drops every enemy to 35% speed for the duration",
+      "+150% attack speed and +50% damage on every tower",
+      "Each tower fires a free overcharged volley at the strongest target",
+      "Towers vent chrono-rings while the dilation holds",
+    ],
   },
   {
     id: "thunder",
     name: "Thunder God",
     color: "#ffe14d",
+    color2: "#fff6a8",
     cd: 20,
     kind: "thunder",
-    desc: "Calls lightning down along the lane: bolts walk the path, chaining between everything they touch.",
-    scaling: "+1 bolt and +25% damage per level",
+    skillName: "STORM SOVEREIGN",
+    castTime: 2.4,
+    desc: "A storm front walks the lane, marking everything it touches so deaths re-arc into the next target.",
+    scaling: "+1 bolt, +1 chain and +25% damage per level",
+    phases: [
+      { at: 0, label: "STORM FRONT" },
+      { at: 0.3, label: "BOLT WALK" },
+      { at: 1.8, label: "SOVEREIGN STRIKE" },
+    ],
+    effects: [
+      "A bolt front walks the full length of the lane",
+      "Every bolt chains between everything within its radius",
+      "Struck enemies are marked with static for 6s",
+      "A marked enemy that dies re-arcs its static into nearby enemies",
+    ],
   },
 ];
 
@@ -908,6 +1000,60 @@ export const DAILY_REWARDS: DailyReward[] = [
   { gold: 25000, gems: 900, label: "25,000 gold + 900 gems", icon: "gold", accent: "#ffcf4d" },
   { chips: { basic: 5, advanced: 2 }, label: "×5 basic + ×2 advanced chips", icon: "chip", accent: "#c44dff" },
   { chests: [{ id: "legendary", n: 3 }], label: "×3 Legendary Chests", icon: "chest", accent: "#ffb324" },
+];
+
+// ---------- daily tasks ----------
+export type TaskId = "play" | "win" | "kills" | "chests" | "upgrade" | "skill" | "spend" | "waves";
+
+export interface DailyTask {
+  id: TaskId;
+  name: string;
+  desc: string;
+  /** how much progress completes it */
+  need: number;
+  /** task points awarded, which feed the milestone track */
+  points: number;
+  gold: number;
+  gems: number;
+  color: string;
+}
+
+/**
+ * Eight objectives that reset with the 07:00 game-day. Completing them feeds a
+ * shared task-point track with three milestone chests.
+ */
+export const DAILY_TASKS: DailyTask[] = [
+  { id: "play", name: "Answer the Call", desc: "Finish any run", need: 3, points: 10, gold: 2500, gems: 40, color: "#8fb0ff" },
+  { id: "win", name: "Hold the Line", desc: "Win a Battle run", need: 2, points: 20, gold: 6000, gems: 120, color: "#3dff8e" },
+  { id: "waves", name: "Wave Breaker", desc: "Clear waves", need: 20, points: 15, gold: 4000, gems: 70, color: "#35e0ff" },
+  { id: "kills", name: "Cull the Rift", desc: "Destroy enemies", need: 150, points: 15, gold: 4500, gems: 80, color: "#ff4d5e" },
+  { id: "skill", name: "Hero's Moment", desc: "Unleash hero skills", need: 5, points: 10, gold: 2000, gems: 50, color: "#ff4fd8" },
+  { id: "upgrade", name: "Arsenal Work", desc: "Upgrade towers or heroes", need: 4, points: 10, gold: 3000, gems: 60, color: "#ffcf4d" },
+  { id: "chests", name: "Lockbreaker", desc: "Open chests", need: 3, points: 10, gold: 2500, gems: 55, color: "#c44dff" },
+  { id: "spend", name: "Big Spender", desc: "Spend gold", need: 20000, points: 10, gold: 1500, gems: 90, color: "#ffb324" },
+];
+
+export const TASK_BY_ID: Record<TaskId, DailyTask> = Object.fromEntries(DAILY_TASKS.map((t) => [t.id, t])) as Record<
+  TaskId,
+  DailyTask
+>;
+
+export const TASK_POINTS_TOTAL = DAILY_TASKS.reduce((a, t) => a + t.points, 0);
+
+export interface TaskMilestone {
+  points: number;
+  label: string;
+  color: string;
+  chests: { id: string; n: number }[];
+  gems: number;
+  chips: ChipBag;
+}
+
+/** the three chests on the daily task point track */
+export const TASK_MILESTONES: TaskMilestone[] = [
+  { points: 30, label: "Supply Cache", color: "#8fe9ff", chests: [{ id: "silver", n: 1 }], gems: 150, chips: { basic: 2 } },
+  { points: 60, label: "War Cache", color: "#c44dff", chests: [{ id: "support", n: 1 }, { id: "epic", n: 1 }], gems: 400, chips: { basic: 3, advanced: 1 } },
+  { points: TASK_POINTS_TOTAL, label: "Perfect Day", color: "#ffb324", chests: [{ id: "legendary", n: 2 }], gems: 1000, chips: { advanced: 3, elite: 1 } },
 ];
 
 // ---------- weekly event rotation ----------

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { loadSave, persistSave, type SaveData } from "./game/save";
+import { loadSave, persistSave, tasksReady, type SaveData } from "./game/save";
 import { sfx, setSfx, setVolume, initAudio } from "./game/audio";
 import { CurrencyBar, Emblem, Toasts, useToasts } from "./components/ui";
 import { LoadingScreen, Home, Specials, Guild, SettingsModal, makeDefaults } from "./screens/Menus";
@@ -217,12 +217,21 @@ export default function App() {
       {/* bottom nav */}
       <div className="shrink-0 border-t border-[var(--line)] bg-[#0a0724]/80 px-2 pb-2 pt-1.5">
         <div className="mx-auto flex max-w-3xl items-center justify-around">
-          {NAV.map((n) => (
-            <button key={n.id} className={`nav-btn flex-1 ${screen === n.id ? "on" : ""}`} onClick={() => { sfx.click(); setScreen(n.id); }}>
-              {n.icon}
-              {n.label}
-            </button>
-          ))}
+          {NAV.map((n) => {
+            // unclaimed daily tasks surface as a badge on the Specials tab
+            const badge = n.id === "specials" ? tasksReady(save) : 0;
+            return (
+              <button
+                key={n.id}
+                className={`nav-btn relative flex-1 ${screen === n.id ? "on" : ""}`}
+                onClick={() => { sfx.click(); setScreen(n.id); }}
+              >
+                {n.icon}
+                {n.label}
+                {badge > 0 && <span className="badge-ping" data-testid="nav-task-badge">{badge}</span>}
+              </button>
+            );
+          })}
         </div>
       </div>
 
