@@ -174,7 +174,7 @@ export const TOWERS: TowerDef[] = [
     target: "all",
     desc: "Strikes a lightning bolt to all enemies.",
     dmg: 400, upDmg: 0, ascDmg: 0, rate: 0.5, upRate: 0, ascRate: 0,
-    aspd: 0.12, upAspd: 0.02, ascAspd: 0.03, exotic: true, unlockFrags: 15,
+    aspd: 0.12, upAspd: 0.02, ascAspd: 0.03, exotic: true, unlockFrags: 1,
     awk1: {
       name: "Superbolt",
       desc: "Chance to strike a superbolt that deals far more damage and always crits.",
@@ -193,7 +193,7 @@ export const TOWERS: TowerDef[] = [
     id: "hellstorm", name: "Hellstorm", rarity: "legendary", kind: "hellstorm", target: "front",
     desc: "Fires a fire bullet. Chance to fire a fireball: 250% more damage, always crits, 5m explosion.",
     dmg: 480, upDmg: 0, ascDmg: 0, rate: 0.75, upRate: 0.03, ascRate: 0,
-    fbChance: 0.25, upFb: 0.05, ascFb: 0.025, exotic: true, unlockFrags: 15,
+    fbChance: 0.25, upFb: 0.05, ascFb: 0.025, exotic: true, unlockFrags: 1,
     awk1: {
       name: "Scorching Hot",
       desc: "On deploy: massive crit damage and +1% attack per kill (stacks to cap).",
@@ -214,7 +214,7 @@ export const TOWERS: TowerDef[] = [
     desc: "Fires an ice bullet. Chance to fire an icicle that cuts 40% of the enemy's current HP.",
     dmg: 720, upDmg: 0, ascDmg: 0, rate: 0.75, upRate: 0.03, ascRate: 0,
     icChance: 0.45, upIc: 0.075, ascIc: 0.025, icPct: 0.4, upIcPct: 0.025, ascIcPct: 0.04,
-    unlockFrags: 15,
+    unlockFrags: 1,
   },
   {
     id: "plant", name: "Power Plant", rarity: "legendary", kind: "plant", target: "none",
@@ -222,7 +222,7 @@ export const TOWERS: TowerDef[] = [
     dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
     aura: true, aspd: 0.03, upAspd: 0.01, ascAspd: 0.02,
     atkAura: 0.03, upAtkAura: 0.01, ascAtkAura: 0.02,
-    hpState: [4, 6, 8, 12], unlockFrags: 15,
+    hpState: [4, 6, 8, 12], unlockFrags: 1,
   },
   {
     id: "swarm", name: "Arcane Swarm", rarity: "decent", kind: "swarm", target: "front",
@@ -246,7 +246,7 @@ export const TOWERS: TowerDef[] = [
     id: "plasma", name: "Plasma Lance", rarity: "legendary", kind: "plasma", target: "front",
     desc: "Skewers a whole file of enemies with one lance.",
     dmg: 560, upDmg: 0, ascDmg: 0, rate: 0.95, upRate: 0.02, ascRate: 0,
-    pierce: 3, upPierce: 1, ascPierce: 1, exotic: true, unlockFrags: 15,
+    pierce: 3, upPierce: 1, ascPierce: 1, exotic: true, unlockFrags: 1,
     awk1: {
       name: "Overcharge",
       desc: "Chance to fire a supercharged lance that deals far more damage and always crits.",
@@ -344,7 +344,7 @@ export const TOWERS: TowerDef[] = [
     dmg: 820, upDmg: 0, ascDmg: 0, rate: 1.05, upRate: 0.02, ascRate: 0,
     splash: 240, upSplash: 12, ascSplash: 0,
     burnPct: 0.5, upBurnPct: 0.03, ascBurnPct: 0, burnDur: 4,
-    killStack: 0.01, exotic: true, unlockFrags: 15,
+    killStack: 0.01, exotic: true, unlockFrags: 1,
     awk1: {
       name: "Inferno Roar",
       desc: "Chance to breathe a firestorm: far more damage, always crits, wider crater.",
@@ -363,7 +363,7 @@ export const TOWERS: TowerDef[] = [
     target: "all",
     desc: "Calls a solar flare down on every enemy at once and sets the field alight.",
     dmg: 300, upDmg: 0, ascDmg: 0, rate: 0.6, upRate: 0.02, ascRate: 0,
-    burnPct: 0.3, upBurnPct: 0.03, ascBurnPct: 0, burnDur: 4, exotic: true, unlockFrags: 15,
+    burnPct: 0.3, upBurnPct: 0.03, ascBurnPct: 0, burnDur: 4, exotic: true, unlockFrags: 1,
     awk1: {
       name: "Supernova",
       desc: "Chance to detonate: the flare deals far more damage and always crits.",
@@ -1324,8 +1324,8 @@ export interface ChestDef {
 }
 
 export const CHESTS: ChestDef[] = [
-  { id: "common", name: "Common Chest", cost: 40, gem: 0, color: "#9fb4c7", gold: [8, 20], frags: [1, 2], bias: 0, blurb: "Cheap and cheerful." },
-  { id: "silver", name: "Silver Chest", cost: 250, gem: 0, color: "#cfd8e6", gold: [30, 70], frags: [3, 5], bias: 0.15, blurb: "Steady fragment income." },
+  { id: "common", name: "Common Chest", cost: 80, gem: 1, color: "#9fb4c7", gold: [8, 20], frags: [1, 2], bias: 0, blurb: "Cheap and cheerful." },
+  { id: "silver", name: "Silver Chest", cost: 200, gem: 1, color: "#cfd8e6", gold: [30, 70], frags: [3, 5], bias: 0.15, blurb: "Steady fragment income." },
   {
     id: "support",
     name: "Support Chest",
@@ -1344,7 +1344,7 @@ export const CHESTS: ChestDef[] = [
   {
     id: "hero",
     name: "Heroes Chest",
-    cost: 35,
+    cost: 500,
     gem: 1,
     color: "#ff4fd8",
     gold: [60, 150],
@@ -1353,8 +1353,8 @@ export const CHESTS: ChestDef[] = [
     bias: 0.3,
     blurb: "Hero shards — level heroes for free.",
   },
-  { id: "epic", name: "Epic Chest", cost: 20, gem: 1, color: "#c44dff", gold: [60, 140], frags: [5, 8], bias: 0.45, blurb: "Epic-leaning fragments." },
-  { id: "legendary", name: "Legendary Chest", cost: 60, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12], bias: 1, blurb: "Best odds at a legendary." },
+  { id: "epic", name: "Epic Chest", cost: 800, gem: 1, color: "#c44dff", gold: [60, 140], frags: [5, 8], bias: 0.45, blurb: "Epic-leaning fragments." },
+  { id: "legendary", name: "Legendary Chest", cost: 2000, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12], bias: 1, blurb: "Best odds at a legendary." },
 ];
 
 export const CHEST_BY_ID: Record<string, ChestDef> = Object.fromEntries(CHESTS.map((c) => [c.id, c]));

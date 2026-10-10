@@ -139,7 +139,9 @@ export function emptyGuild(): GuildState {
 export function defaultSave(): SaveData {
   return {
     gold: 100,
-    gems: 0,
+    // every chest is gem-priced now, so a fresh account starts with enough
+    // gems to crack a couple of commons before the daily income kicks in
+    gems: 300,
     tokens: 0,
     levels: { arrow: 1, cannon: 1, ice: 1 },
     frags: { arrow: 2, cannon: 1, ice: 0 },

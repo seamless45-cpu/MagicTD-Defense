@@ -76,6 +76,7 @@ describe("published build (index.html)", () => {
     const markers = [
       // daily tasks + reworked skills ship in the bundle
       "DAILY TASKS",
+      "JACKPOT",
       "Perfect Day",
       "Supply Cache",
       "SINGULARITY",

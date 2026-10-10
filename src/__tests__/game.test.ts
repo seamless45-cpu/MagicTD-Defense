@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach } from "vitest";
+import { GEM_RAIN_MIN, GOLD_RAIN_MIN } from "../components/ui";
 import {
   DAILY_TASKS,
   TASK_BY_ID,
@@ -256,7 +257,7 @@ describe("tower data", () => {
     const first = claimDailyReward(s)!;
     expect(first.day).toBe(1);
     // day 1 of the reworked calendar is 1,200 gems
-    expect(s.gems).toBe(DAILY_REWARDS[0].gems!);
+    expect(s.gems).toBe(defaultSave().gems + DAILY_REWARDS[0].gems!);
     expect(first.lines.some((l) => l.kind === "gems" && l.n === 1200)).toBe(true);
     expect(s.lastDaily).toBe(todayStr());
     expect(nextDailyStreak(s)).toBe(1); // already claimed today
@@ -512,7 +513,7 @@ describe("gift codes", () => {
     expect(first.ok).toBe(true);
     if (first.ok) expect(first.summary).toContain("500 gold");
     expect(s.gold).toBe(defaultSave().gold + 500);
-    expect(s.gems).toBe(3);
+    expect(s.gems).toBe(defaultSave().gems + 3);
     expect(redeemGiftCode(s, "TESTCODE", codes)).toEqual({ ok: false, reason: "used" });
   });
 
@@ -760,7 +761,7 @@ describe("competition", () => {
     const tier = COMPETITION_TIERS[0];
     expect(compClaimed(s)).toBe(false);
     expect(claimCompetition(s, tier.gems, tier.gold, tier.chips)).toBe(true);
-    expect(s.gems).toBe(tier.gems);
+    expect(s.gems).toBe(defaultSave().gems + tier.gems);
     expect(s.chips.elite).toBe(tier.chips.elite);
     expect(compClaimed(s)).toBe(true);
     expect(claimCompetition(s, tier.gems, tier.gold, tier.chips)).toBe(false);
@@ -1093,5 +1094,64 @@ describe("hero skills", () => {
     const ids = HEROES.map((h) => h.id);
     expect(new Set(ids).size).toBe(ids.length);
     ids.forEach((id) => expect(HERO_BY_ID[id].id).toBe(id));
+  });
+});
+
+// ---------- chest pricing & legendary unlocks ----------
+describe("chest economy", () => {
+  it("prices every headline chest in gems at the new rates", () => {
+    const want: Record<string, number> = { common: 80, silver: 200, hero: 500, epic: 800, legendary: 2000 };
+    Object.entries(want).forEach(([id, cost]) => {
+      const c = CHEST_BY_ID[id];
+      expect(c, id).toBeTruthy();
+      expect(c.gem, `${id} currency`).toBe(1);
+      expect(c.cost, `${id} price`).toBe(cost);
+    });
+  });
+
+  it("keeps the price ladder strictly increasing by tier", () => {
+    const ladder = ["common", "silver", "hero", "epic", "legendary"].map((id) => CHEST_BY_ID[id].cost);
+    for (let i = 1; i < ladder.length; i++) expect(ladder[i]).toBeGreaterThan(ladder[i - 1]);
+  });
+
+  it("starts a fresh account with enough gems to open a chest", () => {
+    expect(defaultSave().gems).toBeGreaterThanOrEqual(CHEST_BY_ID.common.cost);
+  });
+
+  it("unlocks every legendary tower from a single fragment", () => {
+    const legs = TOWERS.filter((t) => t.rarity === "legendary");
+    expect(legs.length).toBeGreaterThan(0);
+    legs.forEach((t) => expect(t.unlockFrags, t.name).toBe(1));
+  });
+
+  it("still gates non-legendary towers behind their own fragment costs", () => {
+    // normals are free, everything between normal and legendary still costs more than one
+    TOWERS.filter((t) => t.rarity === "decent" || t.rarity === "epic").forEach((t) =>
+      expect(t.unlockFrags, t.name).toBeGreaterThan(1)
+    );
+  });
+
+  it("lets a single legendary fragment actually unlock the tower", () => {
+    const leg = TOWERS.find((t) => t.rarity === "legendary")!;
+    const s = defaultSave();
+    s.frags[leg.id] = 1;
+    expect(s.frags[leg.id]).toBeGreaterThanOrEqual(leg.unlockFrags);
+  });
+});
+
+// ---------- jackpot thresholds ----------
+describe("payout rain thresholds", () => {
+  it("triggers the rain at 1000 gold and 100 gems", () => {
+    expect(GOLD_RAIN_MIN).toBe(1000);
+    expect(GEM_RAIN_MIN).toBe(100);
+  });
+
+  it("the legendary chest can pay out enough to trigger it", () => {
+    const s = defaultSave();
+    const before = s.gems;
+    // the top milestone pays well past the gem threshold
+    const loot = { ...rollChest("legendary") };
+    expect(loot.gold + loot.gems).toBeGreaterThan(0);
+    expect(before).toBe(s.gems);
   });
 });

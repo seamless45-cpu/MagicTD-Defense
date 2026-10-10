@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { sfx } from "../game/audio";
 import type { ChipId, TowerDef } from "../game/data";
 import { HERO_BY_ID, RARITY, TOWER_BY_ID, leagueFor, towerArt } from "../game/data";
 import type { RewardLine } from "../game/save";
@@ -639,21 +640,93 @@ export function Modal({
 // ---------- reward claim animation ----------
 
 /** stand-alone chest so the claim overlay does not depend on the menus module */
-export function ClaimChest({ color, size = 150, stage }: { color: string; size?: number; stage: "shut" | "shake" | "burst" }) {
+/**
+ * The chest itself. Six beats drive it: `shut` (idle float), `charge` (it sucks
+ * light inward and compresses), `shake` (violent rattle with escaping light),
+ * `crack` (seams split, beams blast out of the gaps), `burst` (the lid is torn
+ * off and spins away) and `open` (the aftermath, lid gone, interior glowing).
+ */
+export function ClaimChest({
+  color,
+  size = 150,
+  stage,
+}: {
+  color: string;
+  size?: number;
+  stage: "shut" | "charge" | "shake" | "crack" | "burst" | "open";
+}) {
+  const cls =
+    stage === "charge"
+      ? "chest-charge"
+      : stage === "shake"
+        ? "chest-shake"
+        : stage === "crack"
+          ? "chest-crack"
+          : stage === "burst"
+            ? "chest-burst"
+            : "";
+  const cracked = stage === "crack" || stage === "burst" || stage === "open";
+  const lidOff = stage === "burst" || stage === "open";
   return (
-    <div
-      className={stage === "shake" ? "claim-chest-shake" : stage === "burst" ? "claim-chest-burst" : ""}
-      style={stage === "shut" ? { animation: "floaty 2.5s ease-in-out infinite" } : undefined}
-    >
-      <svg width={size} height={size} viewBox="0 0 90 90">
+    <div className={cls} style={stage === "shut" ? { animation: "floaty 2.5s ease-in-out infinite" } : undefined}>
+      <svg width={size} height={size} viewBox="0 0 90 90" style={{ overflow: "visible" }}>
+        <defs>
+          <radialGradient id={`chestGlow-${color.slice(1)}`}>
+            <stop offset="0%" stopColor="#ffffff" />
+            <stop offset="45%" stopColor={color} />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </radialGradient>
+          <linearGradient id={`chestBody-${color.slice(1)}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6b4e22" />
+            <stop offset="100%" stopColor="#2a1c0a" />
+          </linearGradient>
+        </defs>
+
+        {/* light pouring out of the seams once it cracks */}
+        {cracked && (
+          <g className="chest-beams" style={{ transformOrigin: "45px 48px" }}>
+            {Array.from({ length: 10 }).map((_, i) => (
+              <rect
+                key={i}
+                x="43.5"
+                y="-40"
+                width="3"
+                height="88"
+                fill={color}
+                opacity="0.75"
+                transform={`rotate(${i * 36} 45 48)`}
+              />
+            ))}
+          </g>
+        )}
+        {(stage === "charge" || cracked) && (
+          <circle cx="45" cy="48" r={cracked ? 40 : 26} fill={`url(#chestGlow-${color.slice(1)})`} opacity={cracked ? 0.95 : 0.5} className="chest-core" />
+        )}
+
         <ellipse cx="45" cy="78" rx="30" ry="5" fill="#000" opacity="0.45" />
-        <rect x="12" y="34" width="66" height="40" rx="6" fill="#3a2a12" stroke={color} strokeWidth="3" />
-        <g className={stage === "burst" ? "claim-lid" : ""} style={{ transformOrigin: "45px 44px" }}>
+        {/* body */}
+        <rect x="12" y="34" width="66" height="40" rx="6" fill={`url(#chestBody-${color.slice(1)})`} stroke={color} strokeWidth="3" />
+        {/* metal banding gives it some heft */}
+        <rect x="18" y="34" width="5" height="40" fill={color} opacity="0.35" />
+        <rect x="67" y="34" width="5" height="40" fill={color} opacity="0.35" />
+        <rect x="12" y="52" width="66" height="3" fill={color} opacity="0.3" />
+        {/* the seam blazing open */}
+        {cracked && <rect x="12" y="32" width="66" height="5" fill="#fff" opacity="0.95" />}
+
+        <g
+          className={lidOff ? "chest-lid-off" : cracked ? "chest-lid-lift" : ""}
+          style={{ transformOrigin: "45px 44px" }}
+        >
           <path d="M12 42c0-14 14-22 33-22s33 8 33 22v6H12z" fill="#5c451f" stroke={color} strokeWidth="3" />
+          <path d="M22 40c0-10 10-16 23-16s23 6 23 16" fill="none" stroke={color} strokeWidth="2" opacity="0.5" />
           <path d="M45 6l2.6 5.4 6 .6-4.5 4 1.3 5.8L45 18.8 39.6 21.8 40.9 16l-4.5-4 6-.6z" fill={color} opacity="0.9" />
         </g>
-        <rect x="38" y="36" width="14" height="20" rx="3" fill={color} />
-        <circle cx="45" cy="44" r="3.5" fill="#171038" />
+        {!lidOff && (
+          <>
+            <rect x="38" y="36" width="14" height="20" rx="3" fill={color} />
+            <circle cx="45" cy="44" r="3.5" fill="#171038" />
+          </>
+        )}
       </svg>
     </div>
   );
@@ -672,24 +745,102 @@ export interface ClaimData {
   chestCount?: number;
 }
 
+/** payouts at or above these amounts trigger the full currency downpour */
+export const GOLD_RAIN_MIN = 1000;
+export const GEM_RAIN_MIN = 100;
+
 /**
- * Full-screen reward claim ceremony: the chest rattles, bursts open, a shock
- * ring fires, sparks rain and each reward line flies in one after another.
- * Used by the daily streak, chests, guild chests and the competition payout.
+ * The falling-currency jackpot layer. When a claim pays 1000+ gold or 100+
+ * gems, physical coins and gems tumble down the screen behind the card — more
+ * of them the bigger the payout — tumbling in 3D with a bounce at the bottom.
+ */
+function CurrencyRain({ gold, gems }: { gold: number; gems: number }) {
+  const drops = useMemo(() => {
+    const out: { id: string; kind: "gold" | "gems"; left: number; delay: number; dur: number; size: number; spin: number; drift: number }[] = [];
+    const mk = (kind: "gold" | "gems", amount: number, floor: number, cap: number) => {
+      // more loot -> a denser downpour, capped so it never becomes soup
+      const n = Math.min(cap, Math.round(floor + Math.sqrt(amount / (kind === "gold" ? 40 : 4))));
+      for (let i = 0; i < n; i++) {
+        out.push({
+          id: `${kind}-${i}`,
+          kind,
+          left: Math.random() * 100,
+          delay: Math.random() * 1.5,
+          dur: 1.5 + Math.random() * 1.3,
+          size: 16 + Math.random() * 20,
+          spin: Math.round((Math.random() - 0.5) * 1080),
+          drift: Math.round((Math.random() - 0.5) * 120),
+        });
+      }
+    };
+    if (gold >= GOLD_RAIN_MIN) mk("gold", gold, 16, 54);
+    if (gems >= GEM_RAIN_MIN) mk("gems", gems, 14, 44);
+    return out.sort(() => Math.random() - 0.5);
+  }, [gold, gems]);
+
+  if (!drops.length) return null;
+  return (
+    <div className="pointer-events-none fixed inset-0 z-[92] overflow-hidden" data-testid="currency-rain">
+      {drops.map((d) => (
+        <span
+          key={d.id}
+          className="coin-drop absolute top-0"
+          style={
+            {
+              left: `${d.left}%`,
+              animationDelay: `${d.delay}s`,
+              animationDuration: `${d.dur}s`,
+              "--spin": `${d.spin}deg`,
+              "--drift": `${d.drift}px`,
+            } as React.CSSProperties
+          }
+        >
+          <span className="coin-spin block">
+            {d.kind === "gold" ? <CoinIcon size={d.size} /> : <GemIcon size={d.size} />}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Full-screen reward claim ceremony. The chest charges, rattles itself apart,
+ * splits at the seams with light blasting out, then has its lid torn clean off
+ * — and the loot lands as a compact grid of tiles rather than a tall list, so
+ * even a ten-line legendary haul fits on one phone screen without scrolling.
+ * Big payouts additionally trigger a downpour of coins or gems.
  */
 export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () => void }) {
   const wantsChest = data.chest !== false && !!data.chest;
-  const [phase, setPhase] = useState<"shake" | "burst" | "loot">(wantsChest ? "shake" : "loot");
+  const [phase, setPhase] = useState<"charge" | "shake" | "crack" | "burst" | "loot">(wantsChest ? "charge" : "loot");
 
+  const gold = data.lines.find((l) => l.kind === "gold")?.n || 0;
+  const gems = data.lines.find((l) => l.kind === "gems")?.n || 0;
+  const jackpot = gold >= GOLD_RAIN_MIN || gems >= GEM_RAIN_MIN;
+
+  // the open sequence, beat by beat
   useEffect(() => {
     if (!wantsChest) return;
-    const a = setTimeout(() => setPhase("burst"), 900);
-    const b = setTimeout(() => setPhase("loot"), 1650);
-    return () => {
-      clearTimeout(a);
-      clearTimeout(b);
-    };
+    sfx.chestCharge();
+    const ts = [
+      setTimeout(() => setPhase("shake"), 620),
+      setTimeout(() => {
+        setPhase("crack");
+        sfx.chestCrack();
+      }, 1180),
+      setTimeout(() => setPhase("burst"), 1480),
+      setTimeout(() => setPhase("loot"), 1980),
+    ];
+    return () => ts.forEach(clearTimeout);
   }, [wantsChest]);
+
+  // the jackpot rain and its sound fire the instant the loot is revealed
+  useEffect(() => {
+    if (phase !== "loot" || !jackpot) return;
+    if (gold >= GOLD_RAIN_MIN) sfx.goldRain();
+    if (gems >= GEM_RAIN_MIN) setTimeout(() => sfx.gemRain(), gold >= GOLD_RAIN_MIN ? 260 : 0);
+  }, [phase, jackpot, gold, gems]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -701,52 +852,109 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
 
   const sparks = useMemo(
     () =>
-      Array.from({ length: 34 }, (_, i) => ({
+      Array.from({ length: 44 }, (_, i) => ({
         id: i,
-        dx: (Math.random() - 0.5) * 460,
-        dy: -60 - Math.random() * 360,
-        rot: `${Math.round((Math.random() - 0.5) * 720)}deg`,
-        size: 5 + Math.random() * 9,
-        delay: Math.random() * 0.45,
+        dx: (Math.random() - 0.5) * 520,
+        dy: -60 - Math.random() * 400,
+        rot: `${Math.round((Math.random() - 0.5) * 900)}deg`,
+        size: 4 + Math.random() * 10,
+        delay: Math.random() * 0.4,
         color: [data.color, "#ffcf4d", "#35e0ff", "#ff4fd8", "#ffffff"][i % 5],
         round: i % 3 === 0,
       })),
     [data.color]
   );
 
+  // debris thrown out at the moment the lid tears off
+  const debris = useMemo(
+    () =>
+      Array.from({ length: 26 }, (_, i) => {
+        const a = (i / 26) * Math.PI * 2 + Math.random() * 0.3;
+        const d = 80 + Math.random() * 190;
+        return {
+          id: i,
+          dx: Math.cos(a) * d,
+          dy: Math.sin(a) * d * 0.8 - 40,
+          size: 3 + Math.random() * 7,
+          rot: `${Math.round((Math.random() - 0.5) * 900)}deg`,
+          color: [data.color, "#ffffff", "#ffcf4d"][i % 3],
+          delay: Math.random() * 0.1,
+        };
+      }),
+    [data.color]
+  );
+
   const chestCount = Math.max(1, data.chestCount || 1);
+  const opening = phase !== "loot";
+  const chestStage = phase === "loot" ? "open" : phase;
 
   return (
     <div className="claim-root fixed inset-0 z-[90] flex items-center justify-center p-4" data-testid="reward-claim" onPointerDown={onClose}>
-      <div className="claim-rays pointer-events-none absolute" style={{ background: `conic-gradient(from 0deg, ${data.color}00, ${data.color}55, ${data.color}00, ${data.color}55, ${data.color}00)` }} />
       <div
-        className="panel claim-card relative w-[min(460px,94vw)] p-5 text-center"
+        className="claim-rays pointer-events-none absolute"
+        style={{ background: `conic-gradient(from 0deg, ${data.color}00, ${data.color}55, ${data.color}00, ${data.color}55, ${data.color}00)` }}
+      />
+      {phase === "loot" && jackpot && <CurrencyRain gold={gold} gems={gems} />}
+
+      <div
+        className={`panel claim-card relative w-[min(430px,94vw)] p-4 text-center ${phase === "burst" ? "claim-kick" : ""}`}
         style={{ borderColor: data.color + "aa", boxShadow: `0 0 60px ${data.color}44, 0 10px 0 #0b0722` }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <div className="claim-title font-disp text-3xl" style={{ color: data.color, textShadow: `0 0 28px ${data.color}99` }}>
+        <div className="claim-title font-disp text-2xl leading-none" style={{ color: data.color, textShadow: `0 0 28px ${data.color}99` }}>
           {data.title}
         </div>
-        <div className="mt-0.5 text-[12px] font-bold tracking-[0.22em] text-[var(--dim)]">{data.subtitle.toUpperCase()}</div>
+        <div className="mt-0.5 text-[11px] font-bold tracking-[0.22em] text-[var(--dim)]">{data.subtitle.toUpperCase()}</div>
+        {phase === "loot" && jackpot && (
+          <div className="jackpot-tag mt-1 text-[12px] font-black tracking-[0.3em]" style={{ color: "#ffcf4d" }}>
+            ★ JACKPOT ★
+          </div>
+        )}
 
-        {phase !== "loot" ? (
-          <div className="relative my-6 grid place-items-center" style={{ minHeight: 170 }}>
+        {opening ? (
+          <div className="relative my-4 grid place-items-center" style={{ minHeight: 150 }}>
             {Array.from({ length: Math.min(3, chestCount) }).map((_, i) => (
-              <div key={i} className="absolute" style={{ transform: `translateX(${(i - (Math.min(3, chestCount) - 1) / 2) * 66}px) scale(${chestCount > 1 ? 0.8 : 1})` }}>
-                <ClaimChest color={data.color} size={150} stage={phase === "burst" ? "burst" : "shake"} />
+              <div
+                key={i}
+                className="absolute"
+                style={{
+                  transform: `translateX(${(i - (Math.min(3, chestCount) - 1) / 2) * 62}px) scale(${chestCount > 1 ? 0.78 : 1})`,
+                  animationDelay: `${i * 70}ms`,
+                }}
+              >
+                <ClaimChest color={data.color} size={138} stage={chestStage} />
               </div>
             ))}
-            {phase === "burst" && (
+            {(phase === "crack" || phase === "burst") && (
               <>
                 <span className="claim-ring absolute" style={{ borderColor: data.color }} />
-                <span className="claim-ring absolute" style={{ borderColor: "#ffffff", animationDelay: "120ms" }} />
+                <span className="claim-ring absolute" style={{ borderColor: "#ffffff", animationDelay: "100ms" }} />
+                <span className="claim-ring absolute" style={{ borderColor: data.color, animationDelay: "220ms" }} />
                 <span className="claim-flash absolute inset-0" style={{ background: `radial-gradient(circle, ${data.color}cc, transparent 65%)` }} />
               </>
             )}
+            {phase === "burst" &&
+              debris.map((d) => (
+                <span
+                  key={d.id}
+                  className="chest-debris absolute"
+                  style={
+                    {
+                      width: d.size,
+                      height: d.size,
+                      background: d.color,
+                      borderRadius: d.id % 2 ? "50%" : 1,
+                      animationDelay: `${d.delay}s`,
+                      "--dx": `${d.dx}px`,
+                      "--dy": `${d.dy}px`,
+                      "--rot": d.rot,
+                    } as React.CSSProperties
+                  }
+                />
+              ))}
           </div>
         ) : (
-          <div className="relative my-4">
-            {/* sparks only fire once the loot lands */}
+          <div className="relative my-3">
             <div className="pointer-events-none absolute inset-x-0 top-1/2 h-0">
               {sparks.map((s) => (
                 <span
@@ -767,22 +975,30 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
                 />
               ))}
             </div>
-            <div className="relative space-y-1.5" data-testid="claim-lines">
+
+            {/* compact loot grid — two tiles per row, scrolls only past ~8 items */}
+            <div className="scroll-thin relative grid max-h-[46vh] grid-cols-2 gap-1.5 overflow-y-auto pr-0.5" data-testid="claim-lines">
               {data.lines.length === 0 && (
-                <div className="py-6 text-sm font-bold text-[var(--dim)]">Nothing but good vibes.</div>
+                <div className="col-span-2 py-5 text-sm font-bold text-[var(--dim)]">Nothing but good vibes.</div>
               )}
               {data.lines.map((l, i) => (
                 <div
                   key={`${l.kind}-${l.id ?? i}`}
-                  className="claim-line flex items-center gap-3 rounded-xl border bg-black/45 px-3 py-2"
-                  style={{ borderColor: l.color + "66", animationDelay: `${i * 110}ms` }}
+                  className="claim-tile relative flex items-center gap-2 overflow-hidden rounded-lg border bg-black/50 px-2 py-1.5"
+                  style={{ borderColor: l.color + "66", animationDelay: `${i * 65}ms` }}
+                  title={l.label}
                 >
-                  <span className="claim-line-icon grid h-10 w-10 shrink-0 place-items-center rounded-lg" style={{ background: l.color + "22", border: `1px solid ${l.color}55` }}>
-                    <RewardIcon line={l} size={26} />
+                  <span
+                    className="claim-line-icon grid h-8 w-8 shrink-0 place-items-center rounded-md"
+                    style={{ background: l.color + "22", border: `1px solid ${l.color}55` }}
+                  >
+                    <RewardIcon line={l} size={20} />
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-left text-[13px] font-bold text-[var(--txt)]">{l.label}</span>
-                  <span className="font-disp shrink-0 text-xl" style={{ color: l.color }}>
-                    ×{l.n.toLocaleString()}
+                  <span className="min-w-0 flex-1 text-left leading-tight">
+                    <span className="block truncate text-[10.5px] font-bold uppercase tracking-wide text-[var(--dim)]">{l.label}</span>
+                    <span className="font-disp block text-[17px] leading-none" style={{ color: l.color }}>
+                      {l.n.toLocaleString()}
+                    </span>
                   </span>
                 </div>
               ))}
@@ -790,13 +1006,8 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
           </div>
         )}
 
-        <button
-          className="btn btn-gold mt-2 w-full py-3 text-lg"
-          data-testid="claim-collect"
-          disabled={phase !== "loot"}
-          onClick={onClose}
-        >
-          {phase === "loot" ? "Collect" : "Opening…"}
+        <button className="btn btn-gold mt-1.5 w-full py-2.5 text-base" data-testid="claim-collect" disabled={opening} onClick={onClose}>
+          {opening ? "Opening…" : "Collect"}
         </button>
       </div>
     </div>

@@ -329,3 +329,40 @@ an on-screen banner tracking its phases:
 | Ember | **Firestorm** | Walks a barrage of meteors across the lane with compounding burn, leaving lava pools behind |
 | Overdrive | **Time Dilation** | Slams time to 40%, overcharges every tower and fires free guaranteed-crit volleys |
 | Thunder | **Storm Sovereign** | Rolls a chaining bolt front down the lane, marks survivors with static that re-arcs on death, then lands a Sovereign Strike pillar |
+
+## Economy rework, reworked claim flow and a rebuilt battlefield
+
+**Chest prices** — every headline chest is now gem-priced: Common 80, Silver 200,
+Heroes 500, Epic 800, Legendary 2000. A fresh account starts with 300 gems so the
+first chest is always reachable, and daily rewards/tasks/events supply the rest.
+
+**Legendary unlocks** — all seven legendary towers (Lightning Princess, Hellstorm,
+Icestorm, Power Plant, Plasma Lance, Dragon's Maw, Sunforge) now unlock from a
+**single** fragment instead of 15, so pulling one legendary fragment immediately
+puts the tower in your roster.
+
+**Compact claim UI** — rewards land as a two-column grid of tiles (icon, label,
+amount) instead of a tall stack of rows, so a ten-line legendary haul fits on one
+phone screen. The card, title and button were all tightened to match.
+
+**Chest opening, rebuilt** — a five-beat sequence instead of a shake-and-pop:
+**charge** (the chest compresses and pulls light inward), **shake** (violent
+accelerating rattle), **crack** (seams split and ten beams of light blast out,
+spinning and stretching), **burst** (the lid tears off, tumbles away and throws
+26 pieces of debris while the card itself takes a recoil kick), then the loot.
+Each beat has its own sound — a rising charge whine and a heavy lid crack.
+
+**Jackpot VFX** — claiming **1000+ gold** or **100+ gems** triggers a downpour of
+actual coins and gems tumbling end-over-end down the screen with drift and
+parallax, denser the bigger the payout, under a cascading coin-chime or glassy
+gem-arpeggio soundtrack, with a pulsing ★ JACKPOT ★ tag on the card.
+
+**Battlefield rework** — the arena was rebuilt from the backdrop up: a drifting
+two-bloom nebula and a parallax twinkling starfield; a raised arena slab with a
+drop shadow, bevelled rim and pulsing etched circuitry; build pads turned into
+notched octagonal tech platforms with real thickness, socket rings and crosshairs;
+the lane turned into a sunken stone road with a trench shadow, kerbs, paving ticks
+and a live energy conduit pulsing from spawn to exit; ambient motes drifting over
+the whole plate; and the portals rebuilt as stone-ringed wells with rune
+buttresses, counter-rotating rings, swirling vortex arms and motes streaming out
+of the spawn and into the exit.

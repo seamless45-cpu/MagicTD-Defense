@@ -223,6 +223,36 @@ export const sfx = {
     [261, 392, 523].forEach((f, i) => tone(f, 0.6, "sine", 0.2, 0, i * 0.05));
     noise(0.5, 0.14, 2600);
   },
+  /** a cascade of coins — plays under the big-gold payout rain */
+  goldRain: () => {
+    for (let i = 0; i < 14; i++) {
+      const f = 760 + Math.random() * 700;
+      tone(f, 0.07, "square", 0.13, 180, i * 0.062 + Math.random() * 0.03);
+      tone(f * 1.5, 0.05, "triangle", 0.08, 0, i * 0.062 + 0.03);
+    }
+    tone(196, 0.5, "sine", 0.16, 60);
+  },
+  /** glassy chimes — plays under the big-gem payout rain */
+  gemRain: () => {
+    const scale = [1046, 1318, 1568, 2093, 2637];
+    for (let i = 0; i < 14; i++) {
+      tone(scale[i % scale.length] * (i > 8 ? 2 : 1), 0.16, "sine", 0.13, 0, i * 0.066);
+    }
+    noise(0.5, 0.07, 5200);
+    tone(261, 0.6, "sine", 0.14, 90);
+  },
+  /** the heavy clunk of a chest lid tearing off */
+  chestCrack: () => {
+    noise(0.1, 0.42, 320);
+    tone(90, 0.3, "sawtooth", 0.3, -40);
+    tone(150, 0.22, "square", 0.22, -70, 0.03);
+  },
+  /** rising tension while a chest rattles itself apart */
+  chestCharge: () => {
+    tone(140, 0.85, "sawtooth", 0.14, 620);
+    tone(210, 0.85, "triangle", 0.1, 900);
+    noise(0.85, 0.09, 1400);
+  },
   merge2: () => {
     tone(300, 0.12, "square", 0.24, 500);
     tone(1200, 0.2, "sine", 0.2, 0, 0.1);

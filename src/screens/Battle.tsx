@@ -2196,28 +2196,110 @@ export default function Battle({
       ctx.stroke();
     };
 
+    /**
+     * Spawn and exit gates. Each is a sunken well of light with a stone
+     * surround, counter-rotating rune rings, a swirling vortex throat and
+     * energy motes being sucked in (exit) or flung out (spawn).
+     */
     const drawPortal = (x: number, y: number, color: string, label: string) => {
       const t = performance.now() / 1000;
+      const out = label === "SPAWN"; // spawn throws energy out, exit drinks it in
       ctx.save();
       ctx.translate(x, y);
-      ctx.rotate(t * 1.6);
+
+      // stone surround with notched buttresses
+      ctx.fillStyle = "#0a0722";
+      ctx.beginPath();
+      ctx.arc(0, 0, 32, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#2e2470";
+      ctx.lineWidth = 5;
+      ctx.stroke();
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2 + t * 0.15;
+        ctx.save();
+        ctx.rotate(a);
+        ctx.fillStyle = "#241b5c";
+        ctx.fillRect(-4, -36, 8, 10);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.5 + 0.5 * Math.abs(Math.sin(t * 2 + i));
+        ctx.fillRect(-2, -34, 4, 6);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+
+      // the throat: a dark well with a glowing heart
+      const well = ctx.createRadialGradient(0, 0, 2, 0, 0, 28);
+      well.addColorStop(0, "#ffffff");
+      well.addColorStop(0.2, color);
+      well.addColorStop(0.65, color + "55");
+      well.addColorStop(1, "#05030f");
+      ctx.fillStyle = well;
+      ctx.beginPath();
+      ctx.arc(0, 0, 27, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalCompositeOperation = "lighter";
+      // swirling vortex arms
       ctx.strokeStyle = color;
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 2;
+      for (let a = 0; a < 4; a++) {
+        ctx.globalAlpha = 0.45;
+        ctx.beginPath();
+        for (let k = 0; k <= 18; k++) {
+          const f = k / 18;
+          const ang = (out ? 1 : -1) * t * 2.6 + (a / 4) * Math.PI * 2 + f * 2.8;
+          const rr = 26 * (1 - f * 0.9);
+          const px = Math.cos(ang) * rr;
+          const py = Math.sin(ang) * rr;
+          k === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+      }
+      // counter-rotating rune rings
+      ctx.lineWidth = 3.5;
+      ctx.globalAlpha = 0.95;
+      ctx.save();
+      ctx.rotate(t * 1.6);
       ctx.beginPath();
       ctx.arc(0, 0, 22 + Math.sin(t * 5) * 3, 0.4, 2.4);
       ctx.stroke();
       ctx.beginPath();
+      ctx.arc(0, 0, 22 + Math.sin(t * 5) * 3, 3.6, 5.6);
+      ctx.stroke();
+      ctx.restore();
+      ctx.save();
+      ctx.rotate(-t * 2.3);
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
       ctx.arc(0, 0, 15, 2.9, 4.9);
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(0, 0, 9, 5.3, 7.1);
+      ctx.arc(0, 0, 15, 6.0, 7.9);
       ctx.stroke();
       ctx.restore();
-      ctx.globalAlpha = 0.8;
-      ctx.font = "700 12px Rajdhani, sans-serif";
+      // motes streaming in or out
+      for (let i = 0; i < 9; i++) {
+        const f = ((t * (out ? 0.8 : -0.8) + i / 9) % 1 + 1) % 1;
+        const rr = out ? 6 + f * 34 : 40 - f * 34;
+        const ang = i * 2.1 + t * 1.2;
+        ctx.globalAlpha = (out ? 1 - f : f) * 0.85;
+        ctx.fillStyle = "#ffffff";
+        ctx.beginPath();
+        ctx.arc(Math.cos(ang) * rr, Math.sin(ang) * rr, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      ctx.globalAlpha = 0.85;
+      ctx.font = "800 11px Rajdhani, sans-serif";
       ctx.textAlign = "center";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(0,0,0,0.8)";
+      const ly = y + (y < OY ? -40 : 50);
+      ctx.strokeText(label, x, ly);
       ctx.fillStyle = color;
-      ctx.fillText(label, x, y + (y < OY ? -34 : 44));
+      ctx.fillText(label, x, ly);
       ctx.globalAlpha = 1;
     };
 
@@ -3456,13 +3538,98 @@ export default function Battle({
         ctx.translate(-W / 2, -H / 2);
       }
 
+      // ================= BATTLEFIELD =================
+      // Deep space backdrop: a vertical gradient, a drifting nebula, a
+      // parallax starfield and a horizon glow behind the arena plate.
       const bg = ctx.createLinearGradient(0, 0, 0, H);
-      bg.addColorStop(0, "#0d0827");
-      bg.addColorStop(1, "#07051a");
+      bg.addColorStop(0, "#120a33");
+      bg.addColorStop(0.45, "#0b0726");
+      bg.addColorStop(1, "#05040f");
       ctx.fillStyle = bg;
       ctx.fillRect(-20, -20, W + 40, H + 40);
 
-      // grid cells (hidden when the Battlefield Guides setting is off)
+      const T = now / 1000;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      // two slow nebula blooms breathing in the background
+      for (let i = 0; i < 2; i++) {
+        const nx = W * (0.3 + i * 0.45) + Math.sin(T * 0.08 + i * 2) * 60;
+        const ny = H * (0.3 + i * 0.35) + Math.cos(T * 0.06 + i) * 40;
+        const nr = Math.min(W, H) * (0.5 + i * 0.12);
+        const ng = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
+        ng.addColorStop(0, i ? "rgba(53,110,255,0.16)" : "rgba(160,60,255,0.17)");
+        ng.addColorStop(0.5, i ? "rgba(53,110,255,0.05)" : "rgba(160,60,255,0.05)");
+        ng.addColorStop(1, "transparent");
+        ctx.fillStyle = ng;
+        ctx.fillRect(nx - nr, ny - nr, nr * 2, nr * 2);
+      }
+      // starfield — deterministic positions, twinkling and drifting in parallax
+      for (let i = 0; i < 90; i++) {
+        const hx = Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1;
+        const hy = Math.abs(Math.sin(i * 78.233) * 12345.6789) % 1;
+        const depth = 0.3 + (i % 3) * 0.35;
+        const px = (hx * W + T * 5 * depth) % W;
+        const py = hy * H;
+        const tw = 0.35 + 0.65 * Math.abs(Math.sin(T * (0.7 + (i % 5) * 0.3) + i));
+        ctx.globalAlpha = tw * depth * 0.8;
+        ctx.fillStyle = i % 7 === 0 ? "#9fd8ff" : "#ffffff";
+        const r = depth * 1.5;
+        ctx.fillRect(px, py, r, r);
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+
+      // --- arena plate: the raised slab the whole fight happens on ---
+      const padX = OX - C * 0.55;
+      const padY = OY - C * 0.55;
+      const padW = COLS * C + C * 1.1;
+      const padH = ROWS * C + C * 1.1;
+      ctx.save();
+      // drop shadow under the slab
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      ctx.beginPath();
+      ctx.roundRect(padX + 6, padY + 12, padW, padH, 26);
+      ctx.fill();
+      // the slab face
+      const slab = ctx.createLinearGradient(0, padY, 0, padY + padH);
+      slab.addColorStop(0, "#1b1446");
+      slab.addColorStop(0.5, "#140e34");
+      slab.addColorStop(1, "#0d0926");
+      ctx.fillStyle = slab;
+      ctx.beginPath();
+      ctx.roundRect(padX, padY, padW, padH, 24);
+      ctx.fill();
+      // bevelled rim, brighter on top
+      ctx.strokeStyle = "rgba(120,96,255,0.5)";
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.strokeStyle = "rgba(53,224,255,0.16)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(padX + 5, padY + 5, padW - 10, padH - 10, 20);
+      ctx.stroke();
+      // etched circuitry along the rim, pulsing
+      ctx.clip();
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 7; i++) {
+        const f = (T * 0.08 + i / 7) % 1;
+        ctx.globalAlpha = 0.1 + 0.1 * Math.sin(T * 2 + i);
+        ctx.strokeStyle = "#35e0ff";
+        ctx.lineWidth = 1;
+        const yy = padY + f * padH;
+        ctx.beginPath();
+        ctx.moveTo(padX, yy);
+        ctx.lineTo(padX + padW * 0.18, yy);
+        ctx.lineTo(padX + padW * 0.22, yy + 8);
+        ctx.moveTo(padX + padW, yy + 20);
+        ctx.lineTo(padX + padW * 0.82, yy + 20);
+        ctx.lineTo(padX + padW * 0.78, yy + 28);
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
+
+      // --- build pads: raised hex-tech platforms with notched corners ---
       const drag = dragRef.current;
       const showGuides = saveRef.current.guides;
       for (let c = 0; c < COLS && showGuides; c++) {
@@ -3470,43 +3637,142 @@ export default function Battle({
           if (isPathCell(c, r)) continue;
           const x = OX + c * C;
           const y = OY + r * C;
+          const occupied = g.towers.some((t) => t.cell && t.cell.c === c && t.cell.r === r);
+          let face = "rgba(31,22,74,0.72)";
+          let edge = "rgba(96,76,190,0.5)";
+          let inner = "rgba(53,224,255,0.07)";
           if (drag && drag.moved) {
             const over = drag.x >= x && drag.x < x + C && drag.y >= y && drag.y < y + C;
-            const occupied = g.towers.some((t) => t.cell && t.cell.c === c && t.cell.r === r);
             if (over) {
-              ctx.fillStyle = occupied ? "rgba(255,77,94,0.25)" : "rgba(61,255,142,0.22)";
-              ctx.strokeStyle = occupied ? "rgba(255,77,94,0.8)" : "rgba(61,255,142,0.8)";
+              face = occupied ? "rgba(255,77,94,0.3)" : "rgba(61,255,142,0.28)";
+              edge = occupied ? "rgba(255,77,94,0.9)" : "rgba(61,255,142,0.95)";
+              inner = occupied ? "rgba(255,77,94,0.2)" : "rgba(61,255,142,0.22)";
             } else {
-              ctx.fillStyle = "rgba(53,224,255,0.05)";
-              ctx.strokeStyle = "rgba(74,58,150,0.4)";
+              face = "rgba(31,22,74,0.55)";
+              inner = "rgba(53,224,255,0.1)";
             }
-          } else {
-            ctx.fillStyle = "rgba(26,18,64,0.45)";
-            ctx.strokeStyle = "rgba(74,58,150,0.4)";
           }
-          ctx.lineWidth = 1.5;
+          const pxs = x + 4;
+          const pys = y + 4;
+          const ps = C - 8;
+          const n = 7; // corner notch
+          // the pad's thickness, drawn as a dark lip beneath it
+          ctx.fillStyle = "rgba(0,0,0,0.5)";
           ctx.beginPath();
-          ctx.roundRect(x + 4, y + 4, C - 8, C - 8, 10);
+          ctx.roundRect(pxs, pys + 4, ps, ps, 8);
           ctx.fill();
+          // notched octagonal face
+          ctx.beginPath();
+          ctx.moveTo(pxs + n, pys);
+          ctx.lineTo(pxs + ps - n, pys);
+          ctx.lineTo(pxs + ps, pys + n);
+          ctx.lineTo(pxs + ps, pys + ps - n);
+          ctx.lineTo(pxs + ps - n, pys + ps);
+          ctx.lineTo(pxs + n, pys + ps);
+          ctx.lineTo(pxs, pys + ps - n);
+          ctx.lineTo(pxs, pys + n);
+          ctx.closePath();
+          ctx.fillStyle = face;
+          ctx.fill();
+          ctx.strokeStyle = edge;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          // inner ring + crosshair, so an empty pad reads as a socket
+          if (!occupied) {
+            ctx.strokeStyle = inner;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(x + C / 2, y + C / 2, ps * 0.26, 0, Math.PI * 2);
+            ctx.stroke();
+            const bl = ps * 0.1;
+            ctx.beginPath();
+            ctx.moveTo(x + C / 2 - bl, y + C / 2);
+            ctx.lineTo(x + C / 2 + bl, y + C / 2);
+            ctx.moveTo(x + C / 2, y + C / 2 - bl);
+            ctx.lineTo(x + C / 2, y + C / 2 + bl);
+            ctx.stroke();
+          }
+          // top-edge highlight
+          ctx.strokeStyle = "rgba(255,255,255,0.07)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(pxs + n, pys + 0.5);
+          ctx.lineTo(pxs + ps - n, pys + 0.5);
           ctx.stroke();
         }
       }
 
-      // path
+      // --- the lane: a sunken stone road with a live energy conduit ---
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.strokeStyle = "#191243";
+      // trench shadow
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.lineWidth = C * 0.92;
+      pathStroke();
+      // road bed
+      ctx.strokeStyle = "#1d1646";
       ctx.lineWidth = C * 0.82;
       pathStroke();
-      ctx.strokeStyle = "#221a55";
-      ctx.lineWidth = C * 0.66;
+      ctx.strokeStyle = "#2a2064";
+      ctx.lineWidth = C * 0.68;
       pathStroke();
-      ctx.strokeStyle = "rgba(120,90,255,0.5)";
-      ctx.lineWidth = 5;
-      ctx.setLineDash([14, 26]);
-      ctx.lineDashOffset = -((now / 12) % 40);
-      pathStroke();
+      // kerb lines down both edges of the road
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = "#4a3aa0";
+      ctx.lineWidth = 2;
       ctx.setLineDash([]);
+      pathStroke();
+      ctx.restore();
+      // paving ticks across the road
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.strokeStyle = "#0a0722";
+      ctx.lineWidth = C * 0.68;
+      ctx.setLineDash([3, 30]);
+      pathStroke();
+      ctx.restore();
+      // the conduit: a glowing channel running the length of the lane
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = "rgba(120,90,255,0.22)";
+      ctx.lineWidth = 12;
+      ctx.setLineDash([]);
+      pathStroke();
+      ctx.strokeStyle = "rgba(53,224,255,0.3)";
+      ctx.lineWidth = 3.5;
+      pathStroke();
+      // energy pulses flowing from spawn toward the exit
+      ctx.strokeStyle = "rgba(180,230,255,0.9)";
+      ctx.lineWidth = 5;
+      ctx.setLineDash([22, 150]);
+      ctx.lineDashOffset = -((now / 4) % 172);
+      pathStroke();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.setLineDash([10, 162]);
+      ctx.lineDashOffset = -((now / 4) % 172);
+      pathStroke();
+      ctx.restore();
+      ctx.setLineDash([]);
+
+      // --- ambient motes drifting over the arena ---
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 26; i++) {
+        const hx = Math.abs(Math.sin(i * 23.17) * 9731.3) % 1;
+        const hy = Math.abs(Math.sin(i * 51.77) * 4571.9) % 1;
+        const sp = 7 + (i % 4) * 5;
+        const mx = padX + hx * padW + Math.sin(T * 0.4 + i) * 14;
+        const my = padY + ((hy * padH - T * sp) % padH + padH) % padH;
+        ctx.globalAlpha = 0.1 + 0.18 * Math.abs(Math.sin(T * 0.9 + i * 1.7));
+        ctx.fillStyle = i % 4 === 0 ? "#ffcf4d" : "#7fd8ff";
+        ctx.beginPath();
+        ctx.arc(mx, my, 1 + (i % 3) * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+      ctx.globalAlpha = 1;
 
       drawPortal(WPX[0].x, WPX[0].y, "#c44dff", "SPAWN");
       drawPortal(WPX[WPX.length - 1].x, WPX[WPX.length - 1].y, "#ff4d5e", "EXIT");

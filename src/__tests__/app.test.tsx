@@ -285,16 +285,16 @@ describe("Shop", () => {
     click(byText("button", "Shop")!);
     await waitFor(() => byText("div", "CHESTS"), "shop screen");
 
-    const goldBefore = saved().gold;
+    const gemsBefore = saved().gems;
     const fragsBefore = fragTotal(saved());
-    expect(goldBefore).toBeGreaterThanOrEqual(40);
+    expect(gemsBefore).toBeGreaterThanOrEqual(80);
 
-    // The common chest is the first chest card; its buy button shows the price.
-    const buyBtn = all("button").find((b) => (b.textContent || "").trim() === "40");
+    // Every headline chest is gem-priced now; the common chest is 80 gems.
+    const buyBtn = all("button").find((b) => (b.textContent || "").trim() === "80");
     expect(buyBtn, "common chest buy button").toBeTruthy();
     click(buyBtn!);
 
-    await waitFor(() => saved().gold === goldBefore - 40, "gold spent on chest");
+    await waitFor(() => saved().gems === gemsBefore - 80, "gems spent on chest");
     const smash = await waitFor(() => byText("button", "Smash Open!"), "smash button");
     click(smash);
 
@@ -302,7 +302,7 @@ describe("Shop", () => {
     click(collect);
 
     await waitFor(() => fragTotal(saved()) > fragsBefore, "fragments banked");
-    expect(saved().gold).toBeGreaterThan(goldBefore - 40);
+    expect(saved().gems).toBe(gemsBefore - 80);
     noErrors();
   });
 
