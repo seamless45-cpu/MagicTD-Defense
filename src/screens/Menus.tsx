@@ -294,7 +294,7 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
               <i key={i} className={pct >= (i / 10) * 100 ? "on" : ""} />
             ))}
           </div>
-          <div className="load-car-run" style={{ left: `${2 + p * 84}%` }}>
+          <div className="load-car-run" style={{ left: `${6 + p * 80}%` }}>
             <div className={`load-car ${launching ? "launching" : ""}`} data-testid="loading-car">
               <span className="load-car-thrust" />
               <span className="load-car-body" />
