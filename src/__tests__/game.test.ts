@@ -41,6 +41,7 @@ import {
   isBossType,
   BOSS_SKILLS,
   BOSS_KITS,
+  TITAN_TYPE,
   BOSS_CHAINS_DR,
   BOSS_METEOR_COUNT,
   BOSS_NULL_SLOW,
@@ -172,8 +173,8 @@ describe("tower data", () => {
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
-    // the roster grew from 15 to 27 towers, then to 33 with the second wave
-    expect(TOWERS).toHaveLength(33);
+    // the roster grew 15 -> 27 -> 33, then to 37 with the mythic arsenal
+    expect(TOWERS).toHaveLength(37);
     // mechanics actually differ between them
     expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
     expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
@@ -892,10 +893,16 @@ describe("reworked enemies", () => {
   });
 
   it("keeps the boss indices intact after the rework", () => {
-    expect(ENEMY_TYPES).toHaveLength(6);
+    expect(ENEMY_TYPES).toHaveLength(7);
     expect(isBossType(4)).toBe(true);
     expect(isBossType(3)).toBe(false);
     expect(ENEMY_TYPES[5].name).toBe("Rift Overlord");
+    // the Void Titan closes the table and is the only one with all nine skills
+    expect(ENEMY_TYPES[TITAN_TYPE].name).toBe("Void Titan");
+    expect(ENEMY_TYPES[TITAN_TYPE].shape).toBe("titan");
+    expect(isBossType(TITAN_TYPE)).toBe(true);
+    expect(BOSS_KITS[TITAN_TYPE]).toHaveLength(9);
+    expect(BOSS_KITS[4]).toHaveLength(6);
   });
 });
 

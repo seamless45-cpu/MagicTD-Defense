@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
 import { addChips, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, heroLevel } from "../game/save";
 import { FullscreenButton } from "./Menus";
@@ -65,6 +65,7 @@ import {
   eventForDate,
   leagueFor,
   trophyDelta,
+  type AwkSpec,
   type ChipBag,
   runShopCost,
   towerArt,
@@ -219,7 +220,6 @@ interface BT {
   rapidCool: number;
   streak: number;
   flash: number;
-  lineupIdx: number; // -1 = teammate
   owner: string;
   atkMul: number;
   /** Null Field: seconds left hexed (fires much slower) */
@@ -227,6 +227,9 @@ interface BT {
   /** Meteor Fall: seconds left offline (cannot fire at all) */
   downT: number;
 }
+/** one vertical lightning pillar: a column from the top of the screen to the ground */
+interface Strike { x: number; y: number; life: number; max: number; width: number; color: string; seed: number }
+
 /** a falling rock telegraphed by a boss — the shadow grows, then it lands */
 interface Met { x: number; y: number; t: number; total: number; uid: number; color: string; done?: boolean }
 
@@ -263,6 +266,8 @@ interface Proj {
   blast?: number;
   /** ground-slam shots throw a bigger shockwave on impact */
   shockwave?: boolean;
+  /** a shot boosted by a Heavy-type awakening: drawn bigger */
+  heavy?: boolean;
   /** splash damage as a share of the shot's own damage (1 = full damage) */
   blastDmg?: number;
   /** this shot always crits (overcharged lances, fireballs) */
@@ -373,6 +378,8 @@ interface G {
   bestHit: number;
   /** Meteor Fall telegraphs waiting to land */
   meteors: Met[];
+  /** vertical lightning pillars (Lightning Princess) */
+  strikes: Strike[];
   /** summons bought this run — drives the summon price */
   spSpend: number;
   /** ascents bought this run — drives the ascent price */
@@ -387,7 +394,7 @@ interface G {
   heroCd: number;
   kills: number;
   /** boss cutscene: name + how long the intro card still runs */
-  cut: { type: number; name: string; sub: string; t: number; total: number } | null;
+  cut: { type: number; name: string; sub: string; t: number; total: number; locked?: boolean } | null;
   /** banner text for the last boss skill that fired */
   bossCast: { skill: string; tell: string; color: string; t: number } | null;
   /** last round whose boss cutscene already played */
@@ -502,6 +509,7 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     crits: 0,
     bestHit: 0,
     meteors: [],
+    strikes: [],
     final: null,
   };
   // no free placements: the opening SP is spent on summons by the player
@@ -991,10 +999,33 @@ export default function Battle({
       burst(p.x, p.y, opt.color || "#ffcf4d", crit ? 8 : 4);
       if (e.hp <= 0) {
         if (opt.tw && (opt.tw.def.id === "hellstorm" || opt.tw.def.killStack)) opt.tw.streak++;
-        // Soul Siphon pays the grid on every kill it lands
-        if (opt.tw?.def.spGain) {
-          g.sp += opt.tw.def.spGain;
-          glow(p.x, p.y, "#c44dff", 44, 0.35);
+        // Soul Siphon + the SP-type awakenings pay the grid on every kill
+        if (opt.tw) {
+          let sp = opt.tw.def.spGain || 0;
+          for (const slot of [0, 1] as const) {
+            const spec = awkSpec(opt.tw, slot);
+            if (!spec || spec.fx !== "sp") continue;
+            const tier = awkTier(opt.tw, slot);
+            if (tier > 0 && Math.random() < spec.chance[tier - 1]) sp += spec.mult[tier - 1];
+          }
+          if (sp > 0) {
+            g.sp += sp;
+            glow(p.x, p.y, "#c44dff", 44, 0.35);
+            addText(p.x, p.y - 20, `+${Math.round(sp)} SP`, "#c44dff", 12, false);
+          }
+          // bounty awakenings: extra gold per kill
+          let goldMul = 0;
+          for (const slot of [0, 1] as const) {
+            const spec = awkSpec(opt.tw, slot);
+            if (!spec || spec.fx !== "bounty") continue;
+            const tier = awkTier(opt.tw, slot);
+            if (tier > 0 && Math.random() < spec.chance[tier - 1]) goldMul += spec.mult[tier - 1];
+          }
+          if (goldMul > 0) {
+            const extra = Math.round(e.gold * goldMul);
+            g.gold += extra;
+            addText(p.x, p.y - 34, `+${extra}`, "#ffcf4d", 12, false);
+          }
         }
         killReward(e);
       }
@@ -1013,45 +1044,118 @@ export default function Battle({
       }
     };
 
+    /**
+     * Lightning Princess: bolts fall *from the sky* onto each enemy as tall
+     * vertical pillars. Nothing travels sideways — a strike column appears, the
+     * ground under it cracks, and the enemy standing there takes the hit. Chain
+     * light then forks between the targets, which is the only lateral bolt left.
+     */
     const strikeLightning = (t: BT) => {
       const now = performance.now();
       const tier1 = saveRef.current.awn["lightning"]?.[0] || 0;
       const tier2 = saveRef.current.awn["lightning"]?.[1] || 0;
       const dmgBase = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * 1.12 * (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1);
-      const p = cellCenter(t.cell!.c, t.cell!.r);
-      const topY = p.y - 96; // tall bolts start high above the tower
       const targets = g.enemies.filter((e) => !e.dead);
       const shown = targets.slice(0, 10);
-      let superbolt = false;
-      if (tier1 > 0 && Math.random() < t.def.awk1!.chance[tier1 - 1]) superbolt = true;
-      shown.forEach((e) => {
+      const superbolt = tier1 > 0 && Math.random() < t.def.awk1!.chance[tier1 - 1];
+      const judgement = tier2 > 0 && Math.random() < t.def.awk2!.chance[tier2 - 1];
+
+      // ---- one vertical pillar per target ----
+      shown.forEach((e, i) => {
         const ep = enemyPos(e);
-        if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, topY, ep.x, ep.y, superbolt ? "#fff2b0" : "#ffe86b", superbolt ? 4 : 2.4, 0.28, now));
-        dealDamage(e, dmgBase, { tw: t, color: "#ffe86b" });
+        const delay = i * 0.035;
+        // the column: a thick core with two thinner filaments either side, all
+        // drawn top-of-screen down to the ground point, with a bright pool at
+        // the bottom where it lands
+        g.strikes.push({
+          x: ep.x,
+          y: ep.y,
+          life: 0.34 + delay,
+          max: 0.34 + delay,
+          width: superbolt ? 16 : 10,
+          color: superbolt ? "#fff6c4" : "#ffe86b",
+          seed: Math.random() * 100,
+        });
+        addZone({
+          kind: "rift",
+          x: ep.x,
+          y: ep.y,
+          r: superbolt ? 70 : 46,
+          life: 0.36 + delay,
+          max: 0.36 + delay,
+          dps: 0,
+          slow: 0,
+          color: superbolt ? "#fff6c4" : "#ffd23f",
+        });
+        sparkAt(ep.x, ep.y, superbolt ? 22 : 12, superbolt ? 300 : 200);
+        shock(ep.x, ep.y, superbolt ? "#fff6c4" : "#ffe86b", superbolt ? 90 : 54, 0.32);
+        glow(ep.x, ep.y, "#fff2b0", superbolt ? 120 : 70, 0.28);
+        // individual damage lands a beat after its column so the eye follows it
+        schedule(delay, () => {
+          if (e.dead) return;
+          dealDamage(e, dmgBase, { alwaysCrit: judgement, tw: t, color: "#ffe86b" });
+        });
       });
-      if (targets.length > 10) targets.slice(10).forEach((e) => dealDamage(e, dmgBase, { tw: t, color: "#ffe86b" }));
-      if (superbolt && shown.length > 0) {
-        const extra = t.def.awk1!.mult[tier1 - 1];
+
+      // ---- the storm reads as a single sky event, not ten separate shots ----
+      flash("#fff2b0", superbolt ? 0.16 : 0.08);
+      g.shake = fxShake(superbolt ? 6 : 3);
+      if (superbolt && shown.length) {
+        // one enemy is singled out: a pillar twice as wide, twice as tall, and
+        // the whole screen dims for a frame as it lands
         const big = shown[Math.floor(Math.random() * shown.length)];
-        const ep = pathPos(big.d);
-        if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, topY, ep.x, ep.y, "#ffffff", 6, 0.42, now));
-        dealDamage(big, dmgBase * (1 + extra), { alwaysCrit: true, tw: t, color: "#ffffff" });
-        addText(ep.x, ep.y - 50, "SUPERBOLT", "#ffffff", 15, true);
+        const bp = enemyPos(big);
+        g.strikes.push({ x: bp.x, y: bp.y, life: 0.5, max: 0.5, width: 30, color: "#ffffff", seed: 7 });
+        hitStop(0.05);
+        punch(0.4, 0.3);
+        schedule(0.06, () => {
+          if (big.dead) return;
+          dealDamage(big, dmgBase * t.def.awk1!.mult[tier1 - 1], { alwaysCrit: true, tw: t, color: "#ffffff" });
+          addText(bp.x, bp.y - 62, "SUPERBOLT", "#ffffff", 16, true);
+        });
         sfx.superbolt();
       }
-      if (tier2 > 0 && Math.random() < t.def.awk2!.chance[tier2 - 1] && shown.length > 0) {
+      // ---- restrike awakened: extra columns fall on the same cluster ----
+      if (tier2 > 0 && Math.random() < t.def.awk2!.chance[tier2 - 1] && shown.length) {
         const lo = t.def.awk2!.mult[tier2 - 1];
         const hi = t.def.awk2!.mult2![tier2 - 1];
-        const k = lo + Math.floor(Math.random() * (hi - lo + 1));
+        const k = lo + Math.floor(Math.random() * Math.max(1, hi - lo + 1));
         for (let i = 0; i < k; i++) {
           const e = shown[Math.floor(Math.random() * shown.length)];
           const ep = enemyPos(e);
-          if (g.bolts.length < 36) g.bolts.push(randBolt(p.x, topY, ep.x, ep.y, "#9ff3ff", 3.4, 0.34, now));
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.3, max: 0.3, width: 8, color: "#9ff3ff", seed: Math.random() * 100 });
           dealDamage(e, dmgBase * 0.8, { tw: t, color: "#9ff3ff" });
         }
       }
+      // ---- chain light between whichever targets were struck ----
+      if (shown.length > 1) {
+        const pts = shown.map((e) => enemyPos(e));
+        for (let i = 1; i < Math.min(pts.length, 7); i++) {
+          if (g.bolts.length < 44) g.bolts.push(randBolt(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y, "#cfefff", 1.6, 0.16, now));
+        }
+      }
+      sfx.shoot("lightning");
       sfx.zap();
-      g.shake = fxShake(2);
+    };
+
+    /** small helper: a tight fan of sparks at a point (used by the sky bolts) */
+    const sparkAt = (x: number, y: number, n: number, spd: number) => {
+      if (!fxOn()) n = Math.min(n, 5);
+      for (let i = 0; i < n; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const v = spd * (0.35 + Math.random() * 0.9);
+        pushPart({
+          x, y,
+          vx: Math.cos(a) * v,
+          vy: Math.sin(a) * v * 0.5 - 60,
+          life: 0.24 + Math.random() * 0.3,
+          max: 0.55,
+          size: 2 + Math.random() * 3,
+          color: "#fff6c4",
+          kind: "spark",
+          add: true,
+        });
+      }
     };
 
     /** every global multiplier a shot picks up (overdrive + shop damage) */
@@ -1063,6 +1167,44 @@ export default function Battle({
       const tier = saveRef.current.awn[t.def.id]?.[1] || 0;
       const cap = tier > 0 ? t.def.awk2!.mult[tier - 1] : 0;
       return 1 + Math.min(cap, t.streak) * t.def.killStack;
+    };
+
+    /**
+     * Generic awakening layer. Towers whose awakening carries an `fx` tag are
+     * driven from here, so every one of the 37 towers has something that actually
+     * fires instead of just a description. Towers with bespoke handling
+     * (lightning, plasma, dragon, sun, hellstorm, rail) have no `fx` and keep
+     * their own code paths.
+     */
+    const awkSpec = (t: BT, slot: 0 | 1): AwkSpec | null => {
+      const spec = slot === 0 ? t.def.awk1 : t.def.awk2;
+      if (!spec || !spec.fx) return null;
+      const tier = saveRef.current.awn[t.def.id]?.[slot] || 0;
+      return tier > 0 ? spec : null;
+    };
+    const awkTier = (t: BT, slot: 0 | 1) => saveRef.current.awn[t.def.id]?.[slot] || 0;
+
+    /**
+     * Rolls an awakening's chance at the current tier and returns its magnitude,
+     * or 0 when the roll fails or the awakening is not owned.
+     */
+    const rollAwk = (t: BT, slot: 0 | 1): number => {
+      const spec = awkSpec(t, slot);
+      if (!spec) return 0;
+      const tier = awkTier(t, slot);
+      if (tier <= 0 || Math.random() >= spec.chance[tier - 1]) return 0;
+      return spec.mult[tier - 1];
+    };
+
+    /** every aura-type awakening on a tower folded into one strength bonus */
+    const auraAwk = (t: BT) => {
+      let mul = 1;
+      for (const slot of [0, 1] as const) {
+        const spec = awkSpec(t, slot);
+        if (!spec || spec.fx !== "aura") continue;
+        mul *= 1 + spec.mult[awkTier(t, slot) - 1];
+      }
+      return mul;
     };
 
     /** damage growth from battle levels, points, auras and the global buffs */
@@ -1105,11 +1247,29 @@ export default function Battle({
       const ep = pathPos(target.d);
       t.angle = Math.atan2(ep.y - p.y, ep.x - p.x);
       t.flash = 0.12;
-      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul() * killStackMul(t);
+      const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul() * killStackMul(t);
       const upg = t.menuLv - 1;
       const asc = t.bLv - 1;
+      // ---------- awakening rolls that change the shot itself ----------
+      const heavy = rollAwk(t, 0); // Heavy Shells / Void Locus / Skyfall / Overpenetration...
+      let forceCrit = rollAwk(t, 1) > 0; // Hollow Points / Hurled Reaper / Shatterpoint...
+      if (rollAwk(t, 0) > 0 && awkSpec(t, 0)?.fx === "critup") forceCrit = true;
+      let dmg = heavy > 0 ? base * (1 + heavy) : base;
+      const volley = rollAwk(t, 1) > 0 && awkSpec(t, 1)?.fx === "volley" ? awkSpec(t, 1)!.mult[awkTier(t, 1) - 1] : 0;
+      const volley0 = rollAwk(t, 0) > 0 && awkSpec(t, 0)?.fx === "volley" ? awkSpec(t, 0)!.mult[awkTier(t, 0) - 1] : 0;
+      const extraShots = Math.round(volley + volley0);
+      if (heavy > 0) {
+        addText(ep.x, ep.y - 40, "LOADED", "#fff2b0", 12, true);
+        glow(p.x, p.y, "#fff2b0", 46, 0.3);
+      }
       const push = (proj: Partial<Proj>, at: { x: number; y: number } = ep, onto: Enemy = target) => {
-        g.projs.push({ x: p.x, y: p.y, tid: onto.id, lx: at.x, ly: at.y, speed: 520, dmg, kind: t.def.id, tw: t, dead: false, age: 0, ...proj } as Proj);
+        g.projs.push({
+          x: p.x, y: p.y, tid: onto.id, lx: at.x, ly: at.y, speed: 520, dmg, kind: t.def.id, tw: t,
+          dead: false, age: 0,
+          ...(forceCrit ? { alwaysCrit: true } : {}),
+          ...(heavy > 0 ? { heavy: true } : {}),
+          ...proj,
+        } as Proj);
       };
       switch (t.def.id) {
         case "arrow": push({ speed: 540 }); break;
@@ -1313,6 +1473,49 @@ export default function Battle({
           if (over) addText(ep.x, ep.y - 42, "OVER PENETRATION", "#7fe9ff", 14, true);
           break;
         }
+        // ---------- mythic arsenal ----------
+        case "reaper": {
+          const pctHp = (t.def.pctHp || 0) + (t.def.upPctHp || 0) * upg + (t.def.ascPctHp || 0) * asc;
+          push({ speed: 640, kind: "void", pctHp });
+          // the toll rings out: a dark halo marks whoever is about to be judged
+          if (g.bolts.length < 40) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#c9a7ff", 3, 0.24, performance.now()));
+          break;
+        }
+        case "prism": {
+          // one beam per nearby enemy, each with its own burn
+          const beams = Math.max(1, t.def.multi || 4);
+          const chain2 = Math.round((t.def.chain || 0) + (t.def.upChain || 0) * upg + (t.def.ascChain || 0) * asc);
+          const burn = rollAwk(t, 1);
+          const list = g.enemies.filter((e) => !e.dead).sort((a, b) => b.d - a.d).slice(0, beams);
+          (list.length ? list : [target]).forEach((e) => {
+            const tp = enemyPos(e);
+            push({ speed: 900, kind: "laser", chain: chain2, burnDps: burn > 0 ? dmg * burn / 4 : 0, burnDur: burn > 0 ? 4 : 0 }, tp, e);
+            if (g.bolts.length < 40) g.bolts.push(randBolt(p.x, p.y, tp.x, tp.y, "#8ff0ff", 2.6, 0.2, performance.now()));
+          });
+          break;
+        }
+        case "aegis":
+          // handled by the aura pulse tick, nothing to fire
+          break;
+        case "hellgate": {
+          const radius = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          const pct = (t.def.burnPct || 0) + (t.def.upBurnPct || 0) * upg + (t.def.ascBurnPct || 0) * asc;
+          const wide = rollAwk(t, 0); // Gates Undone
+          push({
+            speed: 460,
+            kind: "hellstorm",
+            blast: radius * (1 + wide),
+            blastDmg: 0.85,
+            burnDps: dmg * pct,
+            burnDur: t.def.burnDur || 5,
+            alwaysCrit: false,
+          });
+          // the gate itself flares open behind the shell
+          ring(p.x, p.y, "#ff7a3d", 60 + wide * 40);
+          glow(p.x, p.y, "#ffb324", 90, 0.4);
+          if (wide > 0) addText(ep.x, ep.y - 46, "GATES UNDONE", "#ff7a3d", 14, true);
+          break;
+        }
         case "dragon": {
           const radius = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
           const pct = (t.def.burnPct || 0) + (t.def.upBurnPct || 0) * upg + (t.def.ascBurnPct || 0) * asc;
@@ -1332,6 +1535,19 @@ export default function Battle({
           if (roar) addText(ep.x, ep.y - 46, "INFERNO ROAR", "#ff5d3d", 15, true);
           break;
         }
+      }
+      // extra shots from a volley awakening, aimed at the enemies least shot at
+      if (extraShots > 0) {
+        const others = g.enemies.filter((e) => !e.dead && e.id !== target.id).sort((a, b) => b.d - a.d);
+        for (let i = 0; i < extraShots && i < others.length; i++) {
+          const o = others[i];
+          const op = enemyPos(o);
+          g.projs.push({
+            x: p.x, y: p.y, tid: o.id, lx: op.x, ly: op.y, speed: 620, dmg: base, kind: t.def.id, tw: t,
+            dead: false, age: 0, ...(forceCrit ? { alwaysCrit: true } : {}),
+          } as Proj);
+        }
+        if (others.length) addText(p.x, p.y - 34, "VOLLEY", "#9fe8ff", 12, true);
       }
       sfx.shoot(t.def.id);
     };
@@ -1359,6 +1575,94 @@ export default function Battle({
         ring(pos.x, pos.y, "#8a4dff", 46);
       }
       dealDamage(target, pr.dmg, { alwaysCrit: pr.alwaysCrit, tw: pr.tw });
+      // ---------- awakening effects that ride along with the hit ----------
+      if (pr.tw && !target.dead) {
+        const t2 = pr.tw;
+        // Freeze / Permafrost / Flash Freeze: encase what it struck
+        const freeze = rollAwk(t2, awkSpec(t2, 0)?.fx === "freeze" ? 0 : 1);
+        if (freeze > 0) {
+          target.encased = Math.max(target.encased, freeze);
+          target.frozen = Math.max(target.frozen, 1.2);
+          burst(pos.x, pos.y, "#9fe8ff", 10, 140);
+          ring(pos.x, pos.y, "#9fe8ff", 34);
+        }
+        // Burn-type awakenings
+        const burnSlot = awkSpec(t2, 0)?.fx === "burn" ? 0 : 1;
+        const burn = rollAwk(t2, burnSlot);
+        if (burn > 0) {
+          target.burnDps = Math.max(target.burnDps, (pr.dmg * burn) / 4);
+          target.burnT = Math.max(target.burnT, 4);
+          embers(pos.x, pos.y, "#ff7a3d", 3);
+        }
+        // Slow-type awakenings
+        const slowSlot = awkSpec(t2, 0)?.fx === "slow" ? 0 : 1;
+        const slow = rollAwk(t2, slowSlot);
+        if (slow > 0) {
+          target.slow = Math.max(target.slow, Math.min(0.8, slow));
+          target.slowT = Math.max(target.slowT, 2.5);
+        }
+        // Chain / Ricochet / Prism Split: arc into nearby enemies
+        const chainSlot = awkSpec(t2, 0)?.fx === "chain" ? 0 : 1;
+        const chainN = Math.round(rollAwk(t2, chainSlot));
+        if (chainN > 0) {
+          const now2 = performance.now();
+          const near = g.enemies
+            .filter((o) => !o.dead && o.id !== target.id)
+            .map((o) => ({ o, d: Math.hypot(enemyPos(o).x - pos.x, enemyPos(o).y - pos.y) }))
+            .filter((x) => x.d < 190)
+            .sort((a, b) => a.d - b.d)
+            .slice(0, Math.min(8, chainN));
+          let from = pos;
+          near.forEach(({ o }) => {
+            const op = enemyPos(o);
+            if (g.bolts.length < 40) g.bolts.push(randBolt(from.x, from.y, op.x, op.y, "#c9a7ff", 2.2, 0.22, now2));
+            dealDamage(o, pr.dmg * 0.6, { tw: t2, color: "#c9a7ff" });
+            from = op;
+          });
+          if (near.length) sfx.zap();
+        }
+        // Quake awakenings stagger the blast
+        const quakeSlot = awkSpec(t2, 0)?.fx === "quake" ? 0 : 1;
+        const quake = rollAwk(t2, quakeSlot);
+        if (quake > 0) {
+          const radius = pr.blast ?? 120;
+          g.enemies.forEach((o) => {
+            if (o.dead) return;
+            const op = enemyPos(o);
+            if (Math.hypot(op.x - pos.x, op.y - pos.y) <= radius) {
+              o.stun = Math.max(o.stun, quake);
+              ring(op.x, op.y, "#ffd23f", 26);
+            }
+          });
+          shock(pos.x, pos.y, "#ffd23f", radius, 0.45);
+          sfx.stun();
+        }
+        // Splash awakenings widen the crater of an already-splashing shot
+        if (pr.blast !== undefined) {
+          const wide = rollAwk(t2, awkSpec(t2, 0)?.fx === "splash" ? 0 : 1);
+          if (wide > 0) {
+            pr.blast *= 1 + wide;
+            ring(pos.x, pos.y, "#ffb324", pr.blast);
+            burst(pos.x, pos.y, "#ffb324", 14, 220);
+          }
+        }
+        // Execute: reap a target that is already badly wounded
+        const exSlot = awkSpec(t2, 0)?.fx === "execute" ? 0 : 1;
+        const ex = rollAwk(t2, exSlot);
+        if (ex > 0 && !target.dead && target.hp / target.max <= ex) {
+          addText(pos.x, pos.y - 48, "REAPED", "#c9a7ff", 16, true);
+          shock(pos.x, pos.y, "#c9a7ff", 70, 0.5);
+          stars(pos.x, pos.y, "#c9a7ff", 10, 40);
+          dealDamage(target, target.hp + 1, { alwaysCrit: true, tw: t2, color: "#c9a7ff" });
+        }
+        // Hellgate: shots leave a burning pool where they land
+        if (t2.def.lava) {
+          const burnSlot2 = awkSpec(t2, 1)?.fx === "burn" ? 1 : 0;
+          const lake = rollAwk(t2, burnSlot2);
+          const dur = 3 + (lake > 0 ? 2 : 0);
+          addZone({ kind: "lava", x: pos.x, y: pos.y, r: pr.blast ?? 90, life: dur, max: dur, dps: pr.dmg * (0.3 + lake * 0.2), slow: 0.15, color: "#ff7a3d" });
+        }
+      }
       if (pr.slow) {
         const dur = pr.slowDur || 3;
         if (pr.slow >= target.slow || target.slowT <= 0) target.slow = Math.min(0.85, pr.slow);
@@ -1817,7 +2121,8 @@ export default function Battle({
             const b = enemyPos(hit[k]);
             if (g.bolts.length < 44) g.bolts.push(randBolt(a.x, a.y, b.x, b.y, hero.color2, 2, 0.26, now2));
           }
-          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, -40, p.x, p.y, hero.color, 6, 0.42, now2 + i * 8));
+          // the bolt front falls straight out of the sky, one pillar per step
+          g.strikes.push({ x: p.x, y: p.y, life: 0.3, max: 0.3, width: 8, color: hero.color, seed: (i * 17) % 90 });
           shock(p.x, p.y, hero.color, 34, 0.5);
           glow(p.x, p.y, hero.color2, 70, 0.35);
           stars(p.x, p.y, "#ffffff", 4, 40);
@@ -1833,7 +2138,8 @@ export default function Battle({
         hitStop(0.08);
         for (let i = 0; i < 3; i++) shock(sp.x, sp.y, i % 2 ? hero.color : "#ffffff", 34 + i * 22, 0.7);
         glow(sp.x, sp.y, hero.color2, 170, 0.7);
-        if (g.bolts.length < 44) g.bolts.push(randBolt(sp.x, -60, sp.x, sp.y, "#ffffff", 12, 0.6, performance.now()));
+        g.strikes.push({ x: sp.x, y: sp.y, life: 0.62, max: 0.62, width: 26, color: "#fff6c4", seed: 3 });
+        g.strikes.push({ x: sp.x, y: sp.y, life: 0.5, max: 0.5, width: 14, color: "#ffffff", seed: 11 });
         alive().forEach((e) => {
           const ep = enemyPos(e);
           if (Math.hypot(ep.x - sp.x, ep.y - sp.y) > 200) return;
@@ -1846,73 +2152,71 @@ export default function Battle({
     };
     heroRef.current = hero;
 
-    const nextFreeSlot = () => {
-      const used = new Set(g.towers.map((t) => t.lineupIdx).filter((i) => i >= 0));
-      let idx = 0;
-      while (used.has(idx) && idx < 6) idx++;
-      return idx < 6 ? idx : -1;
-    };
-
     /**
-     * SUMMON spawns instantly: a lineup tower lands on a random free cell.
-     * With the whole lineup already deployed it instead feeds a point to a random tower.
+     * SUMMON always puts a new tower on the board — a random free cell, never a
+     * stat on an existing tower. When the board is genuinely full it fuses two
+     * towers that share a point tier to open a cell, then drops the new tower in.
+     * That keeps "spawn" and "upgrade" as separate verbs.
      */
     const summon = () => {
       const cost = summonCost();
-      if (g.sp < cost) { sfx.error(); toastRef.current("Not enough SP", "#ff4d5e"); return; }
-      const idx = nextFreeSlot();
+      if (g.sp < cost) {
+        sfx.error();
+        toastRef.current("Not enough SP", "#ff4d5e");
+        return;
+      }
       const unlocked = Object.keys(saveRef.current.levels).filter((id) => saveRef.current.levels[id] > 0);
       if (unlocked.length === 0) return;
-      // prefer the tower lineup the player curated in the Towers tab
-      const lineup = saveRef.current.lineup.filter((id) => saveRef.current.levels[id] > 0);
-      const pool0 = lineup.length ? lineup : unlocked;
-      if (idx >= 0) {
-        const cell = randFreeCell(g);
-        if (!cell) {
+
+      // free a cell if we need to: merging two same-tier towers opens one up
+      let cell = randFreeCell(g);
+      if (!cell) {
+        const groups = new Map<number, BT[]>();
+        for (const t of g.towers) {
+          if (!t.cell) continue;
+          const list = groups.get(t.points) || [];
+          list.push(t);
+          groups.set(t.points, list);
+        }
+        const pair = [...groups.values()].filter((list) => list.length >= 2).sort((a2, b2) => b2.length - a2.length)[0];
+        if (!pair) {
           sfx.error();
-          toastRef.current("The grid is full", "#ff4d5e");
+          toastRef.current("Board full — drag two towers together to merge", "#ff4d5e");
           return;
         }
-        // cycle the lineup: whatever is on the field least often spawns next
-        const counts = pool0.map((id) => ({
-          id,
-          n: g.towers.filter((t) => t.def.id === id).length,
-        }));
-        const least = Math.min(...counts.map((c) => c.n));
-        const pool = counts.filter((c) => c.n === least);
-        const id = pool[Math.floor(Math.random() * pool.length)].id;
-        const def = TOWER_BY_ID[id];
-        g.towers.push({
-          uid: uidC++, def, menuLv: saveRef.current.levels[id], bLv: 1, points: 0, cell,
-          cd: 0.6, shots: 0, angle: 0, rapidT: 0, rapidCool: 5, streak: 0, flash: 0, lineupIdx: idx,
-          owner: "you", atkMul: 1, hexT: 0, downT: 0,
-        });
-        const p = cellCenter(cell.c, cell.r);
-        levelFlourish(p.x, p.y, RARITY[def.rarity].color, "DEPLOYED", def.rarity === "legendary" ? 3 : 1);
-        burst(p.x, p.y, RARITY[def.rarity].color, 14);
-        sfx.summon();
-        toastRef.current(`${def.name} deployed!`, RARITY[def.rarity].color);
-        g.sp -= cost;
-        g.spSpend++;
-        return;
+        const [src2, dst2] = pair;
+        const kept = dst2.def.name;
+        mergeTowers(src2, dst2);
+        cell = randFreeCell(g);
+        if (!cell) {
+          sfx.error();
+          toastRef.current("Board full", "#ff4d5e");
+          return;
+        }
+        toastRef.current(`Merged two ${kept}s to make room`, "#ff4fd8");
       }
-      // grid full — bank the SP as a point on a random tower instead
-      const open = g.towers.filter((t) => t.points < MAX_POINTS);
-      if (!open.length) {
-        sfx.error();
-        toastRef.current("Every tower is maxed", "#ff4d5e");
-        return;
-      }
-      const t = open[Math.floor(Math.random() * open.length)];
-      t.points++;
+
+      // prefer the tower lineup the player curated in the Towers tab, and always
+      // deploy whichever lineup tower is currently scarcest on the board
+      const lineup = saveRef.current.lineup.filter((id) => saveRef.current.levels[id] > 0);
+      const pool0 = lineup.length ? lineup : unlocked;
+      const counts = pool0.map((id) => ({ id, n: g.towers.filter((t) => t.def.id === id).length }));
+      const least = Math.min(...counts.map((c) => c.n));
+      const pool = counts.filter((c) => c.n === least);
+      const id = pool[Math.floor(Math.random() * pool.length)].id;
+      const def = TOWER_BY_ID[id];
+      g.towers.push({
+        uid: uidC++, def, menuLv: saveRef.current.levels[id], bLv: 1, points: 0, cell,
+        cd: 0.6, shots: 0, angle: 0, rapidT: 0, rapidCool: 5, streak: 0, flash: 0,
+        owner: "you", atkMul: 1, hexT: 0, downT: 0,
+      });
+      const p = cellCenter(cell.c, cell.r);
+      levelFlourish(p.x, p.y, RARITY[def.rarity].color, "DEPLOYED", def.rarity === "legendary" ? 3 : 1);
+      burst(p.x, p.y, RARITY[def.rarity].color, 14);
+      sfx.summon();
+      toastRef.current(`${def.name} deployed!`, RARITY[def.rarity].color);
       g.sp -= cost;
       g.spSpend++;
-      sfx.point();
-      if (t.cell) {
-        const p = cellCenter(t.cell.c, t.cell.r);
-        levelFlourish(p.x, p.y, ptColor(t.points), `+1 PT · ${t.points}/${MAX_POINTS}`, t.points >= MAX_POINTS ? 3 : 1);
-      }
-      toastRef.current(`${t.def.name} gained a point (${t.points}/${MAX_POINTS})`, ptColor(t.points));
     };
     summonRef.current = summon;
 
@@ -1961,6 +2265,8 @@ export default function Battle({
         b.life -= dt;
         jitBolt(b, now);
       }
+      for (const st of g.strikes) st.life -= dt;
+      g.strikes = g.strikes.filter((st) => st.life > 0);
       g.bolts = g.bolts.filter((b) => b.life > 0);
       for (const p of g.parts) {
         p.life -= dt;
@@ -2034,6 +2340,14 @@ export default function Battle({
       // a boss cutscene stops the world until it is dismissed
       if (g.cut) {
         g.cut.t -= dt;
+        // the rings "lock on" a beat before the cut ends — the whole overlay
+        // turns red-hot for that last second, then snaps straight into the fight
+        if (!g.cut.locked && g.cut.t <= 0.9) {
+          g.cut.locked = true;
+          g.shake = fxShake(8);
+          flash(ENEMY_TYPES[g.cut.type].color, 0.22);
+          sfx.superbolt();
+        }
         if (g.cut.t <= 0) g.cut = null;
         updateFx(dt);
         return;
@@ -2388,6 +2702,10 @@ export default function Battle({
         bonus *= 1 + 0.5 * t.points;
         if (t.def.id === "plant") bonus *= hpState;
         const atk = ((t.def.atkAura || 0) + (t.def.upAtkAura || 0) * upg + (t.def.ascAtkAura || 0) * asc) * (1 + 0.5 * t.points);
+        // War Anthem / Overclock / Bulwark Field: the aura's own awakenings
+        const aw = auraAwk(t);
+        bonus *= aw;
+        const atkAw = atk * aw;
         const nbs = [
           [t.cell.c + 1, t.cell.r],
           [t.cell.c - 1, t.cell.r],
@@ -2398,11 +2716,39 @@ export default function Battle({
           const nb = g.towers.find((x) => x.cell && x.cell.c === c && x.cell.r === r);
           if (nb && nb.def.target === "front") {
             aspdA.set(nb.uid, (aspdA.get(nb.uid) || 0) + bonus);
-            atkA.set(nb.uid, (atkA.get(nb.uid) || 0) + atk);
+            atkA.set(nb.uid, (atkA.get(nb.uid) || 0) + atkAw);
           }
         }
       }
       for (const t of g.towers) t.atkMul = 1 + (atkA.get(t.uid) || 0);
+
+      // pulse towers (Aegis Core) blast everything standing near them
+      for (const t of g.towers) {
+        if (!t.cell || !t.def.pulse) continue;
+        t.rapidCool -= dt;
+        if (t.rapidCool > 0) continue;
+        t.rapidCool = t.def.pulseRate || 2.5;
+        const pdmg = ((t.def.pulse || 0) + (t.def.upPulse || 0) * (t.menuLv - 1)) * Math.pow(ASC_DMG_MUL, Math.max(0, t.bLv - 1)) * (1 + POINT_DMG_STEP * t.points);
+        const pp = cellCenter(t.cell.c, t.cell.r);
+        const qc = rollAwk(t, 1); // Retribution
+        let hits = 0;
+        for (const e of g.enemies) {
+          if (e.dead) continue;
+          const ep = enemyPos(e);
+          if (Math.hypot(ep.x - pp.x, ep.y - pp.y) > 150) continue;
+          hits++;
+          dealDamage(e, pdmg, { tw: t, color: "#9fe8ff" });
+          if (qc > 0 && !e.dead) {
+            e.stun = Math.max(e.stun, qc);
+            ring(ep.x, ep.y, "#9fe8ff", 30);
+          }
+        }
+        if (hits) {
+          shock(pp.x, pp.y, "#9fe8ff", 150, 0.5);
+          glow(pp.x, pp.y, "#9fe8ff", 90, 0.4);
+          punch(0.2, 0.15);
+        }
+      }
 
       // chrono time fields: chill everything inside the aura
       for (const t of g.towers) {
@@ -3140,6 +3486,139 @@ export default function Battle({
           ctx.arc(0, 0, 12 + rec, 0, Math.PI * 2);
           ctx.fill();
           break;
+        case "scythe": {
+          // Reaper's Toll: a hooked blade on a shaft, spinning slowly
+          const spin = now / 900;
+          ctx.fillStyle = "#5b4a86";
+          ctx.strokeStyle = "#2a1a4a";
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.roundRect(-4, -6, 8, 30, 3);
+          ctx.fill();
+          ctx.stroke();
+          ctx.save();
+          ctx.rotate(spin);
+          ctx.fillStyle = rc.color;
+          ctx.beginPath();
+          ctx.moveTo(0, -34);
+          ctx.quadraticCurveTo(30, -26, 24, -2);
+          ctx.quadraticCurveTo(12, -18, 0, -18);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 1.4;
+          ctx.stroke();
+          ctx.restore();
+          ctx.fillStyle = "#e6dcff";
+          ctx.beginPath();
+          ctx.arc(0, -6, 5, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case "prism": {
+          // Prism Array: a faceted crystal that spins and throws split beams
+          ctx.save();
+          ctx.rotate(now / 1400);
+          ctx.fillStyle = "rgba(143,240,255,0.22)";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(0, -30);
+          ctx.lineTo(24, 12);
+          ctx.lineTo(-24, 12);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(0, -30);
+          ctx.lineTo(0, 12);
+          ctx.moveTo(-12, -9);
+          ctx.lineTo(12, -9);
+          ctx.stroke();
+          ctx.restore();
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          const pg = ctx.createRadialGradient(0, -12, 1, 0, -12, 16);
+          pg.addColorStop(0, "#ffffff");
+          pg.addColorStop(1, "transparent");
+          ctx.fillStyle = pg;
+          ctx.beginPath();
+          ctx.arc(0, -12, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case "aegis": {
+          // Aegis Core: a drifting shield generator with a rotating barrier
+          const bob2 = Math.sin(now / 700) * 3;
+          ctx.save();
+          ctx.translate(0, bob2);
+          ctx.fillStyle = "#10243d";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(0, -22);
+          ctx.lineTo(20, -14);
+          ctx.lineTo(20, 6);
+          ctx.quadraticCurveTo(20, 20, 0, 30);
+          ctx.quadraticCurveTo(-20, 20, -20, 6);
+          ctx.lineTo(-20, -14);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = rc.color;
+          ctx.beginPath();
+          ctx.arc(0, 2, 7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          // the field itself: two dashed arcs counter-rotating
+          ctx.save();
+          ctx.globalAlpha = 0.55;
+          ctx.strokeStyle = "#9fe8ff";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([7, 7]);
+          ctx.rotate(now / 1200);
+          ctx.beginPath();
+          ctx.arc(0, 0, 38, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.rotate(-now / 500);
+          ctx.beginPath();
+          ctx.arc(0, 0, 44, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+          break;
+        }
+        case "gate": {
+          // Hellgate: a torn portal with fire licking out of the arch
+          const gfl = Math.sin(now / 130) * 3;
+          ctx.fillStyle = "#2b1206";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.moveTo(-22, 22);
+          ctx.lineTo(-22, -6);
+          ctx.quadraticCurveTo(0, -34, 22, -6);
+          ctx.lineTo(22, 22);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          const gg = ctx.createRadialGradient(0, 6, 2, 0, 6, 20);
+          gg.addColorStop(0, "#fff2b0");
+          gg.addColorStop(0.4, "#ff8c3d");
+          gg.addColorStop(1, "transparent");
+          ctx.fillStyle = gg;
+          ctx.beginPath();
+          ctx.ellipse(0, 6, 15, 17 + gfl, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#ff7a3d";
+          ctx.beginPath();
+          ctx.moveTo(-10, -4 - gfl);
+          ctx.quadraticCurveTo(-2, -18, 0, -26 - gfl);
+          ctx.quadraticCurveTo(2, -18, 10, -4 - gfl);
+          ctx.quadraticCurveTo(0, 2, -10, -4 - gfl);
+          ctx.fill();
+          break;
+        }
         default:
           ctx.fillStyle = rc.color;
           ctx.beginPath();
@@ -3519,6 +3998,71 @@ export default function Battle({
         ctx.closePath();
         ctx.fill();
         ctx.restore();
+      } else if (et.shape === "titan") {
+        // titan: a colossal siege walker — slab torso, void core, shard halo
+        legs(R * 0.62, R * 0.46, R * 0.86, 6);
+        // shard halo
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < 7; i++) {
+          const a = cycle * 0.35 + (i / 7) * Math.PI * 2;
+          const rr = R * (1.5 + Math.sin(cycle * 0.8 + i) * 0.08);
+          const sx = Math.cos(a) * rr;
+          const sy = Math.sin(a) * rr * 0.55;
+          ctx.fillStyle = et.accent + (i % 2 ? "88" : "55");
+          ctx.beginPath();
+          ctx.moveTo(sx, sy - R * 0.2);
+          ctx.lineTo(sx + R * 0.11, sy);
+          ctx.lineTo(sx, sy + R * 0.2);
+          ctx.lineTo(sx - R * 0.11, sy);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.globalCompositeOperation = "source-over";
+        // torso: a wide trapezoid plated in slabs
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.82, -R * 0.7);
+        ctx.lineTo(R * 0.82, -R * 0.7);
+        ctx.lineTo(R * 1.05, R * 0.5);
+        ctx.quadraticCurveTo(0, R * 0.95, -R * 1.05, R * 0.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.strokeStyle = et.shade;
+        ctx.lineWidth = 2.4;
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.moveTo(-R * (0.72 - i * 0.05), -R * 0.45 + i * R * 0.3);
+          ctx.lineTo(R * (0.72 - i * 0.05), -R * 0.45 + i * R * 0.3);
+          ctx.stroke();
+        }
+        // void core in the chest
+        const coreGlow = ctx.createRadialGradient(0, 0, 2, 0, 0, R * 0.42);
+        coreGlow.addColorStop(0, "#ffffff");
+        coreGlow.addColorStop(0.45, et.accent);
+        coreGlow.addColorStop(1, "transparent");
+        ctx.fillStyle = coreGlow;
+        ctx.beginPath();
+        ctx.arc(0, 0, R * 0.42 * (1 + Math.sin(cycle * 2) * 0.08), 0, Math.PI * 2);
+        ctx.fill();
+        // shoulder cannons
+        ctx.fillStyle = et.shade;
+        [-1, 1].forEach((sgn) => {
+          ctx.beginPath();
+          ctx.roundRect(sgn < 0 ? -R * 1.12 : R * 0.62, -R * 0.86, R * 0.5, R * 0.3, 4);
+          ctx.fill();
+        });
+        // head: a slab with a visor slit
+        ctx.fillStyle = et.color;
+        ctx.beginPath();
+        ctx.roundRect(-R * 0.3, -R * 1.16, R * 0.6, R * 0.42, 5);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#fff";
+        ctx.shadowColor = et.accent;
+        ctx.shadowBlur = 12;
+        ctx.fillRect(-R * 0.22, -R * 1.05, R * 0.44, R * 0.1);
+        ctx.shadowBlur = 0;
       } else {
         // overlord: a levitating rift sovereign — cloak, crown, orbiting shards
         const float = Math.sin(cycle * 0.5) * 3.5;
@@ -4367,6 +4911,53 @@ export default function Battle({
       for (const pr of g.projs) drawProj(pr);
 
       // bolts
+      // ---------- vertical lightning pillars ----------
+      for (const st of g.strikes) {
+        const k = Math.max(0, Math.min(1, st.life / st.max)); // 1 -> 0
+        const punch2 = 1 - k; // 0 -> 1 as the column fades
+        const top = -30;
+        const w = st.width * (0.75 + k * 0.5);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        // wide outer halo
+        const halo = ctx.createLinearGradient(st.x - w * 3, 0, st.x + w * 3, 0);
+        halo.addColorStop(0, "transparent");
+        halo.addColorStop(0.5, st.color + "66");
+        halo.addColorStop(1, "transparent");
+        ctx.globalAlpha = 0.5 + k * 0.5;
+        ctx.fillStyle = halo;
+        ctx.fillRect(st.x - w * 3, top, w * 6, st.y - top);
+        // the core column: three jagged filaments sharing one spine
+        for (let f = -1; f <= 1; f++) {
+          const segments = 7;
+          const jitter = (st.seed + f * 13) % 7;
+          ctx.globalAlpha = (f === 0 ? 0.95 : 0.45) * (0.4 + k * 0.6);
+          ctx.strokeStyle = f === 0 ? "#ffffff" : st.color;
+          ctx.lineWidth = f === 0 ? w : Math.max(1.5, w * 0.45);
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(st.x + f * 2, top);
+          for (let i = 0; i <= segments; i++) {
+            const t2 = i / segments;
+            const y2 = top + (st.y - top) * t2;
+            const wob = Math.sin((i + jitter) * 2.7 + punch2 * 5) * (w * 0.7) * (1 - t2 * 0.35) + f * w * 0.5;
+            ctx.lineTo(st.x + wob, y2);
+          }
+          ctx.stroke();
+        }
+        // the impact pool where the column meets the ground
+        ctx.globalAlpha = 0.6 * (0.35 + k * 0.65);
+        const pool = ctx.createRadialGradient(st.x, st.y, 1, st.x, st.y, w * 4.5);
+        pool.addColorStop(0, "#ffffff");
+        pool.addColorStop(0.4, st.color);
+        pool.addColorStop(1, "transparent");
+        ctx.fillStyle = pool;
+        ctx.beginPath();
+        ctx.ellipse(st.x, st.y, w * 4.5, w * 2.1, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
       for (const b of g.bolts) {
         boltPts(b, boltCache);
         if (boltCache.length < 2) continue;
@@ -4809,55 +5400,30 @@ export default function Battle({
 
   const heroReady = g ? g.heroCd <= 0 : true;
   const heroDef = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
+  /** the fixed six-slot list the ascent bar renders. Never grows with the board. */
+  const lineupIds = useMemo(() => {
+    const chosen = save.lineup.filter((id) => (save.levels[id] || 0) > 0 && TOWER_BY_ID[id]);
+    const rest = TOWERS.filter((t) => (save.levels[t.id] || 0) > 0 && !chosen.includes(t.id)).map((t) => t.id);
+    return [...chosen, ...rest].slice(0, 6);
+  }, [save.lineup, save.levels]);
 
   return (
     <div className="app-bg relative flex h-full flex-col">
       <Toasts toasts={toasts} />
-      {/* TOP BAR — lineup left / status right */}
-      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 px-3 pt-2">
-        <div className="flex flex-1 flex-wrap items-center gap-1.5">
-          {Array.from({ length: 6 }).map((_, i) => {
-            const t = g?.towers.find((x) => x.lineupIdx === i);
-            return (
-              <div
-                key={i}
-                className="tile relative flex h-[58px] w-[78px] flex-col items-center justify-center"
-                style={{
-                  borderColor: t ? RARITY[t.def.rarity].color : "#3a2c74",
-                  opacity: t ? 1 : 0.45,
-                }}
-              >
-                {t ? (
-                  <>
-                    <span className="badge-num absolute -left-1.5 -top-1.5" style={{ borderColor: RARITY[t.def.rarity].color }}>
-                      {t.bLv}
-                    </span>
-                    <div key={`s${i}-${t.points}`}>
-                      <TowerIcon def={t.def} size={32} />
-                    </div>
-                    <div className="flex items-center gap-1 text-[10px] font-bold leading-none">
-                      <span style={{ color: ptColor(t.points) }}>
-                        {t.points >= MAX_POINTS ? "MAX PTS" : `${t.points} pts`}
-                      </span>
-                    </div>
-                    {t.cell ? <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full border border-black bg-[#3dff8e]" /> : null}
-                  </>
-                ) : (
-                  <span className="text-[9px] font-bold tracking-widest text-[var(--line2)]">EMPTY</span>
-                )}
-              </div>
-            );
-          })}
-          <button
-            className="cta-banner ml-1 h-[54px] shrink-0 px-3 text-[12px] leading-tight"
-            disabled={g ? g.sp < cost : true}
-            onClick={() => summonRef.current()}
-          >
-            SUMMON
-            <span className="block text-[10px] font-bold opacity-80">SP {cost}</span>
-            <span className="block text-[9px] font-bold opacity-70">spawns randomly</span>
-          </button>
-        </div>
+      {/* TOP BAR — status only. The installed-tower strip that used to live up
+          here duplicated the bottom bar and pushed the arena off small screens,
+          so the bar now carries currencies and one SUMMON button. */}
+      <div className="flex shrink-0 items-center gap-2 px-3 pt-2">
+        <button
+          className="cta-banner shrink-0 px-4 py-2 text-[13px] leading-tight"
+          disabled={g ? g.sp < cost : true}
+          data-testid="summon-btn"
+          onClick={() => summonRef.current()}
+        >
+          SUMMON
+          <span className="block text-[10px] font-bold opacity-80">SP {cost}</span>
+        </button>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
         {g && (
           <div className="flex items-center gap-2 text-[15px] font-bold">
             <span data-testid="sp-chip" className="pill-dark text-[11px] text-[#7fe9ff]" style={{ borderColor: "#1f6f8c" }}>
@@ -4890,6 +5456,14 @@ export default function Battle({
             )}
             <span className="pill-dark text-[11px] text-[var(--dim)]">
               <span className="num">{g.enemies.length + g.spawnQ.length}</span> left
+            </span>
+            <span
+              className="pill-dark text-[11px] text-[#8effc4]"
+              style={{ borderColor: "#1f7a4a" }}
+              data-testid="towers-on-board"
+              title="Towers currently deployed (any type)"
+            >
+              <span className="num">{g.towers.filter((t) => t.cell).length}</span> towers
             </span>
             {/* the merged crit stat, plus how many crits this run has landed */}
             <span
@@ -4928,6 +5502,7 @@ export default function Battle({
             )}
           </div>
         )}
+        </div>
       </div>
 
       {/* CANVAS */}
@@ -5134,76 +5709,83 @@ export default function Battle({
 
       </div>
 
-      {/* BOTTOM BAR — one card per deployed tower, each with its own ASCENT button */}
+      {/* BOTTOM BAR — one fixed card per lineup tower *type*, not per instance.
+          Spawning more copies of a tower changes the count and the level, never
+          the layout, so the bar can't duplicate itself when the board grows. */}
       {g && (
-        <div className="flex shrink-0 items-stretch gap-2 px-3 py-2">
-          {/* the six tower slots */}
-          {Array.from({ length: 6 }).map((_, i) => {
-            const t = g.towers.find((x) => x.lineupIdx === i);
-            const maxed = t ? t.bLv >= MAX_BATTLE_LEVEL : false;
-            // every copy of this tower type ascends together
-            const family = t ? g.towers.filter((x) => x.def.id === t.def.id).length : 0;
-            const canAscend = !!t && !maxed && g.sp >= ascentCost;
+        <div className="flex shrink-0 items-stretch gap-1.5 px-2 pb-1.5" data-testid="ascent-bar">
+          {lineupIds.map((id, i) => {
+            const def = TOWER_BY_ID[id];
+            const copies = g.towers.filter((x) => x.def.id === id);
+            const lead = copies[0];
+            const bLv = lead ? lead.bLv : 1;
+            const pts = lead ? Math.max(...copies.map((x) => x.points)) : 0;
+            const maxed = !!lead && bLv >= MAX_BATTLE_LEVEL;
+            const canAscend = !!lead && !maxed && g.sp >= ascentCost;
+            const rc = RARITY[def.rarity];
             return (
               <div
-                key={i}
+                key={id}
                 data-slot={i}
-                className="tile flex min-w-0 flex-1 flex-col gap-1 px-2 py-1.5"
-                style={{ opacity: t ? 1 : 0.45 }}
+                data-tower={id}
+                className="tile flex min-w-0 flex-1 flex-col gap-1 px-1.5 py-1.5"
+                style={{ opacity: lead ? 1 : 0.4, borderColor: lead ? rc.color : undefined }}
               >
-                {t ? (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <TowerIcon def={t.def} size={34} />
-                      <div className="min-w-0 flex-1 leading-tight">
-                        <div className="truncate text-[12px] font-bold" style={{ color: RARITY[t.def.rarity].color }}>
-                          {t.def.name}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <span className="text-[11px] font-bold text-[var(--dim)]">
-                            Lv {t.bLv}/{MAX_BATTLE_LEVEL}
-                          </span>
-                          <span
-                            key={t.points}
-                            className="anim-pop rounded px-1 text-[11px] font-bold"
-                            style={{ background: "rgba(0,0,0,0.4)", color: ptColor(t.points) }}
-                          >
-                            {t.points >= MAX_POINTS ? "MAX" : `${t.points} pts`}
-                          </span>
-                        </div>
-                      </div>
+                <div className="flex items-center gap-1.5">
+                  <TowerIcon def={def} size={28} />
+                  <div className="min-w-0 flex-1 leading-tight">
+                    <div className="truncate text-[11px] font-bold" style={{ color: rc.color }}>
+                      {def.name}
                     </div>
-                    <div className="h-1 overflow-hidden rounded-full bg-black/50">
-                      <div
-                        className="h-full rounded-full"
-                        style={{
-                          width: `${(t.bLv / MAX_BATTLE_LEVEL) * 100}%`,
-                          background: "linear-gradient(90deg,#35e0ff,#c44dff)",
-                        }}
-                      />
+                    <div className="flex flex-wrap items-center gap-1 text-[10px] font-bold">
+                      <span className="text-[var(--dim)]">Lv {bLv}/{MAX_BATTLE_LEVEL}</span>
+                      <span className="rounded bg-black/40 px-1" style={{ color: ptColor(pts) }}>
+                        {pts >= MAX_POINTS ? "MAX" : `${pts}p`}
+                      </span>
+                      {copies.length > 1 && (
+                        <span className="rounded bg-black/40 px-1 text-[#7fe9ff]">×{copies.length}</span>
+                      )}
                     </div>
-                    {/* the ascent button lives ON the tower now — no dragging */}
-                    <button
-                      data-testid={`ascend-${i}`}
-                      disabled={!canAscend}
-                      onClick={() => {
-                        if (!canAscend) {
-                          sfx.error();
-                          push(maxed ? `${t.def.name} is already maxed` : "Not enough SP", "#ff4d5e");
-                          return;
-                        }
-                        ascendTower(t.uid);
-                      }}
-                      className={`ascend-btn ${canAscend ? "on" : ""}`}
-                    >
-                      {maxed ? "MAX LEVEL" : (<><span>ASCENT</span><b>SP {ascentCost}{family > 1 ? ` ×${family}` : ""}</b></>)}
-                    </button>
-                  </>
-                ) : (
-                  <span className="w-full text-center text-[10px] font-bold tracking-widest text-[var(--line2)]">
-                    EMPTY SLOT
-                  </span>
-                )}
+                  </div>
+                </div>
+                <div className="h-1 overflow-hidden rounded-full bg-black/50">
+                  <div
+                    className="h-full rounded-full transition-all duration-200"
+                    style={{ width: `${(bLv / MAX_BATTLE_LEVEL) * 100}%`, background: "linear-gradient(90deg,#35e0ff,#c44dff)" }}
+                  />
+                </div>
+                <button
+                  data-testid={`ascend-${i}`}
+                  disabled={!canAscend}
+                  onClick={() => {
+                    if (!lead) {
+                      sfx.error();
+                      push(`${def.name} isn't on the board yet`, "#ff4d5e");
+                      return;
+                    }
+                    if (!canAscend) {
+                      sfx.error();
+                      push(maxed ? `${def.name} is already maxed` : "Not enough SP", "#ff4d5e");
+                      return;
+                    }
+                    ascendTower(lead.uid);
+                  }}
+                  className={`ascend-btn ${canAscend ? "on" : ""}`}
+                >
+                  {!lead ? (
+                    "NOT DEPLOYED"
+                  ) : maxed ? (
+                    "MAX LEVEL"
+                  ) : (
+                    <>
+                      <span>ASCENT</span>
+                      <b>
+                        SP {ascentCost}
+                        {copies.length > 1 ? ` ×${copies.length}` : ""}
+                      </b>
+                    </>
+                  )}
+                </button>
               </div>
             );
           })}
@@ -5277,17 +5859,45 @@ export default function Battle({
         >
           <div className="boss-backdrop absolute inset-0" />
           <div className="relative flex flex-col items-center px-6 text-center">
-            <div className="boss-cut-ring absolute" style={{ width: 340, height: 340, borderColor: `${ENEMY_TYPES[g.cut.type].color}aa` }} />
-            <div className="boss-cut-ring absolute" style={{ width: 340, height: 340, borderColor: "#ffcf4d55", animationDelay: "0.45s" }} />
+            {/* three rings sweep in at different speeds, then lock and snap off */}
+            <div className="boss-cut-ring absolute" style={{ width: 360, height: 360, borderColor: `${ENEMY_TYPES[g.cut.type].color}aa` }} />
+            <div className="boss-cut-ring absolute" style={{ width: 360, height: 360, borderColor: "#ffcf4d55", animationDelay: "0.45s" }} />
+            <div className="boss-cut-ring boss-cut-ring-lock absolute" style={{ width: 300, height: 300, borderColor: "#ffffff44" }} />
+            {/* scanning bars crossing the screen */}
+            <div className="boss-cut-scan" />
+            <div className="boss-cut-scan boss-cut-scan-b" />
+            {/* the boss itself, drawn huge behind the name */}
+            <div className={`boss-cut-portrait ${g.cut.locked ? "locked" : ""}`}>
+              <div className="boss-cut-portrait-glow" style={{ background: `radial-gradient(circle, ${ENEMY_TYPES[g.cut.type].color}88, transparent 68%)` }} />
+              <BossPortrait type={g.cut.type} />
+            </div>
             <div className="boss-cut-in relative">
-              <div className="text-[12px] font-bold tracking-[0.5em] text-[#ffcf4d]">WARNING</div>
+              <div className="boss-cut-warn text-[12px] font-bold tracking-[0.5em] text-[#ffcf4d]">WARNING</div>
               <div
-                className="font-disp mt-2 text-5xl"
+                className="font-disp boss-cut-name mt-1 text-5xl"
                 style={{ color: ENEMY_TYPES[g.cut.type].color, textShadow: `0 0 34px ${ENEMY_TYPES[g.cut.type].color}` }}
               >
                 {g.cut.name.toUpperCase()}
               </div>
+              <div className="boss-cut-title mt-1 text-[12px] font-bold tracking-[0.32em] text-[#ff9be9]">
+                {ENEMY_TYPES[g.cut.type].title.toUpperCase()}
+              </div>
               <div className="mt-2 text-[13px] font-bold tracking-[0.3em] text-[var(--txt)]">{g.cut.sub}</div>
+              {/* live stat readout, so the cutscene tells you what you're facing */}
+              <div className="boss-cut-stats mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-[11px] font-bold">
+                <span className="text-[var(--dim)]">
+                  HEALTH <span className="num" style={{ color: "#ff8f9a" }}>×{ENEMY_TYPES[g.cut.type].hpMul}</span>
+                </span>
+                <span className="text-[var(--dim)]">
+                  ARMOUR <span className="num text-[#8fb0ff]">{Math.round(ENEMY_TYPES[g.cut.type].armor * 100)}%</span>
+                </span>
+                <span className="text-[var(--dim)]">
+                  LIVES <span className="num text-[#ff4d5e]">{ENEMY_TYPES[g.cut.type].lives}</span>
+                </span>
+                <span className="text-[var(--dim)]">
+                  BOUNTY <span className="num text-[#ffcf4d]">{ENEMY_TYPES[g.cut.type].gold}</span>
+                </span>
+              </div>
               <div className="mt-3 flex max-w-[560px] flex-wrap items-center justify-center gap-1.5">
                 {bossKit(g.cut.type).map((id, i) => {
                   const sk = BOSS_SKILL_BY_ID[id];
@@ -5303,8 +5913,13 @@ export default function Battle({
                   );
                 })}
               </div>
-              <div className="mt-5 text-[11px] font-bold tracking-[0.25em] text-[var(--dim)]">
-                TAP TO CONTINUE · {Math.max(0, Math.ceil(g.cut.t))}s
+              <div className="mt-5 flex items-center justify-center gap-3">
+                <div className={`boss-cut-count ${g.cut.locked ? "locked" : ""}`}>
+                  <span className="num">{g.cut.locked ? "!" : Math.max(1, Math.ceil(g.cut.t))}</span>
+                </div>
+                <span className="text-[11px] font-bold tracking-[0.25em] text-[var(--dim)]">
+                  {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "TAP TO SKIP"}
+                </span>
               </div>
             </div>
           </div>
@@ -5472,6 +6087,94 @@ function RunShop({
         </button>
       </div>
     </div>
+  );
+}
+
+/** a big flat silhouette of a boss, for the cutscene — pure SVG so it scales crisply */
+function BossPortrait({ type }: { type: number }) {
+  const et = ENEMY_TYPES[type];
+  const c = et.color;
+  const a = et.accent;
+  const sh = et.shade;
+  return (
+    <svg width={190} height={190} viewBox="-100 -100 200 200" className="relative">
+      <defs>
+        <radialGradient id="bp-core" cx="50%" cy="50%">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="45%" stopColor={a} />
+          <stop offset="100%" stopColor="transparent" />
+        </radialGradient>
+      </defs>
+      {/* silhouette per shape — kept deliberately chunky so it reads at a glance */}
+      {et.shape === "titan" && (
+        <g stroke={sh} strokeWidth={3}>
+          <path d="M-78-58 H78 L62 22 Q0 72 -62 22 Z" fill={c} />
+          <path d="M-66-40 H66 M-58-16 H58 M-50 8 H50" stroke={a} strokeWidth={3} fill="none" opacity={0.7} />
+          <circle r={30} fill="url(#bp-core)" />
+          <rect x={-58} y={-82} width={44} height={26} rx={4} fill={sh} />
+          <rect x={14} y={-82} width={44} height={26} rx={4} fill={sh} />
+          <rect x={-28} y={-104} width={56} height={38} rx={6} fill={c} />
+          <rect x={-20} y={-94} width={40} height={9} rx={3} fill="#ffffff" />
+          <path d="M-44 30 L-58 74 M44 30 L58 74" stroke={sh} strokeWidth={9} strokeLinecap="round" />
+        </g>
+      )}
+      {et.shape === "overlord" && (
+        <g stroke={sh} strokeWidth={3}>
+          <path d="M0-88 L52-30 L34 62 L0 84 L-34 62 L-52-30 Z" fill={c} />
+          <path d="M0-70 L34-26 L22 48 L0 64 L-22 48 L-34-26 Z" fill={a} opacity={0.55} />
+          <circle r={22} fill="url(#bp-core)" />
+          <path d="M-40-96 L-26-118 L-12-92 M40-96 L26-118 L12-92 M0-108 L0-128" stroke={a} strokeWidth={5} fill="none" strokeLinecap="round" />
+        </g>
+      )}
+      {et.shape === "warlord" && (
+        <g stroke={sh} strokeWidth={3}>
+          <path d="M-56-52 H56 L46 44 Q0 66 -46 44 Z" fill={c} />
+          <path d="M-44-30 H44" stroke={a} strokeWidth={4} />
+          <path d="M-66-46 L-86-14 L-70 10" fill={sh} />
+          <path d="M66-46 L86-14 L70 10" fill={sh} />
+          <rect x={-30} y={-78} width={60} height={30} rx={5} fill={c} />
+          <path d="M-20-64 H20" stroke="#ffffff" strokeWidth={6} strokeLinecap="round" />
+          <path d="M-34 50 L-44 80 M34 50 L44 80" stroke={sh} strokeWidth={8} strokeLinecap="round" />
+        </g>
+      )}
+      {et.shape === "knight" && (
+        <g stroke={sh} strokeWidth={3}>
+          <path d="M-48-40 H48 L40 40 Q0 58 -40 40 Z" fill={c} />
+          <path d="M-34-20 H34 M-30 4 H30" stroke={a} strokeWidth={3} />
+          <path d="M-56-44 L-72-6 L-58 10 Z" fill={sh} />
+          <rect x={-26} y={-64} width={52} height={26} rx={4} fill={c} />
+          <path d="M-18-52 H18" stroke="#ffffff" strokeWidth={5} strokeLinecap="round" />
+        </g>
+      )}
+      {et.shape === "mage" && (
+        <g stroke={sh} strokeWidth={3}>
+          <path d="M0-84 L34-24 L26 54 Q0 70 -26 54 L-34-24 Z" fill={c} />
+          <path d="M0-84 L20-30 L0 60 L-20-30 Z" fill={a} opacity={0.5} />
+          <circle r={18} fill="url(#bp-core)" />
+          <circle cx={0} cy={-40} r={6} fill="#ffffff" />
+          <path d="M34-40 L54-70" stroke={sh} strokeWidth={5} strokeLinecap="round" />
+          <circle cx={58} cy={-76} r={9} fill={a} />
+        </g>
+      )}
+      {et.shape === "runner" && (
+        <g stroke={sh} strokeWidth={3}>
+          <path d="M-30-46 Q0-70 30-46 L40 26 Q0 58 -40 26 Z" fill={c} />
+          <path d="M-40 26 L-70 48 L-34 42 M40 26 L70 48 L34 42" fill={sh} />
+          <circle r={14} fill="url(#bp-core)" />
+          <path d="M-18-52 L26-70" stroke={a} strokeWidth={5} strokeLinecap="round" />
+        </g>
+      )}
+      {et.shape === "slime" && (
+        <g stroke={sh} strokeWidth={3}>
+          <path d="M-70 24 Q-58-72 0-72 Q58-72 70 24 Q40 56 0 56 Q-40 56 -70 24 Z" fill={c} />
+          <circle cx={-22} cy={-24} r={11} fill="#ffffff" />
+          <circle cx={22} cy={-24} r={11} fill="#ffffff" />
+          <circle cx={-19} cy={-21} r={5} fill={sh} />
+          <circle cx={25} cy={-21} r={5} fill={sh} />
+          <circle cy={14} r={16} fill="url(#bp-core)" />
+        </g>
+      )}
+    </svg>
   );
 }
 

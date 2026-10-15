@@ -36,6 +36,10 @@ export type TowerKind =
   | "storm"
   | "plague"
   | "rail"
+  | "reaper"
+  | "prism"
+  | "aegis"
+  | "hellgate"
   | "axe"
   | "frost"
   | "mortar"
@@ -46,12 +50,63 @@ export type TowerKind =
 
 export type GameMode = "battle" | "endless";
 
+/**
+ * How an awakening behaves, so one implementation in the battle engine can
+ * drive every tower's kit. Towers with a hand-written special still get first
+ * say (lightning, plasma, dragon, sun, hellstorm, rail); everything else is
+ * routed through these.
+ */
+export type AwkFx =
+  | "heavy" // chance to fire a shot with far more damage
+  | "critup" // chance to make the shot always crit
+  | "volley" // chance to loose an extra shot at another enemy
+  | "freeze" // chance to encase whatever it hits
+  | "burn" // chance to leave a burn on whatever it hits
+  | "chain" // chance to arc the hit into nearby enemies
+  | "slow" // chance to chill whatever it hits
+  | "splash" // chance to widen the blast
+  | "sp" // bonus SP per kill
+  | "bounty" // bonus gold per kill
+  | "aura" // aura towers: stronger aura at all times
+  | "execute" // instantly kill enemies under a share of their max HP
+  | "leech" // heal lives back on kills
+  | "quake"; // chance to stun everything in the blast
+
 export interface AwkSpec {
   name: string;
   desc: string;
   chance: number[]; // per tier I..V
   mult: number[]; // effect magnitude per tier
   mult2?: number[]; // secondary magnitude per tier
+  /** engine hook — absent means the tower has bespoke handling in Battle.tsx */
+  fx?: AwkFx;
+}
+
+/**
+ * Awakening factory. `chance` and `mult` are given as [tier I, tier V] pairs and
+ * interpolated across the five tiers, so the data stays readable.
+ */
+export function awking(
+  name: string,
+  fx: AwkFx,
+  desc: string,
+  chance: [number, number],
+  mult: [number, number],
+  mult2?: [number, number]
+): AwkSpec {
+  const spread = (pair: [number, number]) =>
+    Array.from({ length: 5 }, (_, i) => {
+      const v = pair[0] + ((pair[1] - pair[0]) * i) / 4;
+      return Math.round(v * 1000) / 1000;
+    });
+  return {
+    name,
+    fx,
+    desc,
+    chance: spread(chance),
+    mult: spread(mult),
+    ...(mult2 ? { mult2: spread(mult2) } : {}),
+  };
 }
 
 export interface TowerDef {
@@ -121,6 +176,14 @@ export interface TowerDef {
   burnDur?: number;
   /** sp earned on every kill this tower lands (Mana Siphon style) */
   spGain?: number;
+  /** bonus gold per kill this tower lands */
+  goldGain?: number;
+  /** aura towers: damage of a periodic pulse in radius, and how often it fires */
+  pulse?: number;
+  upPulse?: number;
+  pulseRate?: number;
+  /** shots that leave a burning pool on the ground where they land */
+  lava?: boolean;
   /** extra damage per kill this tower has landed, capped (Scorching Hot style) */
   killStack?: number;
   /** canvas + icon art family (defaults to the tower kind) */
@@ -138,43 +201,71 @@ export const TOWERS: TowerDef[] = [
     desc: "Fires an arrow at the enemy. The arrow gains an attack speed buff.",
     dmg: 50, upDmg: 2, ascDmg: 7, rate: 0.5, upRate: 0.01, ascRate: 0.02,
     aspd: 0.3, upAspd: 0.05, ascAspd: 0.1, unlockFrags: 0,
-  },
+
+    awk1: awking("Quick Draw", "volley",
+      "Chance to loose a second arrow at the next enemy in line", [0.12, 0.5], [1, 1]),
+    awk2: awking("Serrated Heads", "burn",
+      "Arrows leave a bleeding wound that keeps damaging the target", [0.2, 0.65], [0.5, 2.2]),  },
   {
     id: "cannon", name: "Cannon", rarity: "normal", kind: "cannon", target: "front",
     desc: "Fires a bomb shell. Explodes in 2m radius.",
     dmg: 100, upDmg: 4, ascDmg: 10, rate: 0.7, upRate: 0.01, ascRate: 0.02,
     splash: 30, upSplash: 3, ascSplash: 5, unlockFrags: 0,
-  },
+
+    awk1: awking("Heavy Shells", "heavy",
+      "Chance to load a far heavier shell", [0.15, 0.55], [1, 5]),
+    awk2: awking("Shrapnel Load", "splash",
+      "The shell bursts wider and scatters burning shards", [0.2, 0.7], [0.4, 1.1]),  },
   {
     id: "ice", name: "Ice Cube", rarity: "normal", kind: "ice", target: "front",
     desc: "Fires a big ice cube. Chance to freeze the enemy for 3s.",
     dmg: 20, upDmg: 4, ascDmg: 13, rate: 1.2, upRate: 0.02, ascRate: 0.025,
     freeze: 0.1, upFreeze: 0.05, ascFreeze: 0.1, unlockFrags: 0,
-  },
+
+    awk1: awking("Deep Freeze", "freeze",
+      "Chance to encase the target in solid ice", [0.15, 0.6], [1.2, 2.4]),
+    awk2: awking("Frostbite", "slow",
+      "Ice bites deeper: hits chill for longer and harder", [0.25, 0.8], [0.2, 0.45]),  },
   {
     id: "speaker", name: "S-Speaker", rarity: "decent", kind: "speaker", target: "none",
     desc: "Buffs attack speed of surrounding towers (left / right / up / down). The bonus increases with tower points.",
     dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
     aura: true, aspd: 0.03, upAspd: 0.01, ascAspd: 0.02, unlockFrags: 5,
-  },
+
+    awk1: awking("War Anthem", "aura",
+      "The attack-speed aura grows stronger with every tier", [1, 1], [0.5, 2.5]),
+    awk2: awking("Resonance", "aura",
+      "A second stack of aura that also lifts attack power", [1, 1], [0.3, 1.6]),  },
   {
     id: "tesla", name: "Tesla Coil", rarity: "decent", kind: "tesla", target: "front",
     desc: "Shoots an electrical bullet that chains damage to enemies.",
     dmg: 35, upDmg: 20, ascDmg: 10, rate: 0.8, upRate: 0.02, ascRate: 0,
     chain: 6, upChain: 4, ascChain: 8, unlockFrags: 8,
-  },
+
+    awk1: awking("Ionised Air", "chain",
+      "Chance to arc the bolt into two more enemies", [0.2, 0.7], [2, 6]),
+    awk2: awking("Static Bloom", "heavy",
+      "Chance to discharge a shot that hits far harder", [0.12, 0.5], [1, 4.5]),  },
   {
     id: "gatling", name: "Gatling", rarity: "epic", kind: "gatling", target: "front",
     desc: "Shoots a bullet. Every 5s activates rapid fire for 6s.",
     dmg: 180, upDmg: 40, ascDmg: 100, rate: 0.4, upRate: 0, ascRate: 0,
     aspd: 2.0, upAspd: 0.5, ascAspd: 0.25, rapid: true, unlockFrags: 12,
-  },
+
+    awk1: awking("Drum Mag", "volley",
+      "Chance to fire an extra round at a second target", [0.15, 0.6], [1, 1]),
+    awk2: awking("Hollow Points", "critup",
+      "Chance for a burst of rounds that always crits", [0.08, 0.35], [1, 1]),  },
   {
     id: "core", name: "Energy Core", rarity: "epic", kind: "core", target: "front",
     desc: "Fires a blue orb that pushes enemies back 3m, then stuns for 2s.",
     dmg: 10, upDmg: 2, ascDmg: 3, rate: 0.9, upRate: 0.03, ascRate: 0,
     stun: 2, upStun: 0.5, ascStun: 1, unlockFrags: 12,
-  },
+
+    awk1: awking("Force Push", "quake",
+      "The orb stuns everything caught in its wake", [0.2, 0.7], [0.6, 1.8]),
+    awk2: awking("Reactor Vent", "chain",
+      "Chance to vent a second orb at the nearest enemy", [0.18, 0.6], [1, 1]),  },
   {
     id: "lightning", name: "Lightning Princess", rarity: "legendary", kind: "lightning",
     target: "all",
@@ -221,7 +312,12 @@ export const TOWERS: TowerDef[] = [
     dmg: 720, upDmg: 0, ascDmg: 0, rate: 0.75, upRate: 0.03, ascRate: 0,
     icChance: 0.45, upIc: 0.075, ascIc: 0.025, icPct: 0.4, upIcPct: 0.025, ascIcPct: 0.04,
     unlockFrags: 1,
-  },
+
+
+    awk1: awking("Absolute Zero", "freeze",
+      "Chance to encase the target solid in ice for several seconds", [0.15, 0.6], [1.5, 3.5]),
+    awk2: awking("Glacial Shards", "chain",
+      "Icicles splinter into the enemies packed around the target", [0.25, 0.8], [2, 5]),  },
   {
     id: "plant", name: "Power Plant", rarity: "legendary", kind: "plant", target: "none",
     desc: "Buffs surrounding towers' attack speed by tower points. 4 / 6 / 8 / 12 placed = High Performance (+50% bonus).",
@@ -229,25 +325,41 @@ export const TOWERS: TowerDef[] = [
     aura: true, aspd: 0.03, upAspd: 0.01, ascAspd: 0.02,
     atkAura: 0.03, upAtkAura: 0.01, ascAtkAura: 0.02,
     hpState: [4, 6, 8, 12], unlockFrags: 1,
-  },
+
+    awk1: awking("Overclock", "aura",
+      "The aura surges: attack speed and damage both climb", [1, 1], [0.5, 2.4]),
+    awk2: awking("Capacitor Bank", "sp",
+      "Every enemy killed inside the aura feeds the grid", [0.3, 1], [2, 9]),  },
   {
     id: "swarm", name: "Arcane Swarm", rarity: "decent", kind: "swarm", target: "front",
     desc: "Loose three homing bolts at once, at up to three different enemies.",
     dmg: 34, upDmg: 11, ascDmg: 0, rate: 0.85, upRate: 0.02, ascRate: 0,
     multi: 3, unlockFrags: 10,
-  },
+
+    awk1: awking("Swarm Surge", "volley",
+      "Chance to loose two extra homing bolts", [0.18, 0.65], [1, 3]),
+    awk2: awking("Void Locus", "heavy",
+      "Chance for a bolt to collapse into a heavy detonation", [0.1, 0.45], [1.5, 6]),  },
   {
     id: "chrono", name: "Chrono Spire", rarity: "epic", kind: "chrono", target: "front",
     desc: "Time field: slows enemies around it and chills whatever it hits. Slowed enemies take +25% damage.",
     dmg: 70, upDmg: 18, ascDmg: 0, rate: 0.95, upRate: 0.02, ascRate: 0,
     slow: 0.4, upSlow: 0.04, ascSlow: 0.03, slowDur: 3.5, slowAura: 210, unlockFrags: 14,
-  },
+
+    awk1: awking("Time Lock", "slow",
+      "Chance to freeze a caught enemy's clock completely", [0.15, 0.6], [0.3, 0.7]),
+    awk2: awking("Paradox", "chain",
+      "Slowed enemies take a rebound hit from their own timeline", [0.2, 0.7], [0.4, 1.4]),  },
   {
     id: "void", name: "Void Cannon", rarity: "epic", kind: "void", target: "front",
     desc: "Slow siege gun that shaves a share of the target's maximum HP on every hit.",
     dmg: 110, upDmg: 22, ascDmg: 0, rate: 1.7, upRate: 0.03, ascRate: 0,
     pctHp: 0.05, upPctHp: 0.009, ascPctHp: 0.014, unlockFrags: 16,
-  },
+
+    awk1: awking("Event Horizon", "execute",
+      "Chance to erase an enemy that is already badly wounded", [0.1, 0.4], [0.12, 0.3]),
+    awk2: awking("Collapse", "splash",
+      "Hits pull harder and drag nearby enemies into the wound", [0.25, 0.8], [0.5, 1.6]),  },
   {
     id: "plasma", name: "Plasma Lance", rarity: "legendary", kind: "plasma", target: "front",
     desc: "Skewers a whole file of enemies with one lance.",
@@ -277,28 +389,44 @@ export const TOWERS: TowerDef[] = [
     desc: "Snaps a stone at the front enemy three times a second. Cheap, quick, relentless.",
     dmg: 26, upDmg: 3, ascDmg: 9, rate: 0.3, upRate: 0.004, ascRate: 0.006,
     aspd: 0.4, upAspd: 0.06, ascAspd: 0.05, unlockFrags: 2,
-  },
+
+    awk1: awking("Double Shot", "volley",
+      "Chance to snap a second stone at another enemy", [0.18, 0.6], [1, 1]),
+    awk2: awking("Flint Load", "burn",
+      "Stones strike sparks and set the target alight", [0.2, 0.65], [0.5, 2]),  },
   {
     id: "flame", name: "Flamethrower", rarity: "normal", kind: "flame", art: "flame", accent: "#ff8c3d",
     target: "front",
     desc: "Coats the target in fire: 60% of the hit damage keeps burning for 4s.",
     dmg: 34, upDmg: 4, ascDmg: 11, rate: 0.55, upRate: 0.012, ascRate: 0.02,
     burnPct: 0.6, upBurnPct: 0.06, ascBurnPct: 0.08, burnDur: 4, unlockFrags: 3,
-  },
+
+    awk1: awking("Napalm", "burn",
+      "The burn lasts longer and spreads to enemies beside it", [0.2, 0.7], [0.6, 2.6]),
+    awk2: awking("Blue Flame", "heavy",
+      "Chance to ignite a searingly hot shot", [0.12, 0.5], [1, 4.5]),  },
   {
     id: "spike", name: "Spike Trap", rarity: "normal", kind: "spike", art: "spike", accent: "#c8d6e5",
     target: "front",
     desc: "Erupts under the front enemy, shredding everything packed around it.",
     dmg: 70, upDmg: 6, ascDmg: 16, rate: 0.9, upRate: 0.015, ascRate: 0.02,
     splash: 95, upSplash: 6, ascSplash: 8, unlockFrags: 4,
-  },
+
+    awk1: awking("Rupture", "quake",
+      "Chance to stun everything the spikes erupt under", [0.2, 0.7], [0.6, 2]),
+    awk2: awking("Caltrops", "slow",
+      "The crater is left littered with spikes that slow anything walking in", [0.25, 0.8], [0.25, 0.5]),  },
   {
     id: "boomer", name: "Boomerang", rarity: "normal", kind: "boomer", art: "sling", accent: "#9fe8ff",
     target: "front",
     desc: "Hurls a blade that curves through the whole file of enemies.",
     dmg: 42, upDmg: 5, ascDmg: 14, rate: 0.6, upRate: 0.012, ascRate: 0.02,
     pierce: 3, upPierce: 1, ascPierce: 1, unlockFrags: 5,
-  },
+
+    awk1: awking("Ricochet", "chain",
+      "The blade bounces into more enemies before it returns", [0.2, 0.7], [2, 6]),
+    awk2: awking("Serrated Edge", "burn",
+      "Every enemy it cuts keeps bleeding", [0.2, 0.65], [0.4, 1.6]),  },
   {
     id: "toxin", name: "Toxic Sprayer", rarity: "normal", kind: "toxin", art: "flame", accent: "#8effc4",
     target: "front",
@@ -306,14 +434,22 @@ export const TOWERS: TowerDef[] = [
     dmg: 20, upDmg: 2, ascDmg: 7, rate: 0.5, upRate: 0.01, ascRate: 0.015,
     splash: 70, upSplash: 5, ascSplash: 6,
     burnPct: 0.35, upBurnPct: 0.04, ascBurnPct: 0.05, burnDur: 5, unlockFrags: 6,
-  },
+
+    awk1: awking("Virulence", "burn",
+      "The poison eats into the target far harder", [0.25, 0.8], [0.8, 3.2]),
+    awk2: awking("Miasma", "splash",
+      "The cloud is larger and lingers as a choking pool", [0.2, 0.7], [0.6, 1.8]),  },
   {
     id: "axe", name: "Axe Thrower", rarity: "decent", kind: "axe", art: "tube", accent: "#ff9d5c",
     target: "front",
     desc: "Spins a heavy axe that cuts through the front line and keeps going.",
     dmg: 105, upDmg: 16, ascDmg: 0, rate: 0.8, upRate: 0.018, ascRate: 0,
     pierce: 4, upPierce: 1, splash: 60, upSplash: 6, unlockFrags: 9,
-  },
+
+    awk1: awking("Hurled Reaper", "critup",
+      "Chance for a spinning axe that always crits", [0.1, 0.4], [1, 1]),
+    awk2: awking("Bleeding Cut", "burn",
+      "Axes leave deep wounds that bleed the target dry", [0.22, 0.7], [0.5, 2.2]),  },
   {
     id: "frost", name: "Frost Spire", rarity: "decent", kind: "frost", art: "spike", accent: "#9fe8ff",
     target: "front",
@@ -321,28 +457,44 @@ export const TOWERS: TowerDef[] = [
     dmg: 62, upDmg: 10, ascDmg: 0, rate: 1, upRate: 0.02, ascRate: 0,
     freeze: 0.2, upFreeze: 0.03, ascFreeze: 0,
     slow: 0.35, upSlow: 0.03, slowDur: 3.2, slowAura: 190, unlockFrags: 11,
-  },
+
+    awk1: awking("Permafrost", "freeze",
+      "Chance to lock the target in a block of ice", [0.18, 0.65], [1.4, 3]),
+    awk2: awking("Cold Snap", "splash",
+      "Chance to burst a ring of frost that chills everything around", [0.25, 0.8], [0.4, 1.2]),  },
   {
     id: "mortar", name: "Siege Mortar", rarity: "decent", kind: "mortar", art: "tube", accent: "#d0d6e0",
     target: "front",
     desc: "Lobs one enormous shell every two seconds. Huge crater, huge damage.",
     dmg: 340, upDmg: 45, ascDmg: 0, rate: 2, upRate: 0.04, ascRate: 0,
     splash: 230, upSplash: 14, ascSplash: 0, unlockFrags: 13,
-  },
+
+    awk1: awking("Siege Load", "splash",
+      "Chance to fire a far wider crater shell", [0.2, 0.7], [0.4, 1.1]),
+    awk2: awking("Thermite", "burn",
+      "The shell leaves a burning crater behind", [0.25, 0.8], [0.6, 2.4]),  },
   {
     id: "laser", name: "Laser Cutter", rarity: "epic", kind: "laser", art: "beam", accent: "#ff4fd8",
     target: "front",
     desc: "Sustained beam that arcs to two more enemies. Fires four times a second.",
     dmg: 58, upDmg: 12, ascDmg: 0, rate: 0.25, upRate: 0.006, ascRate: 0,
     chain: 3, upChain: 1, ascChain: 0, unlockFrags: 14,
-  },
+
+    awk1: awking("Prism Split", "chain",
+      "Chance for the beam to fan out into extra enemies", [0.2, 0.7], [2, 6]),
+    awk2: awking("Overburn", "burn",
+      "Beams scorch on contact and keep burning", [0.25, 0.8], [0.4, 1.8]),  },
   {
     id: "missile", name: "Missile Battery", rarity: "epic", kind: "missile", art: "tube", accent: "#ffd23f",
     target: "front",
     desc: "Launches four homing rockets at four different enemies. Every one pops.",
     dmg: 135, upDmg: 22, ascDmg: 0, rate: 1.15, upRate: 0.02, ascRate: 0,
     multi: 4, splash: 70, upSplash: 6, ascSplash: 0, unlockFrags: 16,
-  },
+
+    awk1: awking("Cluster Payload", "volley",
+      "Chance for two more rockets in the salvo", [0.18, 0.6], [1, 2]),
+    awk2: awking("Incendiary", "burn",
+      "Every rocket leaves a burning pool where it pops", [0.25, 0.8], [0.5, 2]),  },
   {
     id: "dragon", name: "Dragon's Maw", rarity: "legendary", kind: "dragon", art: "flame", accent: "#ff5d3d",
     target: "front",
@@ -393,14 +545,22 @@ export const TOWERS: TowerDef[] = [
     dmg: 90, upDmg: 7, ascDmg: 18, rate: 1.1, upRate: 0.018, ascRate: 0.02,
     splash: 85, upSplash: 6, ascSplash: 8,
     freeze: 0.22, upFreeze: 0.04, ascFreeze: 0.05, unlockFrags: 7,
-  },
+
+    awk1: awking("Flash Freeze", "freeze",
+      "Chance to lock the whole blast zone solid", [0.2, 0.65], [1.2, 2.8]),
+    awk2: awking("Shatterpoint", "critup",
+      "Chance for a shell that always crits and shreds ice", [0.1, 0.4], [1, 1]),  },
   {
     id: "siphon", name: "Soul Siphon", rarity: "decent", kind: "siphon", art: "tube", accent: "#c44dff",
     target: "front",
     desc: "Every kill it lands feeds the grid: bonus SP and a rising damage aura.",
     dmg: 96, upDmg: 14, ascDmg: 0, rate: 1.05, upRate: 0.02, ascRate: 0,
     spGain: 9, unlockFrags: 10,
-  },
+
+    awk1: awking("Soul Tithe", "sp",
+      "Every kill feeds far more SP into the grid", [0.35, 1], [3, 14]),
+    awk2: awking("Withering", "burn",
+      "Stolen souls linger and rot the target from inside", [0.25, 0.8], [0.5, 2.2]),  },
   {
     id: "quake", name: "Quake Pylon", rarity: "decent", kind: "quake", art: "spike", accent: "#ffd23f",
     target: "front",
@@ -408,14 +568,22 @@ export const TOWERS: TowerDef[] = [
     dmg: 150, upDmg: 22, ascDmg: 0, rate: 1.6, upRate: 0.03, ascRate: 0,
     splash: 190, upSplash: 12, ascSplash: 0,
     stun: 1.1, upStun: 0.15, ascStun: 0, unlockFrags: 13,
-  },
+
+    awk1: awking("Fault Line", "quake",
+      "Chance to stagger everything on the lane", [0.2, 0.7], [0.8, 2.6]),
+    awk2: awking("Aftershock", "heavy",
+      "Chance for a slam that lands twice as hard", [0.15, 0.55], [1, 4]),  },
   {
     id: "storm", name: "Storm Caller", rarity: "epic", kind: "storm", art: "beam", accent: "#a0e8ff",
     target: "front",
     desc: "Arc lightning that forks through five enemies at once.",
     dmg: 120, upDmg: 20, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
     chain: 5, upChain: 1, ascChain: 0, unlockFrags: 15,
-  },
+
+    awk1: awking("Thunderhead", "chain",
+      "Chance for the arc to fork into two extra enemies", [0.22, 0.7], [2, 6]),
+    awk2: awking("Skyfall", "heavy",
+      "Chance to call a bolt straight down on the target", [0.12, 0.5], [1.5, 6]),  },
   {
     id: "plague", name: "Plague Mortar", rarity: "epic", kind: "plague", art: "tube", accent: "#8effc4",
     target: "front",
@@ -424,7 +592,11 @@ export const TOWERS: TowerDef[] = [
     splash: 200, upSplash: 12, ascSplash: 0,
     burnPct: 0.55, upBurnPct: 0.05, ascBurnPct: 0, burnDur: 5,
     slow: 0.3, upSlow: 0.02, slowDur: 3, unlockFrags: 17,
-  },
+
+    awk1: awking("Pandemic", "burn",
+      "The rot spreads harder and the crater keeps burning", [0.25, 0.8], [0.7, 2.8]),
+    awk2: awking("Blight", "slow",
+      "Plague victims are left barely able to walk", [0.25, 0.8], [0.25, 0.55]),  },
   {
     id: "rail", name: "Railgun", rarity: "legendary", kind: "rail", art: "plasma", accent: "#7fe9ff",
     target: "front",
@@ -443,6 +615,56 @@ export const TOWERS: TowerDef[] = [
       chance: [0.3, 0.45, 0.6, 0.8, 1],
       mult: [1.5, 3, 5, 8, 13],
     },
+  },
+  // ---------------------------------------------------------------
+  // MYTHIC ARSENAL — four more legendaries for the endgame roster
+  // ---------------------------------------------------------------
+  {
+    id: "reaper", name: "Reaper's Toll", rarity: "legendary", kind: "reaper", art: "scythe", accent: "#c9a7ff",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Tolls for the wounded: shaves a fifth of the target's maximum HP and reaps anything already dying.",
+    dmg: 360, upDmg: 0, ascDmg: 0, rate: 1.5, upRate: 0.02, ascRate: 0,
+    pctHp: 0.2, upPctHp: 0.012, ascPctHp: 0,
+    awk1: awking("Last Rites", "execute",
+      "Chance to reap anything below a share of its maximum health outright", [0.1, 0.4], [0.12, 0.3]),
+    awk2: awking("Soul Tithe", "bounty",
+      "Every soul it reaps pays out extra gold", [0.3, 1], [0.5, 3]),
+  },
+  {
+    id: "prism", name: "Prism Array", rarity: "legendary", kind: "prism", art: "prism", accent: "#8ff0ff",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Splits one beam into four, each finding its own enemy and burning what it touches.",
+    dmg: 300, upDmg: 0, ascDmg: 0, rate: 0.9, upRate: 0.02, ascRate: 0,
+    multi: 4, chain: 2, upChain: 1,
+    awk1: awking("Refraction", "volley",
+      "Chance to split into extra beams", [0.2, 0.6], [1, 3]),
+    awk2: awking("Scorch Prism", "burn",
+      "Every beam leaves a searing burn on whatever it strikes", [0.3, 0.9], [0.5, 2.4]),
+  },
+  {
+    id: "aegis", name: "Aegis Core", rarity: "legendary", kind: "aegis", art: "aegis", accent: "#9fe8ff",
+    target: "none", exotic: true, unlockFrags: 1,
+    desc: "Fortress generator: a huge attack-speed and power aura, and it blasts anything that comes close.",
+    dmg: 0, upDmg: 0, ascDmg: 0, rate: 2, upRate: 0, ascRate: 0,
+    aura: true, aspd: 0.05, upAspd: 0.01, ascAspd: 0.02,
+    atkAura: 0.05, upAtkAura: 0.012, ascAtkAura: 0.02,
+    pulse: 260, upPulse: 24, pulseRate: 2.4,
+    awk1: awking("Bulwark Field", "aura",
+      "The field hardens: an even stronger aura for everything it covers", [1, 1], [0.6, 2.8]),
+    awk2: awking("Retribution", "quake",
+      "Chance for its pulse to stagger everything it hits", [0.25, 0.8], [0.6, 2]),
+  },
+  {
+    id: "hellgate", name: "Hellgate", rarity: "legendary", kind: "hellgate", art: "gate", accent: "#ff8c3d",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Rips open a burning gate on the lane: colossal damage and a lake of fire left behind.",
+    dmg: 700, upDmg: 0, ascDmg: 0, rate: 1.6, upRate: 0.02, ascRate: 0,
+    splash: 210, upSplash: 12, ascSplash: 0,
+    burnPct: 0.7, upBurnPct: 0.05, ascBurnPct: 0, burnDur: 5, lava: true,
+    awk1: awking("Gates Undone", "splash",
+      "Chance for the gate to tear open far wider", [0.2, 0.65], [0.4, 1.2]),
+    awk2: awking("Lake of Fire", "burn",
+      "The fire it leaves burns far hotter and longer", [0.3, 0.9], [0.6, 2.6]),
   },
 ];
 
@@ -698,7 +920,7 @@ export function runShopCost(item: RunShopItem, bought: number) {
   return Math.round(item.cost * Math.pow(item.step ?? 1, bought));
 }
 
-export type EnemyShape = "slime" | "runner" | "knight" | "mage" | "warlord" | "overlord";
+export type EnemyShape = "slime" | "runner" | "knight" | "mage" | "warlord" | "overlord" | "titan";
 
 export interface EnemyType {
   name: string;
@@ -727,6 +949,7 @@ export interface EnemyType {
  * shade) plus a `shape` tag that the renderer uses to pick a hand-drawn body,
  * so enemies read as distinct silhouettes instead of coloured polygons.
  */
+// eslint-disable-next-line prefer-const
 export const ENEMY_TYPES: EnemyType[] = [
   {
     name: "Slime",
@@ -826,6 +1049,32 @@ export const ENEMY_TYPES: EnemyType[] = [
   },
 ];
 
+/**
+ * The third boss. A walking siege engine with its own shape, the biggest health
+ * multiplier in the game and the full nine-skill kit.
+ */
+const TITAN: EnemyType = {
+  name: "Void Titan",
+  title: "Titan of the Last Rift",
+  color: "#22d3ee",
+  accent: "#d8fbff",
+  shade: "#0b4a5c",
+  shape: "titan",
+  hpMul: 34,
+  speed: 26,
+  r: 34,
+  armor: 0.3,
+  lives: 10,
+  gold: 90,
+  legs: 2,
+  bobRate: 0.5,
+};
+ENEMY_TYPES.push(TITAN);
+
+/** index of the Void Titan in ENEMY_TYPES, for the wave comp and the cutscene */
+export const TITAN_TYPE = ENEMY_TYPES.length - 1;
+
+
 /** types 4+ are bosses: they get a cutscene, a health bar and skills */
 export const BOSS_TYPE = 4;
 export const isBossType = (type: number) => type >= BOSS_TYPE;
@@ -875,6 +1124,7 @@ export const BOSS_SKILL_BY_ID: Record<BossSkillId, BossSkillRow> = Object.fromEn
 export const BOSS_KITS: Record<number, BossSkillId[]> = {
   4: ["summon", "blink", "ward", "enrage", "nullfield", "meteor"],
   5: ["summon", "blink", "ward", "enrage", "nullfield", "devour", "meteor", "chains", "warp"],
+  6: ["summon", "blink", "ward", "enrage", "nullfield", "devour", "meteor", "chains", "warp"],
 };
 
 export const bossKit = (type: number): BossSkillId[] => BOSS_KITS[type] || BOSS_KITS[BOSS_TYPE];
@@ -921,9 +1171,10 @@ export function waveComp(round: number): number[] {
     else if (round >= 3 && roll < 0.62) t = 1;
     out.push(t);
   }
-  // boss every 4th wave, and a second one once the waves get long
-  if (round % 4 === 0) out.push(round >= 16 ? 5 : 4);
-  if (round >= 16 && round % 4 === 0) out.push(4);
+  // boss every 4th wave; the roster escalates with the round count
+  if (round % 4 === 0) out.push(round >= 32 ? 6 : round >= 16 ? 5 : 4);
+  if (round >= 16 && round % 4 === 0) out.push(round >= 32 ? 5 : 4);
+  if (round >= 32 && round % 8 === 0) out.push(6);
   return out;
 }
 
@@ -1650,3 +1901,146 @@ export const GUILD_QUESTS: GuildQuest[] = [
   { id: "chests", name: "Lockpicker", desc: "Open chests of any grade", need: 6, xp: 260, coins: 70 },
 ];
 
+// ---------- mail ----------
+/**
+ * The mailbox. Messages are static content with an optional attachment; the save
+ * only records which ones have been read and which rewards were taken, so a new
+ * message can be shipped simply by adding a row here.
+ */
+export type MailKind = "system" | "reward" | "season" | "guild" | "gift";
+
+export interface MailItem {
+  id: string;
+  kind: MailKind;
+  from: string;
+  subject: string;
+  body: string;
+  /** shown when the mail is not claimable (a plain announcement) */
+  color: string;
+  /** optional reward, claimed with the CLAIM button */
+  reward?: { gold?: number; gems?: number; tokens?: number; frags?: number; chips?: number };
+  /** game-day stamp the message pretends to have been sent on */
+  age: string;
+}
+
+export const MAIL_KIND: Record<MailKind, { label: string; color: string; glyph: string }> = {
+  system: { label: "SYSTEM", color: "#8fb0ff", glyph: "⚙" },
+  reward: { label: "REWARD", color: "#ffcf4d", glyph: "★" },
+  season: { label: "SEASON", color: "#ff4fd8", glyph: "◈" },
+  guild: { label: "GUILD", color: "#3dff8e", glyph: "✉" },
+  gift: { label: "GIFT", color: "#35e0ff", glyph: "✦" },
+};
+
+export const MAIL: MailItem[] = [
+  {
+    id: "welcome",
+    kind: "gift",
+    from: "The Rift Watch",
+    subject: "Welcome to the Watch",
+    body: "Your first squad is paid for. Take these supplies and hold the line — the rift does not sleep.",
+    color: "#35e0ff",
+    reward: { gold: 4000, gems: 150, chips: 4 },
+    age: "day 1",
+  },
+  {
+    id: "season-open",
+    kind: "season",
+    from: "Season Command",
+    subject: "Season 1 has begun",
+    body: "Trophies now feed the season track. Every tier you pass hands over a crate — see Specials → Season.",
+    color: "#ff4fd8",
+    reward: { tokens: 5, gems: 100 },
+    age: "day 1",
+  },
+  {
+    id: "arsenal",
+    kind: "system",
+    from: "Quartermaster",
+    subject: "New towers unlocked",
+    body: "The Mythic Arsenal has been cleared for deployment. Reaper's Toll, Prism Array, Aegis Core and Hellgate are in the roster.",
+    color: "#c9a7ff",
+    reward: { frags: 6 },
+    age: "day 2",
+  },
+  {
+    id: "awakenings",
+    kind: "system",
+    from: "Awakened Council",
+    subject: "Every tower can awaken",
+    body: "Two awakenings per tower, five tiers each. Spend Magic Tokens at the Towers screen and watch your damage ceiling move.",
+    color: "#ffcf4d",
+    reward: { tokens: 8 },
+    age: "day 3",
+  },
+  {
+    id: "boss-warning",
+    kind: "system",
+    from: "Rift Watch",
+    subject: "Something bigger is coming",
+    body: "Scouts report a Titan walking the far side of the rift. It arrives after round 30. Bring crit damage.",
+    color: "#22d3ee",
+    age: "day 4",
+  },
+];
+
+export const MAIL_BY_ID: Record<string, MailItem> = Object.fromEntries(MAIL.map((m) => [m.id, m]));
+
+// ---------- season ----------
+/**
+ * The season track. Season points come off the trophy ladder (and a little off
+ * wins), each tier pays out once, and the season rolls over on a fixed
+ * 30-day cycle keyed to the epoch — so the numbering is the same for everyone.
+ */
+export const SEASON_LENGTH_DAYS = 30;
+export const SEASON_POINTS_PER_TROPHY = 1;
+export const SEASON_POINTS_PER_WIN = 12;
+
+export interface SeasonTier {
+  /** season points needed to unlock this tier */
+  at: number;
+  name: string;
+  color: string;
+  gems?: number;
+  gold?: number;
+  tokens?: number;
+  frags?: number;
+  chips?: number;
+}
+
+export const SEASON_TIERS: SeasonTier[] = [
+  { at: 0, name: "Scout", color: "#8fb0ff", gold: 1500, gems: 40 },
+  { at: 120, name: "Ranger", color: "#35e0ff", gold: 3000, gems: 60, chips: 1 },
+  { at: 300, name: "Warden", color: "#3dff8e", gold: 5000, gems: 90, chips: 2 },
+  { at: 560, name: "Captain", color: "#ffcf4d", gold: 8000, gems: 140, tokens: 3 },
+  { at: 900, name: "Commander", color: "#ffb324", gold: 12000, gems: 200, chips: 3 },
+  { at: 1350, name: "Champion", color: "#ff8c3d", gold: 18000, gems: 280, tokens: 6 },
+  { at: 1900, name: "Warlord", color: "#ff4fd8", gold: 26000, gems: 380, chips: 5 },
+  { at: 2600, name: "Ascendant", color: "#c44dff", gold: 36000, gems: 500, tokens: 10 },
+  { at: 3500, name: "Mythic", color: "#ff4fd8", gold: 50000, gems: 700, frags: 8 },
+  { at: 4600, name: "Rift Sovereign", color: "#ffcf4d", gold: 75000, gems: 1000, tokens: 20, frags: 12 },
+];
+
+/** which season we are in, counted from the epoch in 30-day blocks */
+export function seasonNumber(now = Date.now()): number {
+  return 1 + Math.floor(now / (SEASON_LENGTH_DAYS * 86400000));
+}
+
+/** 0..1 progress through the current season */
+export function seasonProgress(now = Date.now()): number {
+  const span = SEASON_LENGTH_DAYS * 86400000;
+  return (now % span) / span;
+}
+
+/** season points earned so far, from the trophy ladder */
+export function seasonPoints(trophies: number, wins: number): number {
+  return Math.max(0, Math.round(trophies)) * SEASON_POINTS_PER_TROPHY + Math.max(0, wins) * SEASON_POINTS_PER_WIN;
+}
+
+/** index of the highest tier the player has unlocked, -1 if none */
+export function seasonTierFor(points: number): number {
+  let idx = -1;
+  SEASON_TIERS.forEach((t, i) => {
+    if (points >= t.at) idx = i;
+  });
+  return idx;
+}

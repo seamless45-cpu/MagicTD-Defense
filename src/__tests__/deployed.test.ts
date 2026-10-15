@@ -94,9 +94,19 @@ describe("published build (index.html)", () => {
       "Missile Battery",
       "Toxic Sprayer",
       "CONGRATULATIONS",
-      "BATTLE LINEUP",
-      // the boot sequence, the merged crit stat and the boss skill kits
-      "TAP TO SKIP",
+      // the compact tower grid, the mailbox and the season track
+      "SUMMON ROTATION",
+      "MAILBOX",
+      "RIFT SEASON",
+      "Reaper's Toll",
+      "Prism Array",
+      "Aegis Core",
+      "Hellgate",
+      "Void Titan",
+      "Rift Sovereign",
+      "Lake of Fire",
+      // the boot sequence, the merged crit stat and the reworked boss cutscene
+      "ENGAGED",
       "Replay",
       "CRIT DAMAGE",
       "Rift Chains",

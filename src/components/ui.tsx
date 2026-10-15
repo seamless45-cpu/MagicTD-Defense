@@ -327,6 +327,41 @@ export function TowerIcon({
             <circle cx="15" cy="34" r="3.4" fill={a} />
           </g>
         );
+      case "scythe":
+        return (
+          <g>
+            <path d="M30 8c-14 1-22 9-23 20 6-7 13-10 21-10z" fill={c} stroke="#2a1a4a" strokeWidth="1.6" />
+            <path d="M13 26 30 42" stroke="#6b7f96" strokeWidth="3.4" strokeLinecap="round" />
+            <path d="M28 40l7 3-3-7z" fill={a} />
+            <circle cx="34" cy="14" r="3.4" fill={a} />
+          </g>
+        );
+      case "prism":
+        return (
+          <g>
+            <path d="M24 6 40 36H8z" fill="none" stroke={c} strokeWidth="2.6" strokeLinejoin="round" />
+            <path d="M24 6v30M16 21h16" stroke={a} strokeWidth="1.8" opacity="0.85" />
+            <path d="M24 20 6 34M24 20l18 14M24 20v20" stroke={a} strokeWidth="2.2" strokeLinecap="round" opacity="0.8" />
+            <circle cx="24" cy="20" r="3.6" fill="#fff" />
+          </g>
+        );
+      case "aegis":
+        return (
+          <g>
+            <path d="M24 5l15 6v13c0 9-6 15-15 19-9-4-15-10-15-19V11z" fill="#10243d" stroke={c} strokeWidth="2.6" strokeLinejoin="round" />
+            <path d="M24 12l8 3v8c0 5-3 8-8 11-5-3-8-6-8-11v-8z" fill="none" stroke={a} strokeWidth="2" />
+            <circle cx="24" cy="24" r="4" fill="#fff" opacity="0.9" />
+          </g>
+        );
+      case "gate":
+        return (
+          <g>
+            <path d="M11 42V22a13 13 0 0 1 26 0v20z" fill="#2b1206" stroke={c} strokeWidth="2.6" />
+            <path d="M17 42V23a7 7 0 0 1 14 0v19z" fill="none" stroke={a} strokeWidth="2.2" />
+            <path d="M24 30c2 4 4 5 4 8a4 4 0 0 1-8 0c0-3 3-4 4-8z" fill="#ffd23f" />
+            <path d="M8 42h32" stroke={c} strokeWidth="3" strokeLinecap="round" />
+          </g>
+        );
       case "beam":
         return (
           <g>

@@ -11,7 +11,13 @@ import {
   HERO_BY_ID,
   HERO_MAX_LEVEL,
   HERO_SHARD_COST,
+  MAIL,
+  MAIL_BY_ID,
   RARITY,
+  SEASON_TIERS,
+  seasonNumber,
+  seasonPoints,
+  seasonTierFor,
   TOWER_BY_ID,
   TROPHY_LOSS,
   TROPHY_WIN,
@@ -23,6 +29,8 @@ import {
   towerUpgradeCount,
   type ChipBag,
   type ChipId,
+  type MailItem,
+  type SeasonTier,
   type DailyReward,
   type GuildShopItem,
   type Rarity,
@@ -38,6 +46,24 @@ export interface TaskState {
   claimed: TaskId[];
   /** milestone indices already cashed in today */
   milestones: number[];
+}
+
+export interface MailState {
+  /** message ids already opened */
+  read: string[];
+  /** message ids whose attachment has been taken */
+  claimed: string[];
+  /** message ids the player deleted (they stay gone) */
+  deleted: string[];
+}
+
+export interface SeasonState {
+  /** the season number this progress belongs to */
+  number: number;
+  /** tier indices already collected this season */
+  claimed: number[];
+  /** season points banked from previous seasons (flavour only) */
+  best: number;
 }
 
 export interface GuildState {
@@ -85,6 +111,10 @@ export interface SaveData {
   lastEvent: string;
   /** daily objectives, reset with the 07:00 game-day */
   tasks: TaskState;
+  /** mailboxes: read/claimed ids, plus ids the player has deleted */
+  mail: MailState;
+  /** season track progress (season number + tier indices already collected) */
+  season: SeasonState;
   best: number;
   bestEndless: number;
   wins: number;
@@ -130,6 +160,14 @@ export function emptyTasks(day = ""): TaskState {
   return { day, prog: {}, claimed: [], milestones: [] };
 }
 
+export function emptyMail(): MailState {
+  return { read: [], claimed: [], deleted: [] };
+}
+
+export function emptySeason(number = seasonNumber()): SeasonState {
+  return { number, claimed: [], best: 0 };
+}
+
 export function emptyGuild(): GuildState {
   return { id: null, xp: 0, coins: 0, lastDonate: "", donatesToday: 0, lastChest: "", quests: {}, questsDone: [] };
 }
@@ -155,6 +193,8 @@ export function defaultSave(): SaveData {
     guild: emptyGuild(),
     lastEvent: "",
     tasks: emptyTasks(),
+    mail: emptyMail(),
+    season: emptySeason(),
     best: 0,
     bestEndless: 0,
     wins: 0,
@@ -198,6 +238,18 @@ function normalise(s: SaveData): SaveData {
   s.tasks.prog = s.tasks.prog && typeof s.tasks.prog === "object" ? s.tasks.prog : {};
   s.tasks.claimed = Array.isArray(s.tasks.claimed) ? (s.tasks.claimed as TaskId[]) : [];
   s.tasks.milestones = Array.isArray(s.tasks.milestones) ? s.tasks.milestones.map(Number) : [];
+  s.mail = { ...emptyMail(), ...(s.mail && typeof s.mail === "object" ? s.mail : {}) };
+  s.mail.read = Array.isArray(s.mail.read) ? s.mail.read.map(String) : [];
+  s.mail.claimed = Array.isArray(s.mail.claimed) ? s.mail.claimed.map(String) : [];
+  s.mail.deleted = Array.isArray(s.mail.deleted) ? s.mail.deleted.map(String) : [];
+  s.season = { ...emptySeason(), ...(s.season && typeof s.season === "object" ? s.season : {}) };
+  s.season.number = Number.isFinite(s.season.number) ? s.season.number : seasonNumber();
+  s.season.claimed = Array.isArray(s.season.claimed) ? s.season.claimed.map(Number) : [];
+  // a new season clears last season's collection state but keeps the record
+  if (s.season.number !== seasonNumber()) {
+    s.season.best = Math.max(s.season.best, seasonPointsFor(s));
+    s.season = emptySeason();
+  }
   s.streak = Math.max(0, Number.isFinite(s.streak) ? s.streak : 0);
   s.dailyStreak = Number.isFinite(s.dailyStreak) ? Math.max(0, Math.min(7, s.dailyStreak)) : 0;
   return s;
@@ -235,6 +287,108 @@ export function clearSave() {
   } catch {
     /* ignore */
   }
+}
+
+
+// ---------- mail ----------
+/** every message still sitting in the inbox, newest last */
+export function inbox(s: SaveData): MailItem[] {
+  return MAIL.filter((m) => !s.mail.deleted.includes(m.id));
+}
+
+/** ids whose attachment is still waiting to be collected */
+export function unclaimedMail(s: SaveData): string[] {
+  return MAIL.filter(
+    (m) => m.reward && !s.mail.claimed.includes(m.id) && !s.mail.deleted.includes(m.id)
+  ).map((m) => m.id);
+}
+
+/** how many messages are unopened or unclaimed — drives the badge */
+export function mailReady(s: SaveData): number {
+  return MAIL.filter(
+    (m) => !s.mail.deleted.includes(m.id) && (!s.mail.read.includes(m.id) || (m.reward && !s.mail.claimed.includes(m.id)))
+  ).length;
+}
+
+export function openMail(s: SaveData, id: string) {
+  if (!MAIL_BY_ID[id]) return;
+  if (!s.mail.read.includes(id)) s.mail.read = [...s.mail.read, id];
+}
+
+export function deleteMail(s: SaveData, id: string) {
+  if (!s.mail.deleted.includes(id)) s.mail.deleted = [...s.mail.deleted, id];
+}
+
+/** take a message's attachment. Returns the loot lines for the claim UI. */
+export function claimMail(s: SaveData, id: string): ChestLoot | null {
+  const m = MAIL_BY_ID[id];
+  if (!m || !m.reward || s.mail.claimed.includes(id) || s.mail.deleted.includes(id)) return null;
+  const loot: ChestLoot = { ...emptyLoot(), gold: m.reward.gold || 0, gems: m.reward.gems || 0, tokens: m.reward.tokens || 0 };
+  if (m.reward.chips) loot.chips = { basic: m.reward.chips, advanced: 0, elite: 0 };
+  if (m.reward.frags) {
+    // fragments are rolled off the rarity table, so a mail drop is never a dud
+    for (let i = 0; i < m.reward.frags; i++) pushFrag(loot.frags, randFrag(i % 3 === 0 ? 0.6 : 0.2), 1);
+  }
+  grantLoot(s, loot);
+  s.mail.claimed = [...s.mail.claimed, id];
+  openMail(s, id);
+  return loot;
+}
+
+/** collect every ready attachment at once */
+export function claimAllMail(s: SaveData): ChestLoot | null {
+  const ready = unclaimedMail(s);
+  if (!ready.length) return null;
+  let total: ChestLoot | null = null;
+  for (const id of ready) {
+    const l = claimMail(s, id);
+    if (l) total = total ? mergeLoot(total, l) : l;
+  }
+  return total;
+}
+
+// ---------- season rewards ----------
+/** points this account has earned on the season track */
+export function seasonPointsFor(s: SaveData): number {
+  return seasonPoints(s.trophies, s.wins);
+}
+
+/** the tier index the player has reached, -1 when the track has not started */
+export function seasonTier(s: SaveData): number {
+  return seasonTierFor(seasonPointsFor(s));
+}
+
+export function seasonClaimed(s: SaveData, idx: number): boolean {
+  return s.season.number === seasonNumber() && s.season.claimed.includes(idx);
+}
+
+/** how many season crates are sitting ready to collect */
+export function seasonReady(s: SaveData): number {
+  let n = 0;
+  const top = seasonTier(s);
+  for (let i = 0; i <= top; i++) if (!seasonClaimed(s, i)) n++;
+  return n;
+}
+
+export function claimSeasonTier(s: SaveData, idx: number): ChestLoot | null {
+  const t = SEASON_TIERS[idx] as SeasonTier | undefined;
+  if (!t || seasonClaimed(s, idx) || idx > seasonTier(s)) return null;
+  const loot: ChestLoot = { ...emptyLoot(), gold: t.gold || 0, gems: t.gems || 0, tokens: t.tokens || 0 };
+  if (t.chips) loot.chips = { basic: t.chips, advanced: 0, elite: 0 };
+  if (t.frags) for (let i = 0; i < t.frags; i++) pushFrag(loot.frags, randFrag(0.8), 1);
+  grantLoot(s, loot);
+  s.season.claimed = [...s.season.claimed, idx];
+  return loot;
+}
+
+/**
+ * Copy the season-claim state forward when a new season rolls around. Called on
+ * load; keeping it here means the UI never has to think about it.
+ */
+export function rollSeason(s: SaveData): boolean {
+  if (s.season.number === seasonNumber()) return false;
+  s.season = emptySeason(seasonNumber());
+  return true;
 }
 
 // ---------- the 07:00 game-day ----------

@@ -1,13 +1,26 @@
 import { useCallback, useEffect, useState } from "react";
-import { loadSave, persistSave, tasksReady, type SaveData } from "./game/save";
+import { loadSave, mailReady, persistSave, seasonReady, tasksReady, type SaveData } from "./game/save";
 import { sfx, setSfx, setVolume, initAudio } from "./game/audio";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
 import { LaunchIntro, LoadingScreen, Home, Specials, Guild, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
 import Towers from "./screens/Towers";
 import Battle from "./screens/Battle";
+import Mail from "./screens/Mail";
+import Season from "./screens/Season";
 
-type Screen = "intro" | "loading" | "home" | "shop" | "towers" | "specials" | "guild" | "battle" | "endless";
+type Screen =
+  | "intro"
+  | "loading"
+  | "home"
+  | "shop"
+  | "towers"
+  | "specials"
+  | "guild"
+  | "mail"
+  | "season"
+  | "battle"
+  | "endless";
 
 const MODES = {
   battle: { mode: "battle" as const, title: "BATTLE", rounds: "12 rounds" },
@@ -43,6 +56,26 @@ const NAV: { id: Screen; label: string; icon: React.ReactNode }[] = [
         <path d="M3 11 12 3l9 8" />
         <path d="M5 10v10h14V10" />
         <path d="M12 14l1.5 3H15l1.5 3" />
+      </svg>
+    ),
+  },
+  {
+    id: "mail",
+    label: "Mail",
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="m3.5 7 8.5 6 8.5-6" />
+      </svg>
+    ),
+  },
+  {
+    id: "season",
+    label: "Season",
+    icon: (
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 20V4M4 20h16" />
+        <path d="M8 20v-6M13 20V8M18 20v-9" />
       </svg>
     ),
   },
@@ -215,6 +248,8 @@ export default function App() {
         {screen === "towers" && <Towers save={save} mutate={mutate} push={push} />}
         {screen === "specials" && <Specials save={save} mutate={mutate} push={push} />}
           {screen === "guild" && <Guild save={save} mutate={mutate} push={push} />}
+          {screen === "mail" && <Mail save={save} mutate={mutate} push={push} />}
+          {screen === "season" && <Season save={save} mutate={mutate} push={push} />}
         </div>
       </div>
 
@@ -222,8 +257,15 @@ export default function App() {
       <div className="shrink-0 border-t border-[var(--line)] bg-[#0a0724]/80 px-2 pb-2 pt-1.5">
         <div className="mx-auto flex max-w-3xl items-center justify-around">
           {NAV.map((n) => {
-            // unclaimed daily tasks surface as a badge on the Specials tab
-            const badge = n.id === "specials" ? tasksReady(save) : 0;
+            // unclaimed things surface as a badge on their tab
+            const badge =
+              n.id === "specials"
+                ? tasksReady(save)
+                : n.id === "mail"
+                  ? mailReady(save)
+                  : n.id === "season"
+                    ? seasonReady(save)
+                    : 0;
             return (
               <button
                 key={n.id}
@@ -232,7 +274,7 @@ export default function App() {
               >
                 {n.icon}
                 {n.label}
-                {badge > 0 && <span className="badge-ping" data-testid="nav-task-badge">{badge}</span>}
+                {badge > 0 && <span className="badge-ping" data-testid={`nav-badge-${n.id}`}>{badge}</span>}
               </button>
             );
           })}

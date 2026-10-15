@@ -29,6 +29,18 @@ function pointer(type: string, target: EventTarget, x = 0, y = 0) {
   target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
 }
 
+/**
+ * Tap a tower-grid cell. The grid opens the tower sheet from a pointerup that
+ * never moved, so a plain `click` would not trigger it.
+ */
+function tapCell(id: string) {
+  const cell = document.querySelector(`[data-tower="${id}"]`) as HTMLElement;
+  if (!cell) throw new Error(`tower cell ${id} not found`);
+  pointer("pointerdown", cell, 200, 300);
+  pointer("pointerup", window, 200, 300);
+  return cell;
+}
+
 function saved(): SaveData {
   return { ...defaultSave(), ...(JSON.parse(localStorage.getItem("magictd_save_v1") || "{}") as SaveData) };
 }
@@ -99,7 +111,7 @@ describe("MagicTD app shell", () => {
     expect(document.body.textContent).toContain("Common Chest");
 
     click(byText("button", "Towers")!);
-    await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
     expect(document.body.textContent).toContain("Ascent All");
 
     click(byText("button", "Specials")!);
@@ -119,6 +131,14 @@ describe("MagicTD app shell", () => {
 
     click(byText("button", "Guild")!);
     await waitFor(() => byText("div", "Guild Hall"), "guild screen");
+
+    click(byText("button", "Mail")!);
+    await waitFor(() => byText("div", "MAILBOX"), "mail screen");
+    expect(document.body.textContent).toContain("Welcome to the Watch");
+
+    click(byText("button", "Season")!);
+    await waitFor(() => byText("div", "RIFT SEASON"), "season screen");
+    expect(document.body.textContent).toContain("Scout");
 
     click(byText("button", "Home")!);
     await waitFor(() => byText("div", "Command Center"), "home screen again");
@@ -206,12 +226,18 @@ describe("Settings", () => {
   it("stacks several toasts at once (regression: duplicate toast keys)", async () => {
     await mountApp();
     click(byText("button", "Towers")!);
-    await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
 
-    click(byText("button", "Remove from lineup")!);
+    click(document.querySelector('[data-testid="chip-x-arrow"]') as HTMLElement);
     await waitFor(() => !saved().lineup.includes("arrow"), "arrow removed");
-    click(byText("button", "Add to lineup")!);
+    tapCell("arrow");
+    const pv = await waitFor(
+      () => document.querySelector('[data-testid="tower-preview"]') as HTMLElement,
+      "preview panel"
+    );
+    click(Array.from(pv.querySelectorAll("button")).find((b) => (b.textContent || "").includes("Add to Lineup"))!);
     await waitFor(() => saved().lineup.includes("arrow"), "arrow re-added");
+    click(byText("button", "Close")!);
 
     await waitFor(() => all(".toast").length >= 2, "two toasts visible together");
     noErrors();
@@ -345,8 +371,8 @@ describe("Crit damage", () => {
     expect(before).toBe("60%");
     expect(upgradesBefore).toBe(0);
 
-    // buy one upgrade on the arrow tower from its preview panel
-    click(byText("button", "Preview & Upgrade")!);
+    // buy one upgrade on the arrow tower from its sheet (a tap on the grid cell)
+    tapCell("arrow");
     await waitFor(() => document.querySelector('[data-testid="tower-preview"]'), "preview panel");
     const upBtn = all("button").find((b) => /^Upgrade/.test((b.textContent || "").trim()))!;
     expect(upBtn, "upgrade button").toBeTruthy();
@@ -456,15 +482,19 @@ describe("Towers", () => {
     });
     await mountApp();
     click(byText("button", "Towers")!);
-    await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
 
-    const card = () =>
-      all(".tile").find((p) => (p.textContent || "").includes("Arrow") && (p.textContent || "").includes("Preview"))!;
-    // the level badge in the card corner shows the menu level
-    expect(card().querySelector(".badge-num")!.textContent).toBe("1");
+    const cell = () => document.querySelector('[data-tower="arrow"]') as HTMLElement;
+    // the grid cell is an icon with the level underneath and a rarity outline
+    expect(cell().className).toContain("tw-cell");
+    expect(cell().querySelector(".tw-cell-lv")!.textContent).toBe("LV 1");
+    // normal-rarity outline (#9fb4c7 as the browser normalises it)
+    expect(cell().getAttribute("style")).toContain("rgb(159, 180, 199)");
+    // no button anywhere on the tile
+    expect(cell().querySelectorAll("button")).toHaveLength(0);
 
     const before = saved();
-    click(byText("button", "Preview & Upgrade")!);
+    tapCell("arrow");
     const pv = await waitFor(
       () => document.querySelector('[data-testid="tower-preview"]') as HTMLElement,
       "tower preview panel"
@@ -489,15 +519,20 @@ describe("Towers", () => {
 
     click(byText("button", "Close")!);
     await waitFor(() => !document.querySelector('[data-testid="tower-preview"]'), "preview closed");
-    expect(card().querySelector(".badge-num")!.textContent).toBe("2");
+    await waitFor(() => cell().querySelector(".tw-cell-lv")!.textContent === "LV 2", "grid shows the new level");
 
-    click(byText("button", "Remove from lineup")!);
-    await waitFor(() => !saved().lineup.includes("arrow"), "arrow removed from lineup");
-    expect(byText("button", "Add to lineup")).toBeTruthy();
-    // fragments are shown as a gem pill under each card (9 owned, 1 spent on the upgrade)
-    const fragPill = card().querySelector(".pill-dark")!;
-    expect(fragPill.textContent).toContain("8");
-    expect(fragPill.textContent).toContain("1 next"); // level 2 costs 1 fragment
+    // the rotation chip's ✕ removes the tower, the sheet puts it back
+    click(document.querySelector('[data-testid="chip-x-arrow"]') as HTMLElement);
+    await waitFor(() => !saved().lineup.includes("arrow"), "arrow removed from the rotation");
+    tapCell("arrow");
+    await waitFor(() => document.querySelector('[data-testid="tower-preview"]'), "sheet reopened");
+    click(byText("button", "Add to Lineup")!);
+    await waitFor(() => saved().lineup.includes("arrow"), "arrow back in the rotation");
+    click(byText("button", "Close")!);
+    await waitFor(() => !document.querySelector('[data-testid="tower-preview"]'), "sheet closed again");
+    // fragments are shown in the cell itself (9 owned, 1 spent on the upgrade)
+    expect(cell().querySelector(".tw-cell-frag")!.textContent).toContain("8");
+    expect(cell().querySelector(".tw-cell-frag")!.textContent).toContain("/1"); // level 2 costs 1 fragment
 
     noErrors();
   });
@@ -511,35 +546,34 @@ describe("Towers", () => {
     });
     await mountApp();
     click(byText("button", "Towers")!);
-    await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
 
-    const slots = all(".slot-dash");
-    expect(slots).toHaveLength(6);
-    slots.forEach((el, i) => {
+    const chips = all(".tw-chip");
+    expect(chips.length).toBeGreaterThanOrEqual(3);
+    chips.forEach((el, i) => {
       const left = 100 + i * 100;
       el.getBoundingClientRect = () =>
-        ({ left, top: 0, right: left + 90, bottom: 70, width: 90, height: 70, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+        ({ left, top: 0, right: left + 90, bottom: 60, width: 90, height: 60, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
     });
 
-    const card = all(".tile").find((p) => (p.textContent || "").includes("Gatling"))!;
-    pointer("pointerdown", card, 20, 400);
-    pointer("pointermove", window, 345, 35); // centre of slot 2
-    pointer("pointerup", window, 345, 35);
+    pointer("pointerdown", document.querySelector('[data-tower="gatling"]') as HTMLElement, 20, 400);
+    pointer("pointermove", window, 250, 30); // centre of chip 1
+    pointer("pointerup", window, 250, 30);
 
-    await waitFor(() => saved().lineup[2] === "gatling", "gatling dropped into slot 2");
+    await waitFor(() => saved().lineup[1] === "gatling", "gatling dropped into rotation slot 1");
     noErrors();
   });
 
   it("refuses to unlock a tower without enough fragments", async () => {
     await mountApp();
     click(byText("button", "Towers")!);
-    await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
 
-    const lockCard = all(".tile").find(
-      (p) => (p.textContent || "").includes("Lightning Princess") && (p.textContent || "").includes("Unlock with")
-    )!;
-    expect(lockCard, "locked Lightning Princess card").toBeTruthy();
-    click(Array.from(lockCard.querySelectorAll("button")).find((b) => /Preview/.test(b.textContent || ""))!);
+    const lockCell = document.querySelector('[data-tower="lightning"]') as HTMLElement;
+    expect(lockCell, "locked Lightning Princess cell").toBeTruthy();
+    expect(lockCell.getAttribute("data-locked")).toBe("1");
+    expect(lockCell.querySelector(".tw-cell-lv")!.textContent).toBe("LOCKED");
+    tapCell("lightning");
 
     const pv = await waitFor(
       () => document.querySelector('[data-testid="tower-preview"]') as HTMLElement,
@@ -564,10 +598,9 @@ describe("Awakenings", () => {
     });
     await mountApp();
     click(byText("button", "Towers")!);
-    await waitFor(() => byText("div", "BATTLE LINEUP"), "tower screen");
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
 
-    const card = all(".tile").find((p) => (p.textContent || "").includes("Lightning Princess"))!;
-    click(Array.from(card.querySelectorAll("button")).find((b) => /Preview/.test(b.textContent || ""))!);
+    tapCell("lightning");
     const pv = await waitFor(
       () => document.querySelector('[data-testid="tower-preview"]') as HTMLElement,
       "preview panel"
@@ -720,9 +753,28 @@ describe("Battle", () => {
     expect(document.body.textContent).toContain("1/12");
 
     // the field starts EMPTY now: the opening SP buys four summons
-    const summon = byText("button", "SUMMON")!;
-    const tilesOnField = () => all("[data-slot]").filter((el) => el.textContent && !el.textContent.includes("EMPTY")).length;
-    expect(tilesOnField()).toBe(0);
+    const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
+    expect(summon, "summon button").toBeTruthy();
+    const towersOnBoard = () =>
+      Number((document.querySelector('[data-testid="towers-on-board"]')?.textContent || "").replace(/[^\d]/g, ""));
+    expect(towersOnBoard()).toBe(0);
+
+    // the bottom bar is FIXED: one card per rotation tower, all of them already
+    // present before a single tower is summoned
+    const bar = document.querySelector('[data-testid="ascent-bar"]') as HTMLElement;
+    expect(bar, "ascent bar").toBeTruthy();
+    const barIds = () => all('[data-testid="ascent-bar"] [data-tower]').map((el) => el.getAttribute("data-tower"));
+    const fixedIds = barIds();
+    const barCount = fixedIds.length;
+    expect(barCount).toBeGreaterThan(0);
+    expect(barCount).toBeLessThanOrEqual(6);
+    for (const id of barIds()) {
+      const card = document.querySelector(`[data-testid="ascent-bar"] [data-tower="${id}"]`) as HTMLElement;
+      expect(card.textContent).toContain("NOT DEPLOYED");
+    }
+    // neither the retired top strip nor the old ascent token came back
+    expect(document.querySelector('[data-testid="deck-strip"]')).toBeNull();
+    expect(document.querySelector('[data-testid="ascent-token"]')).toBeNull();
 
     const spNow = () =>
       Number((document.querySelector('[data-testid="sp-chip"]')?.textContent || "").replace(/[^\d]/g, ""));
@@ -733,10 +785,24 @@ describe("Battle", () => {
       click(summon);
       await waitFor(() => spNow() < spBefore, `summon ${i + 1} spent SP`);
       await waitFor(() => (document.body.textContent || "").includes("deployed!"), `summon ${i + 1} toast`);
-      await waitFor(() => tilesOnField() === i + 1, `tower ${i + 1} deployed onto the grid`);
+      await waitFor(() => towersOnBoard() === i + 1, `tower ${i + 1} deployed onto the grid`);
     }
     // exactly four fit in the starting budget
     expect(spNow()).toBeLessThan(120);
+
+    // spawning never moved or duplicated the bar: same cards, same order
+    expect(barIds()).toEqual(fixedIds);
+    expect(barIds().length).toBe(barCount);
+    // and the cards that own a tower show its live battle level
+    const deployed = barIds().filter((id) => {
+      const card = document.querySelector(`[data-testid="ascent-bar"] [data-tower="${id}"]`) as HTMLElement;
+      return !card.textContent!.includes("NOT DEPLOYED");
+    });
+    expect(deployed.length).toBeGreaterThan(0);
+    for (const id of deployed) {
+      const card = document.querySelector(`[data-testid="ascent-bar"] [data-tower="${id}"]`) as HTMLElement;
+      expect(card.textContent).toMatch(/Lv 1/);
+    }
 
     // wave 1 begins ~7s after deploy phase starts
     const enemiesOut = await waitFor(() => {
@@ -848,7 +914,15 @@ describe("Battle", () => {
     // the boss that leads an early round is the Warlord
     expect(text).toContain("WARLORD");
     expect(text).toContain("ROUND 4");
-    expect(text).toContain("TAP TO CONTINUE");
+    expect(text).toContain("TAP TO SKIP");
+    // the reworked card carries the boss title and a live stat block
+    expect(text).toContain("CRIMSON WARLORD");
+    expect(text).toContain("HEALTH");
+    expect(text).toContain("ARMOUR");
+    expect(text).toContain("LIVES");
+    expect(text).toContain("BOUNTY");
+    // and the skills the kit advertises are real rows from the shared table
+    expect(text).toContain("Rift Call");
     // its whole skill kit is advertised
     for (const skill of ["Rift Call", "Void Step", "Bulwark", "Blood Frenzy"]) {
       expect(text, skill).toContain(skill);
@@ -940,28 +1014,39 @@ describe("Battle", () => {
     noErrors();
   });
 
-  it("ascends every tower of the same type with one button press", async () => {
+  it("ascends a tower type from the fixed bottom bar without the bar moving", async () => {
     await mountApp();
     startMode("Battle");
     await waitFor(() => byText("button", "SUMMON"), "battle HUD");
 
-    const summon = byText("button", "SUMMON")!;
+    const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
     for (let i = 0; i < 4; i++) {
       click(summon);
       await sleep(90);
     }
     await waitFor(
-      () => all("[data-slot]").filter((el) => !(el.textContent || "").includes("EMPTY")).length === 4,
+      () => Number((document.querySelector('[data-testid="towers-on-board"]')!.textContent || "0").replace(/[^\d]/g, "")) === 4,
       "four towers deployed"
     );
 
-    // the drag token is gone — each slot owns its own ascend button
+    // the drag token is gone — the bar is fixed and owns every ascend button
     expect(document.querySelector('[data-testid="ascent-token"]')).toBeNull();
-    const btn0 = () => document.querySelector('[data-testid="ascend-0"]') as HTMLButtonElement;
-    expect(btn0(), "ascent button on slot 0").toBeTruthy();
-    expect(btn0().textContent).toContain("ASCENT");
+    const barIds = () => all("[data-testid=\"ascent-bar\"] [data-tower]").map((el) => el.getAttribute("data-tower"));
+    const fixedIds = barIds();
+
+    // find the first card that actually owns a tower
+    const owned = fixedIds.filter((id) => {
+      const card = document.querySelector(`[data-testid="ascent-bar"] [data-tower="${id}"]`) as HTMLElement;
+      return !card.textContent!.includes("NOT DEPLOYED");
+    });
+    expect(owned.length).toBeGreaterThan(0);
+    const idx = fixedIds.indexOf(owned[0]);
+    const card = () => document.querySelector(`[data-testid="ascent-bar"] [data-tower="${fixedIds[idx]}"]`) as HTMLElement;
+    const btn = () => document.querySelector(`[data-testid="ascend-${idx}"]`) as HTMLButtonElement;
+    expect(btn(), "ascent button").toBeTruthy();
+    expect(btn().textContent).toContain("ASCENT");
     // the opening SP all went into the four summons, so the button locks out
-    expect(btn0().disabled).toBe(true);
+    expect(btn().disabled).toBe(true);
 
     // stock up from the run shop (Mana Battery: 60 gold -> +150 SP)
     click(document.querySelector('[data-testid="battle-shop"]') as HTMLElement);
@@ -970,7 +1055,7 @@ describe("Battle", () => {
       "run shop modal"
     );
     click(Array.from(shop.querySelectorAll("button")).find((b) => (b.textContent || "").includes("60"))!);
-    await waitFor(() => !btn0().disabled, "ascent affordable again");
+    await waitFor(() => !btn().disabled, "ascent affordable again");
     click(byText("button", "Back to battle")!);
     await waitFor(() => !document.querySelector('[data-testid="run-shop"]'), "shop closed");
 
@@ -978,19 +1063,16 @@ describe("Battle", () => {
       Number((document.querySelector('[data-testid="sp-chip"]')?.textContent || "").replace(/[^\d]/g, ""));
     const spBefore = spNow();
 
-    click(btn0());
-    await waitFor(
-      () => ((document.querySelector('[data-slot="0"]') as HTMLElement).textContent || "").includes("Lv 2/6"),
-      "slot 0 ascended"
-    );
+    click(btn());
+    await waitFor(() => (card().textContent || "").includes("Lv 2/6"), "the tower type ascended");
     expect(spNow()).toBeLessThan(spBefore);
 
-    // every deployed copy of that tower type moved up together
-    const name = ((document.querySelector('[data-slot="0"]') as HTMLElement).textContent || "").split("Lv")[0].trim();
-    for (const slot of all("[data-slot]")) {
-      const text = slot.textContent || "";
-      if (name && text.includes(name) && !text.includes("EMPTY")) expect(text).toContain("Lv 2/6");
-    }
+    // the bar is byte-for-byte the same set of cards afterwards
+    expect(barIds()).toEqual(fixedIds);
+    // and summoning more towers still cannot duplicate a card
+    click(summon);
+    await sleep(120);
+    expect(barIds()).toEqual(fixedIds);
 
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
@@ -1002,23 +1084,132 @@ describe("Battle", () => {
     startMode("Battle");
     await waitFor(() => byText("button", "SUMMON"), "battle HUD");
 
-    const summon = byText("button", "SUMMON")!;
+    const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
     for (let i = 0; i < 3; i++) {
       click(summon);
       await sleep(90);
     }
     await waitFor(() => document.querySelector('[data-testid="ascend-0"]'), "ascent button");
 
-    const slot0 = () => document.querySelector('[data-slot="0"]') as HTMLElement;
+    // the bar slot to press is the first one that owns a deployed tower
+    const ids = all('[data-testid="ascent-bar"] [data-tower]').map((el) => el.getAttribute("data-tower")!);
+    const idx = ids.findIndex((id) => {
+      const card = document.querySelector(`[data-testid="ascent-bar"] [data-tower="${id}"]`) as HTMLElement;
+      return !card.textContent!.includes("NOT DEPLOYED");
+    });
+    expect(idx, "a bar slot owning a tower").toBeGreaterThanOrEqual(0);
+    const card = () => document.querySelector(`[data-testid="ascent-bar"] [data-tower="${ids[idx]}"]`) as HTMLElement;
+    const btn = () => document.querySelector(`[data-testid="ascend-${idx}"]`) as HTMLButtonElement;
+
     // press while affordable — SP is the only limiter
     for (let i = 0; i < 8; i++) {
-      const btn = document.querySelector('[data-testid="ascend-0"]') as HTMLButtonElement;
-      if (!btn || btn.disabled) break;
-      click(btn);
+      if (!btn() || btn().disabled) break;
+      click(btn());
       await sleep(80);
     }
-    expect(slot0().textContent || "").toMatch(/Lv [2-6]\/6/);
+    expect(card().textContent || "").toMatch(/Lv [2-6]/);
+    // and it is still mounted, still in the same slot, once it tops out
+    expect(document.querySelector(`[data-testid="ascend-${idx}"]`), "maxed card still mounted").toBeTruthy();
+    expect(all('[data-testid="ascent-bar"] [data-tower]').map((el) => el.getAttribute("data-tower"))).toEqual(ids);
     noErrors();
   });
 
+});
+
+describe("Mail", () => {
+  it("lists the inbox, reads a message, collects its attachment and deletes it", async () => {
+    await mountApp();
+    click(byText("button", "Mail")!);
+    await waitFor(() => byText("div", "MAILBOX"), "mail screen");
+
+    // the static inbox is listed newest-first
+    const rows = all("[data-mail]");
+    expect(rows.length).toBe(5);
+    expect(document.body.textContent).toContain("Welcome to the Watch");
+    expect(document.body.textContent).toContain("Something bigger is coming");
+
+    // the nav badge counts unread + unclaimed mail
+    expect(document.querySelector('[data-testid="nav-badge-mail"]')).toBeTruthy();
+
+    // open the welcome message: it has an attachment
+    const welcome = document.querySelector('[data-mail="welcome"]') as HTMLElement;
+    click(welcome);
+    await waitFor(() => saved().mail.read.includes("welcome"), "welcome marked read");
+    await waitFor(() => document.querySelector('[data-testid="mail-claim"]'), "claim button");
+    expect(document.body.textContent).toContain("ATTACHED");
+
+    const goldBefore = saved().gold;
+    const gemsBefore = saved().gems;
+    click(document.querySelector('[data-testid="mail-claim"]') as HTMLElement);
+    await waitFor(() => saved().mail.claimed.includes("welcome"), "welcome claimed");
+    expect(saved().gold).toBe(goldBefore + 4000);
+    expect(saved().gems).toBe(gemsBefore + 150);
+
+    // the claim plays the reward card, which is dismissed to get back to the inbox
+    await waitFor(() => byText("div", "WELCOME TO THE WATCH"), "claim card");
+    click(document.querySelector('[data-testid="claim-collect"]') as HTMLElement);
+    await waitFor(() => !byText("div", "WELCOME TO THE WATCH"), "claim card dismissed");
+
+    // deleting the message takes it out of the inbox
+    click(document.querySelector('[data-mail="welcome"]') as HTMLElement);
+    await waitFor(() => document.querySelector('[data-testid="mail-delete"]'), "delete button");
+    click(document.querySelector('[data-testid="mail-delete"]') as HTMLElement);
+    await waitFor(() => saved().mail.deleted.includes("welcome"), "welcome deleted");
+    await waitFor(() => !document.querySelector('[data-mail="welcome"]'), "row removed from the list");
+
+    noErrors();
+  }, 30000);
+
+  it("collects every ready attachment in one press", async () => {
+    await mountApp();
+    click(byText("button", "Mail")!);
+    await waitFor(() => byText("div", "MAILBOX"), "mail screen");
+
+    const ready = document.querySelector('[data-testid="mail-claim-all"]') as HTMLButtonElement;
+    expect(ready.disabled).toBe(false);
+    expect(ready.textContent).toContain("COLLECT ALL");
+
+    const before = saved();
+    click(ready);
+    await waitFor(() => saved().mail.claimed.length >= 4, "every attachment claimed");
+    expect(saved().gold).toBeGreaterThan(before.gold);
+    expect(saved().tokens).toBeGreaterThan(before.tokens);
+    // nothing is left waiting, so the button locks out
+    await waitFor(
+      () => (document.querySelector('[data-testid="mail-claim-all"]') as HTMLButtonElement).disabled,
+      "collect-all disabled"
+    );
+    noErrors();
+  }, 30000);
+});
+
+describe("Season", () => {
+  it("derives season points from the ladder and pays a tier", async () => {
+    // 600 trophies + 5 wins = 600 + 60 = 660 points -> tiers 0..3 (560) unlocked
+    persistSave({ ...defaultSave(), trophies: 600, wins: 5 });
+    await mountApp();
+    click(byText("button", "Season")!);
+    await waitFor(() => byText("div", "RIFT SEASON"), "season screen");
+
+    expect(document.querySelector('[data-testid="season-points"]')!.textContent).toContain("660");
+    expect(document.querySelector('[data-testid="season-tier-name"]')!.textContent).toContain("CAPTAIN");
+    // four crates are ready, the rest are locked out
+    const tiers = all("[data-tier]");
+    expect(tiers.length).toBe(10);
+    expect(tiers.filter((t) => t.getAttribute("data-ready") === "1").length).toBe(4);
+    expect((document.querySelector('[data-testid="season-tier-9"]') as HTMLButtonElement).disabled).toBe(true);
+
+    const goldBefore = saved().gold;
+    click(document.querySelector('[data-testid="season-tier-0"]') as HTMLElement);
+    await waitFor(() => saved().season.claimed.includes(0), "tier 0 claimed");
+    expect(saved().gold).toBe(goldBefore + 1500);
+    await waitFor(() => document.querySelector('[data-testid="claim-collect"]'), "season claim card");
+    click(document.querySelector('[data-testid="claim-collect"]') as HTMLElement);
+    await waitFor(() => !byText("div", "SCOUT"), "claim card dismissed");
+
+    // collecting everything left over clears the badge
+    click(document.querySelector('[data-testid="season-claim-all"]') as HTMLElement);
+    await waitFor(() => saved().season.claimed.length === 4, "all reached tiers claimed");
+    noErrors();
+  }, 30000);
 });

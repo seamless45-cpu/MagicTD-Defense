@@ -59,9 +59,16 @@ Every 4th round a boss leads the wave in:
 | --- | --- | --- |
 | **Warlord** | rounds 4, 8, 12… | 5 lives, 15× HP, 20% armour |
 | **Rift Overlord** | round 16+ every 4th | 8 lives, 26× HP, 28% armour, purple |
+| **Void Titan** | round 32+ every 4th (plus an extra one every 8th) | 10 lives, 34× HP, 30% armour, an armoured siege colossus that walks in with **all nine skills** |
 
-Bosses arrive with a **cutscene** (WARNING card, name, round, skill kit — tap to continue; the sim
-holds while it plays), then fight with a **health bar** and four skills, each announced in the arena:
+Bosses arrive with a **cutscene**: scanning bars sweep the screen while three rings spiral in, the
+boss's own silhouette rises behind the name (drawn per shape, in its colours), and the card prints
+the boss **title**, the live **stat block** (health multiplier, armour, lives, bounty) and its whole
+skill kit chip by chip. A countdown badge ticks the last three seconds; when it hits zero the rings
+**lock on** — the screen flashes the boss colour, the silhouette snaps to full brightness and the
+readout flips to **ENGAGED** as the run resumes. Tap anywhere to skip. The sim holds while it plays.
+
+Bosses then fight with a **health bar** and their kit, each skill announced in the arena:
 
 | Skill | Effect |
 | --- | --- |
@@ -88,20 +95,21 @@ Heroes level up to 10 with gold — each level adds 30% ability power and shaves
 | **Overdrive** | 35s | Supercharges every tower: +150% attack speed and +50% damage for 8s. |
 | **Thunder God** | 20s | Lightning bolts walk down the lane, chaining between everything they touch and stunning them. |
 
-- **Summon:** tap **SUMMON** (top-left) to drop a random unlocked tower straight onto a free build
-  cell — no dragging. SP cost rises with every summon, and a full grid converts the summon into a
-  bonus point on a random tower. The path (left column, right column, bottom row) is blocked, so
-  there are 15 build cells.
+- **Summon:** tap **SUMMON** (top-left) to drop a tower straight onto a **random free build cell** —
+  no dragging, and no "summon plus upgrade" bundle: a summon is only ever a new tower. SP cost rises
+  with every summon. Only when the board is genuinely full does the summon **fuse the largest pair of
+  same-point towers** to open a cell, which is announced in a toast. The path (left column, right
+  column, bottom row) is blocked, so there are 15 build cells.
 - **Arena zoom:** the − / % / + control sits in the bottom-left of the arena; zoom from fitted up to
   2× and the view scrolls when it overflows. The setting is remembered.
 - **Merge:** drag a placed tower onto another tower with the **same point count** to fuse them into
   a random tower with +1 point (max 8). Higher points = faster firing and +30% damage per point.
 - **Points:** placed lineup towers pulse points to each other as they shoot (+1 point every 3rd
   volley) — lineup order is the pulse ring.
-- **Ascend:** each slot holds a tower, not a button. Drag the gold **ASCENT** token from the left of
-  the bottom bar into a tower's slot (or tap the token, then tap a slot) to buy a battle level
-  (max 6, ×1.55 damage each). Dropping it on a tower on the grid works too.
-- **Summon:** spend SP for a random unlocked tower in an empty lineup slot. Cost rises each time.
+- **Ascend:** the bottom bar is **fixed** — six cards, one per rotation tower, in rotation order.
+  Spawning towers changes the copy count and the battle level on a card, never the card set, so the
+  buttons can never duplicate or shift under your thumb. Press **ASCENT** on the card that owns the
+  tower type you want to push (max battle level 6, ×1.55 damage each).
 - **Battle shop:** spend the gold you earn during a run (gold is a run currency, spent in the
   shop and paid out at the end of the run).
 - **Battle SFX / Rich FX / Damage Numbers / Screen Shake / Battlefield Guides / Auto-Start Waves /
@@ -118,11 +126,17 @@ first wave arrives. Towers are never placed for free, and **towers no longer ear
 own** — points only come from merging two equally levelled towers or buying Point Surge in the run
 shop.
 
-**Ascent is a button, not a drag.** Every deployed tower card in the bottom bar carries its own
-`ASCENT` button (showing the SP price and how many copies it will upgrade). One press upgrades
-**every deployed tower of that same type at once**, so a family always shares one battle level.
-Summoning and ascending have separate SP price ladders, so spamming summons never price-gouges
-your upgrades.
+Towers spawn **only** through the random-grid summon — there is no combined spawn-and-upgrade path,
+and no top-of-screen board duplicating the loadout: the HUD is a single compact row of currency
+pills (SP, gold, lives, wave, enemies left, towers deployed, merged crit, run shop).
+
+**The bottom bar is fixed.** It renders exactly one card per rotation tower (six max), always in the
+same order, whether or not that tower is on the board — an undeployed card reads `NOT DEPLOYED`. Each
+card carries its own **ASCENT** button showing the SP price and how many copies it will upgrade; one
+press upgrades **every deployed tower of that same type at once**, so a family always shares one
+battle level. Because the bar is built from the rotation rather than from the board, summoning and
+ascending cannot duplicate, reorder or drop a button. Summoning and ascending have separate SP price
+ladders, so spamming summons never price-gouges your upgrades.
 
 ## Progression
 
@@ -220,26 +234,34 @@ counters, a roster pulled from the ladder, and a chat you can post in.
 | Missile Battery | Epic | Four homing rockets with splash damage |
 | Dragon's Maw | Legendary | Heavy splash + burn; every kill stacks damage (exotic: Inferno Roar, Molten Carapace) |
 | Sunforge | Legendary | Hits the whole field with burning flares (exotic: Supernova, Solar Wind) |
+| Reaper's Toll | Legendary | Shaves 20% of the target's max HP per hit and reaps anything under the execute line (Last Rites, Soul Tithe) |
+| Prism Array | Legendary | Splits one beam into four that each find their own enemy, then burns them (Refraction, Scorch) |
+| Aegis Core | Legendary | Support: fires nothing, projects a huge attack-speed/power aura and pulses area damage on a timer (Bulwark Field, Retribution) |
+| Hellgate | Legendary | Rips a burning gate open on the lane: colossal splash damage and a **lake of fire** left burning behind it (Gates Undone, Lake of Fire) |
 
-## Gift codes
+## Mailbox
 
-Players redeem codes in **Settings → GIFT CODES** (they are matched ignoring case, spaces and
-dashes, and each code can only be used once per save).
+Every account has an inbox of **five static messages** — a welcome gift, the season opener, a note on
+the new arsenal, one on awakenings and a titan warning from the scouts. Messages carry an optional
+attachment (gold, gems, magic tokens, chip modules or rolled tower fragments); **COLLECT ALL** takes
+every waiting attachment in one press and merges the loot into a single reward card. Reading a
+message marks it read, individual attachments can be taken or the message deleted, and the nav tab
+carries a badge for anything unread or uncollected.
 
-Codes are **not** shipped by default — you add your own rows to `GIFT_CODES` in
-`src/game/data.ts` and rebuild:
+Messages are rows in `MAIL` in `src/game/data.ts`; the save only stores which ids are read, claimed
+and deleted, so shipping a new message is a one-row change.
 
-```ts
-export const GIFT_CODES: Record<string, GiftCode> = {
-  LAUNCHDAY: { label: "Launch day cache", gold: 1000, gems: 10, tokens: 2 },
-  THUNDER:   { label: "Thunder God blessing", frags: { rarity: "epic", n: 4 }, gems: 3 },
-  ARROWHAND: { label: "Arrow hand-out", towers: [{ id: "arrow", n: 10 }] },
-};
-```
+## Season rewards
 
-Every field is optional: `gold`, `gems`, `tokens`, `frags: { rarity, n }` (random fragments of a
-rarity) and `towers: [{ id, n }]` (fragments for a named tower). `label` shows up in the
-confirmation toast. Redeemed codes are stored in `save.redeemed` and listed under the input.
+The season track runs on a fixed **30-day cycle keyed to the epoch**, so every account is on the same
+season number. Season points are **derived, never stored**: `trophies × 1 + wins × 12`. Ten tiers run
+from **Scout** (0 points) to **Rift Sovereign** (4,600), each paying once — gold, gems, magic tokens,
+chip modules or fragments.
+
+The Season tab shows the season number and a live countdown, the current tier and how many points the
+next one needs, a progress bar with a tick per tier, and a card per tier with its payout and a
+**COLLECT** button (greyed out until it is reached). **COLLECT READY** sweeps every crate you have
+unlocked. A new season clears the claim state and banks your best points as a record.
 
 ## PWA
 
@@ -427,3 +449,32 @@ kit it actually brings.
 Quake Pylon (crater + stun), Storm Caller (five-way chain), Plague Mortar (huge
 crater, rot and slow) and the legendary **Railgun** (900 damage skewering six
 enemies, with Overpenetration and Rail Burn awakenings).
+
+## Fixed ascent bar, vertical sky bolts, Void Titan, icon grid and mail/season
+
+- **Merging is spawn-only.** A summon always deploys a fresh tower on a random free cell; the old
+  "spend the summon on a point instead" fallback is gone. A full board fuses the largest same-point
+  pair to open a cell and says so in a toast.
+- **The top installed-tower strip is gone.** The HUD is one compact row: SUMMON, then SP / gold /
+  lives / wave / enemies-left / towers-deployed / merged-crit pills and the run shop.
+- **The bottom bar is fixed.** One card per rotation tower, always in the same slots; spawning and
+  ascending change the copy count and battle level on a card, never the card set. Each card's ASCENT
+  button still upgrades every deployed copy of that type in lockstep.
+- **Lightning is a vertical strike now.** `strikeLightning` (Lightning Princess) no longer fires
+  sideways streaks: each target gets a **tall pillar from the top of the screen to the ground**, three
+  jagged filaments over a bright impact pool, with a stunned beat before the damage lands. Awakened
+  strikes add a white **SUPERBOLT** pillar (wider, with hit-stop and a screen dim), a restrike
+  barrage and fork light between the targets. The **Storm Sovereign** hero's bolts and its
+  **Sovereign Strike** use the same pillars, as does the ascent flourish.
+- **Void Titan** — a new boss (shape `titan`) that steps in from round 32 with all nine skills, a
+  slab-plated siege body with orbiting shards and a void core, plus the reworked cutscene above.
+- **Awakenings for every tower** — 37 towers, two paths each, five tiers each. `AwkFx`
+  (`heavy`, `critup`, `volley`, `freeze`, `burn`, `chain`, `slow`, `splash`, `sp`, `bounty`, `aura`,
+  `execute`, `quake`) is implemented in the battle engine, and the Towers screen lists the live tier
+  effect for each path.
+- **Tower grid.** The Towers screen opens with the crit band and then a **compact icon grid** — one
+  cell per tower with the art, the level underneath and a rarity-tinted outline, plus a fragment
+  readout, an awakening badge and a rotation tick. Tapping a cell opens the full sheet; dragging it
+  onto a rotation chip reorders your summon preference. The rotation is a preference, not a wall:
+  every unlocked tower can be summoned whether it is listed or not.
+- **Mail and Season** screens (see above), wired into the bottom nav with their own badges.
