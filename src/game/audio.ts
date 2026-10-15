@@ -139,6 +139,19 @@ export const sfx = {
     tone(1500, 0.05, "square", 0.18, -600);
     noise(0.06, 0.12, 2600);
   },
+  /** a tier-3+ crit: the little crit sound, but it lands like a hammer */
+  critBig: () => {
+    if (performance.now() - lastShot < 70) return;
+    tone(2100, 0.1, "square", 0.22, -1500);
+    tone(760, 0.22, "sawtooth", 0.24, -420, 0.01);
+    tone(190, 0.3, "triangle", 0.26, -90, 0.02);
+    noise(0.22, 0.3, 1500);
+  },
+  /** meteors falling / boss casting something huge */
+  meteor: () => {
+    tone(420, 0.6, "sawtooth", 0.18, -320);
+    noise(0.5, 0.26, 700);
+  },
   /** the boss walks in */
   boss: () => {
     tone(110, 0.7, "sawtooth", 0.32, 40);

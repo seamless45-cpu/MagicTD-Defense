@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { bumpTask } from "../game/save";
+import { bumpTask, critBonus, towerUpgrades } from "../game/save";
 import { sfx } from "../game/audio";
 import {
   TOWERS,
@@ -13,6 +13,9 @@ import {
   upgradeFragCost,
   ascentAllCost,
   awakenCost,
+  CRIT_DMG_PER_UPGRADE,
+  critBonusFrom,
+  fmtCritPct,
   towerStatRows,
   type TowerDef,
 } from "../game/data";
@@ -162,6 +165,9 @@ export default function Towers({
     // capture the before/after stats so the flourish can show the real deltas
     const before = towerStatRows(def, Math.max(1, lv));
     const after = towerStatRows(def, lv + 1);
+    // the merged crit stat: this upgrade adds CRIT_DMG_PER_UPGRADE to the pool
+    const critFrom = fmtCritPct(critBonusFrom(save.levels));
+    const critTo = fmtCritPct(critBonusFrom({ ...save.levels, [def.id]: lv + 1 }));
     mutate((s) => {
       s.gold -= gold;
       s.frags[def.id] -= fr;
@@ -178,10 +184,14 @@ export default function Towers({
       fromLv: lv,
       toLv: lv + 1,
       note: lv + 1 === MAX_MENU_LEVEL ? "MAX LEVEL" : "LEVEL UP",
-      stats: after
-        .map((r, i) => ({ label: r.label, from: before[i]?.value ?? r.value, to: r.value }))
-        .filter((r) => r.from !== r.to)
-        .slice(0, 4),
+      stats: [
+        // crit damage is account-wide now, so every upgrade shows what it added
+        { label: "Crit Damage", from: critFrom, to: critTo },
+        ...after
+          .map((r, i) => ({ label: r.label, from: before[i]?.value ?? r.value, to: r.value }))
+          .filter((r) => r.from !== r.to)
+          .slice(0, 3),
+      ],
     });
     push(`${def.name} upgraded to Lv ${lv + 1}`, "#ffcf4d");
     if (lv + 1 === MAX_MENU_LEVEL) {
@@ -311,6 +321,22 @@ export default function Towers({
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* MERGED CRIT DAMAGE — every tower upgrade on the account pools into this */}
+      <div className="crit-band shrink-0" data-testid="crit-band">
+        <span className="crit-band-icon">✦</span>
+        <div className="min-w-0">
+          <div className="crit-band-label">CRIT DAMAGE</div>
+          <div className="crit-band-sub">
+            <span className="num" data-testid="crit-upgrades">{towerUpgrades(save)}</span> upgrades merged · +
+            {Math.round(CRIT_DMG_PER_UPGRADE * 100)}% each
+          </div>
+        </div>
+        <div className="crit-band-val">
+          <span className="num" data-testid="crit-total">{fmtCritPct(critBonus(save))}</span>
+          <span className="crit-band-x">×{(1 + critBonus(save)).toFixed(2)} CRITS</span>
         </div>
       </div>
 

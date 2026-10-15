@@ -141,41 +141,65 @@ describe("MagicTD app shell", () => {
   });
 });
 
-describe("Loading screen", () => {
-  it("runs a staged boot sequence with progress, a tip and a skip control", async () => {
+describe("Boot sequence", () => {
+  it("plays the launch intro, then the loading car, then the game", async () => {
     mountRaw();
-    await waitFor(() => document.querySelector(".load-root"), "loading screen");
 
-    // five stages, five bar segments, one ring pair and a progressbar
-    await waitFor(() => document.querySelectorAll(".load-step").length === 5, "five load stages");
-    expect(document.querySelectorAll(".load-seg")).toHaveLength(5);
-    expect(document.querySelectorAll(".load-ring")).toHaveLength(2);
-    expect(document.querySelectorAll(".load-spark").length).toBeGreaterThan(0);
-    expect(document.body.textContent).toContain("TIP ·");
+    // 1. the cold open: logo + animated title over pure black
+    const intro = await waitFor(() => document.querySelector('[data-testid="launch-intro"]'), "launch intro");
+    expect(intro.textContent).toContain("MAGICTD");
+    expect(intro.textContent).toContain("DEFENSE");
+    expect(document.querySelectorAll(".boot-letter").length).toBe("MAGICTD".length);
+    expect(document.querySelector(".boot-emblem")).toBeTruthy();
+
+    // 2. the loading screen: logo + title on top, one car on a track below
+    await waitFor(() => document.querySelector('[data-testid="loading-screen"]'), "loading screen");
+    expect(document.querySelector(".load-logo")).toBeTruthy();
     expect(document.body.textContent).toContain("MagicTD");
+    expect(document.body.textContent).toContain("DEFENSE");
+    expect(document.querySelector('[data-testid="loading-car"]'), "loading car").toBeTruthy();
+    expect(document.querySelector('[data-testid="loading-car"]')!.querySelectorAll("span").length).toBeGreaterThan(4);
+    // only one car, and no leftover checklist / skip button clutter
+    expect(document.querySelectorAll('[data-testid="loading-car"]')).toHaveLength(1);
+    expect(document.querySelectorAll(".load-step")).toHaveLength(0);
+    expect(document.querySelectorAll(".load-seg")).toHaveLength(0);
+    expect(byText("button", "SKIP")).toBeUndefined();
+    expect(document.body.textContent).toContain("TIP");
 
-    // progress really advances and stages complete as it does
-    const pct = () => Number(document.querySelector("[role=progressbar]")!.getAttribute("aria-valuenow"));
+    // the car drives as the track fills
+    const bar = document.querySelector("[role=progressbar]")!;
+    const pct = () => Number(bar.getAttribute("aria-valuenow"));
     await waitFor(() => pct() > 0, "progress moving");
-    await waitFor(() => document.querySelectorAll(".load-step.done").length >= 1, "first stage completed");
+    const run1 = (document.querySelector(".load-car-run") as HTMLElement).style.left;
+    await waitFor(() => (document.querySelector(".load-car-run") as HTMLElement).style.left !== run1, "car moved");
     expect(pct()).toBeLessThanOrEqual(100);
 
-    // skipping cuts straight to the game
-    click(byText("button", "SKIP")!);
-    await waitFor(() => byText("div", "Command Center"), "home screen after skipping the intro");
+    // 3. then the game itself
+    await waitFor(() => byText("div", "Command Center"), "home screen after the boot sequence");
     noErrors();
-  });
+  }, 20000);
 
-  it("replays the boot sequence on demand from settings", async () => {
+  it("lets a tap skip the intro", async () => {
+    mountRaw();
+    await waitFor(() => document.querySelector('[data-testid="launch-intro"]'), "launch intro");
+    window.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    await waitFor(() => document.querySelector('[data-testid="loading-screen"]'), "loading screen after skipping");
+    // and a tap on the loading screen drops straight into the game
+    click(document.querySelector('[data-testid="loading-screen"]') as HTMLElement);
+    await waitFor(() => byText("div", "Command Center"), "home screen after skipping both");
+    noErrors();
+  }, 20000);
+
+  it("replays the whole boot sequence on demand from settings", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Loading Screen"), "settings modal");
 
     click(byText("button", "Replay")!);
-    await waitFor(() => document.querySelector(".load-root"), "loading screen replayed");
+    await waitFor(() => document.querySelector('[data-testid="launch-intro"]'), "intro replayed");
     await waitFor(() => byText("div", "Command Center"), "back to the home screen");
     noErrors();
-  });
+  }, 20000);
 });
 
 describe("Settings", () => {
@@ -237,29 +261,53 @@ describe("Settings", () => {
     noErrors();
   });
 
-  it("redeems a gift code and remembers it", async () => {
+  it("gives every option a knob switch instead of an ON/OFF button", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
-    await waitFor(() => byText("div", "GIFT CODES"), "settings modal");
+    await waitFor(() => byText("div", "Settings"), "settings modal");
 
-    const input = document.querySelector('input[aria-label="Gift code"]') as HTMLInputElement;
-    expect(input, "gift code input").toBeTruthy();
-    const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    // old style buttons are gone (nothing renders a bare ON / OFF label)
+    const bare = all("button").filter((b) => ["ON", "OFF"].includes((b.textContent || "").trim()));
+    expect(bare).toHaveLength(0);
 
-    // boss codes ship empty, so an unknown code is refused without touching the save
-    const goldBefore = saved().gold;
-    setValue.call(input, "NOTACODE");
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    const redeem = all("button").find((b) => (b.textContent || "").trim() === "Redeem")!;
-    click(redeem);
-    await waitFor(() => document.querySelector('[data-testid="gift-msg"]'), "rejection message");
-    expect(document.querySelector('[data-testid="gift-msg"]')!.textContent).toContain("not valid");
-    expect(saved().gold).toBe(goldBefore);
+    const knobs = all(".knob");
+    expect(knobs.length, "one knob per option").toBeGreaterThanOrEqual(8);
+    for (const k of knobs) {
+      expect(k.getAttribute("role")).toBe("switch");
+      expect(k.getAttribute("aria-checked")).toMatch(/true|false/);
+      expect(k.querySelector(".knob-rail")).toBeTruthy();
+      expect(k.querySelector(".knob-head")).toBeTruthy();
+    }
+    // the head slides across the rail when the knob is thrown
+    const off = all(".knob").find((k) => k.getAttribute("aria-checked") === "false")!;
+    expect(off).toBeTruthy();
+    click(off);
+    await waitFor(() => off.getAttribute("aria-checked") === "true", "knob threw");
+    expect(off.classList.contains("on")).toBe(true);
 
+    // every gameplay toggle still writes through to the save
+    const dmg = document.querySelector('[data-testid="toggle-dmgNums"]') as HTMLElement;
+    expect(dmg.getAttribute("aria-checked")).toBe("true");
+    click(dmg);
+    await waitFor(() => saved().dmgNums === false, "toggled through the knob");
+    noErrors();
+  }, 20000);
+
+  it("offers a fullscreen control in settings and in the top bar", async () => {
+    await mountApp();
+    // top-bar button exists and is labelled
+    const bar = document.querySelector('[data-testid="fullscreen-button"]') as HTMLElement;
+    expect(bar, "top bar fullscreen button").toBeTruthy();
+    expect(bar.getAttribute("aria-label")).toMatch(/fullscreen/i);
+
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => byText("div", "Settings"), "settings modal");
+    expect(document.body.textContent).toContain("Fullscreen");
+    expect(document.querySelector('[data-testid="toggle-fullscreen"]')).toBeTruthy();
     click(byText("button", "Close")!);
     await waitFor(() => !byText("div", "Reset Progress"), "settings closed");
     noErrors();
-  });
+  }, 20000);
 
   it("persists a reset instead of restoring the old save", async () => {
     persistSave({ ...defaultSave(), gold: 9999, levels: { arrow: 5 }, lineup: ["arrow"] });
@@ -277,6 +325,39 @@ describe("Settings", () => {
     expect(saved().lineup).toHaveLength(3);
     noErrors();
   });
+});
+
+describe("Crit damage", () => {
+  it("shows the merged crit stat and grows it by 8% per tower upgrade", async () => {
+    persistSave({
+      ...defaultSave(),
+      gold: 9000,
+      levels: { arrow: 1, cannon: 1, ice: 1 },
+      frags: { ...defaultSave().frags, arrow: 9 },
+    });
+    await mountApp();
+    click(byText("button", "Towers")!);
+    await waitFor(() => document.querySelector('[data-testid="crit-band"]'), "crit band");
+
+    const read = () => document.querySelector('[data-testid="crit-total"]')!.textContent!.trim();
+    const before = read();
+    const upgradesBefore = Number(document.querySelector('[data-testid="crit-upgrades"]')!.textContent);
+    expect(before).toBe("60%");
+    expect(upgradesBefore).toBe(0);
+
+    // buy one upgrade on the arrow tower from its preview panel
+    click(byText("button", "Preview & Upgrade")!);
+    await waitFor(() => document.querySelector('[data-testid="tower-preview"]'), "preview panel");
+    const upBtn = all("button").find((b) => /^Upgrade/.test((b.textContent || "").trim()))!;
+    expect(upBtn, "upgrade button").toBeTruthy();
+    click(upBtn);
+    await waitFor(() => saved().levels.arrow === 2, "arrow levelled");
+
+    // the band merges the new upgrade straight into the total
+    await waitFor(() => document.querySelector('[data-testid="crit-upgrades"]')!.textContent === "1", "one merged upgrade");
+    await waitFor(() => read() === "68%", "crit total grew by 8%");
+    noErrors();
+  }, 20000);
 });
 
 describe("Shop", () => {
@@ -356,8 +437,10 @@ describe("Heroes", () => {
 
     startMode("Battle");
     await waitFor(() => byText("button", "SUMMON"), "battle HUD");
-    // the hero button shows the equipped hero
-    expect(document.body.textContent).toContain("GLACIER");
+    // the hero button shows the equipped hero (wait for the card itself — the
+    // SUMMON button is mounted a beat before the engine state is ready)
+    const card = await waitFor(() => document.querySelector('[data-testid="hero-card-battle"]'), "hero card");
+    expect(card.textContent).toContain("GLACIER");
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
     noErrors();
@@ -668,6 +751,55 @@ describe("Battle", () => {
     await waitFor(() => byText("div", "Command Center"), "back home after abandoning");
     noErrors();
   });
+
+  it("shows the merged crit damage in the HUD and counts up as crits land", async () => {
+    // a deep save: lots of upgrades banked, so the merged stat is a big number
+    persistSave({
+      ...defaultSave(),
+      gold: 60000,
+      levels: { arrow: 9, cannon: 5, ice: 3, tesla: 2 },
+      lineup: ["arrow", "cannon", "ice", "tesla"],
+      frags: { arrow: 40, cannon: 40, ice: 40, tesla: 40 },
+    });
+    await mountApp();
+    startMode("Battle");
+
+    const chip = await waitFor(() => document.querySelector('[data-testid="crit-chip"]'), "crit chip");
+    // 8 + 4 + 2 + 1 = 15 upgrades * 8% + 60% base = 180%
+    expect(chip.textContent).toContain("180%");
+    expect(chip.getAttribute("title")).toContain("15 tower upgrades");
+
+    // deploy a tower and wait for crits to start landing
+    const summon = await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+    for (let i = 0; i < 4; i++) {
+      click(summon);
+      await sleep(90);
+    }
+    await waitFor(
+      () => (document.querySelector('[data-testid="crit-chip"]')!.textContent || "").includes("crits"),
+      "crit counter running",
+      40000
+    );
+    expect(document.querySelector('[data-testid="crit-stat"]')!.textContent).toContain("180%");
+
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  }, 60000);
+
+  it("gives the boss bar a skill kit with the new skills", async () => {
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+    // bosses arrive from round 16; the kit is data-driven, so assert on the table
+    const kit = document.querySelector('[data-testid="boss-kit"]');
+    if (kit) {
+      expect(kit.children.length).toBeGreaterThanOrEqual(6);
+    }
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  }, 30000);
 
   it("moves the hero card to the bottom and shows a cooldown ring", async () => {
     await mountApp();

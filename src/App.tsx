@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { loadSave, persistSave, tasksReady, type SaveData } from "./game/save";
 import { sfx, setSfx, setVolume, initAudio } from "./game/audio";
-import { CurrencyBar, Emblem, Toasts, useToasts } from "./components/ui";
-import { LoadingScreen, Home, Specials, Guild, SettingsModal, makeDefaults } from "./screens/Menus";
+import { CurrencyBar, Toasts, useToasts } from "./components/ui";
+import { LaunchIntro, LoadingScreen, Home, Specials, Guild, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
 import Towers from "./screens/Towers";
 import Battle from "./screens/Battle";
 
-type Screen = "loading" | "home" | "shop" | "towers" | "specials" | "guild" | "battle" | "endless";
+type Screen = "intro" | "loading" | "home" | "shop" | "towers" | "specials" | "guild" | "battle" | "endless";
 
 const MODES = {
   battle: { mode: "battle" as const, title: "BATTLE", rounds: "12 rounds" },
@@ -89,7 +89,9 @@ function BootErrors() {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("loading");
+  // the cold open runs first: logo animation, then the loading car. Reduced
+  // motion skips straight past it rather than holding a still frame for 3s.
+  const [screen, setScreen] = useState<Screen>(() => (loadSave().reducedMotion ? "loading" : "intro"));
   const [save, setSave] = useState<SaveData>(() => loadSave());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const { toasts, push } = useToasts();
@@ -127,9 +129,9 @@ export default function App() {
     return () => window.removeEventListener("magictd-reset", h);
   }, []);
 
-  // "Replay" in settings: run the loading screen again
+  // "Replay" in settings: run the whole boot sequence again
   useEffect(() => {
-    const h = () => setScreen("loading");
+    const h = () => setScreen("intro");
     window.addEventListener("magictd-intro", h);
     return () => window.removeEventListener("magictd-intro", h);
   }, []);
@@ -143,12 +145,16 @@ export default function App() {
     });
   }, []);
 
-  if (screen === "loading") {
+  if (screen === "intro" || screen === "loading") {
     return (
-      <div className="h-full">
+      <div className={`h-full ${save.reducedMotion ? "calm" : ""}`}>
         {/* If a stale chunk is missing, dynamic import() fails asynchronously; surface it. */}
         <BootErrors />
-        <LoadingScreen onDone={() => setScreen("home")} />
+        {screen === "intro" ? (
+          <LaunchIntro onDone={() => setScreen("loading")} />
+        ) : (
+          <LoadingScreen onDone={() => setScreen("home")} />
+        )}
       </div>
     );
   }
@@ -171,16 +177,12 @@ export default function App() {
     <div className={`app-bg flex h-full flex-col ${save.reducedMotion ? "calm" : ""}`}>
       <Toasts toasts={toasts} />
       {/* top bar — wraps on narrow screens so the settings button is never clipped */}
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-3">
-        <div className="flex shrink-0 items-center gap-3">
-          <Emblem size={32} />
-          <div className="leading-none">
-            <div className="font-disp text-xl text-[#ffb324]">MagicTD</div>
-            <div className="text-[10px] font-bold tracking-[0.4em] text-[var(--cyan)]">DEFENSE</div>
-          </div>
-        </div>
+      <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-2 px-3 pt-2.5">
+        {/* no title up here — the wordmark lives on the boot screens, which keeps
+            this bar from wrapping on narrow phones */}
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <CurrencyBar gold={save.gold} gems={save.gems} tokens={save.tokens} trophies={save.trophies} />
+          <FullscreenButton compact />
           <button
             className="relative shrink-0 rounded-lg border border-[var(--line)] bg-black/40 p-2 text-[var(--dim)] transition hover:text-[var(--txt)]"
             onClick={() => {
@@ -197,8 +199,9 @@ export default function App() {
         </div>
       </div>
 
-      {/* content */}
-      <div className="min-h-0 flex-1 px-4 pt-4">
+      {/* content — keyed so every tab change replays the entrance animation */}
+      <div className="min-h-0 flex-1 px-3 pt-3">
+        <div key={screen} className="screen-enter h-full">
         {screen === "home" && (
           <Home
             save={save}
@@ -211,7 +214,8 @@ export default function App() {
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}
         {screen === "towers" && <Towers save={save} mutate={mutate} push={push} />}
         {screen === "specials" && <Specials save={save} mutate={mutate} push={push} />}
-        {screen === "guild" && <Guild save={save} mutate={mutate} push={push} />}
+          {screen === "guild" && <Guild save={save} mutate={mutate} push={push} />}
+        </div>
       </div>
 
       {/* bottom nav */}

@@ -39,7 +39,6 @@ import {
   nextDailyStreak,
   questDone,
   questProgress,
-  redeemGiftCode,
   resetCountdown,
   upgradeHero,
   weekStr,
@@ -128,30 +127,103 @@ function useInstallPrompt() {
   return { promptEvent, installed };
 }
 
-const LOAD_STEPS = [
-  "Charging the mana lattice",
-  "Raising towers on the grid",
-  "Briefing the heroes",
-  "Chalking the enemy path",
-  "Opening the rift",
-];
+/**
+ * The cold-open: pure black, a spark, then the logo assembles itself out of
+ * light while the title slams in letter by letter. Tapping anywhere fast-forwards
+ * straight into the loading screen.
+ */
+export function LaunchIntro({ onDone }: { onDone: () => void }) {
+  const [beat, setBeat] = useState(0);
+  const doneRef = useRef(false);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
-/** Rotating one-liners under the checklist — they double as a mini tutorial. */
+  const BOOT_BEATS = [120, 620, 1180, 1700, 2180, 2750];
+
+  const finish = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onDoneRef.current();
+  }, []);
+
+  useEffect(() => {
+    const timers = BOOT_BEATS.map((ms, i) => setTimeout(() => setBeat(i + 1), ms));
+    const out = setTimeout(finish, 3300);
+    return () => {
+      timers.forEach(clearTimeout);
+      clearTimeout(out);
+    };
+  }, [finish]);
+
+  // a tap anywhere skips the rest of the intro
+  useEffect(() => {
+    const h = () => finish();
+    window.addEventListener("pointerdown", h, { once: true });
+    window.addEventListener("keydown", h, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", h);
+      window.removeEventListener("keydown", h);
+    };
+  }, [finish]);
+
+  const TITLE = "MAGICTD";
+  return (
+    <div className="boot-root" data-testid="launch-intro" aria-label="MagicTD Defense boot sequence">
+      <div className="boot-vignette" />
+      <div className={`boot-collapse ${beat >= 1 ? "on" : ""}`} />
+      <div className={`boot-shock ${beat >= 2 ? "on" : ""}`} />
+      {beat >= 6 && <div className="boot-wipe" />}
+
+      <div className="relative z-10 flex flex-col items-center">
+        <div className={`boot-emblem ${beat >= 2 ? "on" : ""}`}>
+          <span className="boot-emblem-halo" />
+          <span className="boot-emblem-ring r1" />
+          <span className="boot-emblem-ring r2" />
+          <Emblem size={132} />
+        </div>
+
+        <div className="mt-5 flex items-end justify-center">
+          {TITLE.split("").map((ch, i) => (
+            <span
+              key={i}
+              className={`boot-letter ${beat >= 3 ? "on" : ""}`}
+              style={{ animationDelay: `${i * 62}ms` }}
+            >
+              {ch}
+            </span>
+          ))}
+        </div>
+
+        <div className={`boot-sub ${beat >= 4 ? "on" : ""}`}>DEFENSE</div>
+        <div className={`boot-tagline ${beat >= 5 ? "on" : ""}`}>
+          HOLD THE LINE <span className="boot-dot">◆</span> MASTER THE ARCANE
+        </div>
+      </div>
+
+      <div className={`boot-skip ${beat >= 2 ? "on" : ""}`}>TAP TO SKIP</div>
+    </div>
+  );
+}
+
 const LOAD_TIPS = [
   "Gold levels a tower up; fragments push it through ascension.",
   "Endless waves scale enemy health ×1.57 every single round.",
   "Chilled enemies take 25% more damage from every source.",
-  "Hero levels add power and shave seconds off the cooldown.",
-  "Zoom the arena with the widget in the bottom-left corner.",
+  "Every tower upgrade adds +8% crit damage to your account.",
+  "Bosses start throwing skills at you from round 16.",
   "Tap any tower in the Towers tab for its full stat sheet.",
-  "Bosses arrive from round 16 — twice as nasty, twice the loot.",
 ];
 
-const LOAD_TIME = 2400;
+const LOAD_TIME = 2200;
 
+/**
+ * The loading screen: logo and title up top, and a single rocket car screaming
+ * along a light-track at the bottom. The car's position *is* the progress bar —
+ * when the track fills it blasts off and the game takes over.
+ */
 export function LoadingScreen({ onDone }: { onDone: () => void }) {
   const [p, setP] = useState(0);
-  const [ready, setReady] = useState(false);
+  const [launching, setLaunching] = useState(false);
   const [tip, setTip] = useState(0);
   const doneRef = useRef(false);
   const onDoneRef = useRef(onDone);
@@ -161,10 +233,10 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
     if (doneRef.current) return;
     doneRef.current = true;
     setP(1);
-    setReady(true);
+    setLaunching(true);
+    setTimeout(() => onDoneRef.current(), 620);
   }, []);
 
-  // progress bar (tap / skip jumps straight to the end)
   useEffect(() => {
     let raf = 0;
     const t0 = performance.now();
@@ -179,101 +251,72 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
     return () => cancelAnimationFrame(raf);
   }, [finish]);
 
-  // short "READY" beat, then hand off to the game
   useEffect(() => {
-    if (!ready) return;
-    const t = setTimeout(() => onDoneRef.current(), 520);
-    return () => clearTimeout(t);
-  }, [ready]);
-
-  useEffect(() => {
-    const t = setInterval(() => setTip((i) => (i + 1) % LOAD_TIPS.length), 1500);
+    const t = setInterval(() => setTip((i) => (i + 1) % LOAD_TIPS.length), 1800);
     return () => clearInterval(t);
   }, []);
 
-  const stage = ready ? LOAD_STEPS.length : p * LOAD_STEPS.length;
-  const pct = Math.round((ready ? 1 : p) * 100);
+  const pct = Math.round((launching ? 1 : p) * 100);
 
   return (
-    <div className="app-bg load-root h-full w-full" onClick={finish}>
-      <div className="load-orb" style={{ width: 240, height: 240, left: "6%", top: "10%", background: "radial-gradient(circle, rgba(53,224,255,.3), transparent 70%)" }} />
-      <div className="load-orb" style={{ width: 320, height: 320, right: "2%", top: "2%", background: "radial-gradient(circle, rgba(255,79,216,.22), transparent 70%)", animationDelay: "1.4s" }} />
-      <div className="load-orb" style={{ width: 280, height: 280, left: "28%", bottom: "-8%", background: "radial-gradient(circle, rgba(255,179,36,.2), transparent 70%)", animationDelay: "2.3s" }} />
+    <div className="load-root h-full w-full" data-testid="loading-screen" onClick={finish}>
+      <div className="load-grid" />
+      <div className="load-orb" style={{ width: 300, height: 300, left: "4%", top: "4%", background: "radial-gradient(circle, rgba(53,224,255,.26), transparent 70%)" }} />
+      <div className="load-orb" style={{ width: 340, height: 340, right: "0%", top: "-2%", background: "radial-gradient(circle, rgba(255,79,216,.2), transparent 70%)", animationDelay: "1.4s" }} />
 
-      <div className="relative z-10 mx-auto flex min-h-full w-full max-w-[440px] flex-col items-center justify-center gap-5 px-5 py-8">
-        <div className="load-emblem relative grid h-[186px] w-[186px] shrink-0 place-items-center">
-          <div className="load-ring outer" />
-          <div className="load-ring inner" />
-          <span className="load-spark" style={{ top: 4, left: "50%" }} />
-          <span className="load-spark" style={{ bottom: 8, left: "16%", animationDelay: ".7s" }} />
-          <span className="load-spark" style={{ bottom: 16, right: "10%", animationDelay: "1.5s" }} />
-          <div style={{ animation: "floaty 2.6s ease-in-out infinite" }}>
-            <Emblem size={118} />
-          </div>
+      {/* ---------- logo + title, pinned to the top ---------- */}
+      <div className="load-top">
+        <div className="load-logo">
+          <span className="load-logo-halo" />
+          <Emblem size={104} />
+          <span className="load-logo-scan" />
         </div>
-
-        <div className="text-center leading-none">
-          <div className="font-disp text-[40px] tracking-wide text-[#ffb324]" style={{ textShadow: "0 0 34px rgba(255,179,36,.5)" }}>
-            MagicTD
-          </div>
-          <div className="mt-1.5 font-disp text-lg tracking-[0.45em] text-[#35e0ff]">DEFENSE</div>
-          <div className="load-divider mx-auto mt-3 h-[3px] w-[170px] rounded-full" />
+        <div className="load-word">
+          <span className="load-word-a">MagicTD</span>
+          <span className="load-word-b">DEFENSE</span>
+          <span className="load-word-rule" />
         </div>
+      </div>
 
-        <div className="panel panel-flat w-full p-4">
-          <div className="flex items-center justify-between text-[11px] font-bold tracking-[0.3em]">
-            <span className={ready ? "text-[var(--green)]" : "text-[var(--dim)]"}>{ready ? "READY" : "LOADING"}</span>
-            <span className="text-[#ffcf4d]" style={{ fontVariantNumeric: "tabular-nums" }}>
-              {pct}%
-            </span>
-          </div>
-
-          <div
-            className="mt-2.5 flex gap-1.5"
-            role="progressbar"
-            aria-label="Loading progress"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={pct}
-          >
-            {LOAD_STEPS.map((_, i) => (
-              <div key={i} className={`load-seg flex-1 ${ready ? "ready" : ""}`}>
-                <i style={{ width: `${Math.max(0, Math.min(1, stage - i)) * 100}%` }} />
-              </div>
+      {/* ---------- the loading car ---------- */}
+      <div className="load-bay">
+        <div
+          className="load-track"
+          role="progressbar"
+          aria-label="Loading progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+        >
+          <div className="load-track-fill" style={{ width: `${pct}%` }} />
+          <div className="load-track-pips">
+            {Array.from({ length: 11 }, (_, i) => (
+              <i key={i} className={pct >= (i / 10) * 100 ? "on" : ""} />
             ))}
           </div>
-
-          <div className="mt-3.5 space-y-1.5">
-            {LOAD_STEPS.map((label, i) => {
-              const isDone = ready || stage >= i + 1;
-              const isActive = !isDone && Math.floor(stage) === i;
-              return (
-                <div key={label} className={`load-step ${isDone ? "done" : isActive ? "active" : ""}`}>
-                  <span className="load-mark">{isDone ? "✓" : i + 1}</span>
-                  <span className="truncate">{label}</span>
-                  {isActive && <span className="load-dots ml-auto">···</span>}
-                </div>
-              );
-            })}
+          <div className="load-car-run" style={{ left: `${2 + p * 84}%` }}>
+            <div className={`load-car ${launching ? "launching" : ""}`} data-testid="loading-car">
+              <span className="load-car-thrust" />
+              <span className="load-car-body" />
+              <span className="load-car-stripe" />
+              <span className="load-car-wing" />
+              <span className="load-car-wheel w1" />
+              <span className="load-car-wheel w2" />
+              <span className="load-car-headlight" />
+            </div>
+            <span className="load-car-smoke s1" />
+            <span className="load-car-smoke s2" />
+            <span className="load-car-smoke s3" />
           </div>
         </div>
-
-        <div key={tip} className="load-tip w-full px-1 text-center text-[11px] font-semibold leading-snug text-[var(--dim)]">
-          <span className="text-[#ffcf4d]">TIP · </span>
-          {LOAD_TIPS[tip]}
+        <div className="load-bay-row">
+          <span className="load-state" data-testid="load-state">
+            {launching ? "ENTERING THE ARENA" : "LOADING"}
+          </span>
+          <span className="load-pct">{pct}%</span>
         </div>
-
-        <div className="flex w-full items-center justify-between gap-3">
-          <span className="pill-dark text-[10px] tracking-[0.18em]">BUILD 1.0 · SINGLE FILE</span>
-          <button
-            className={`btn px-4 py-1.5 text-xs ${ready ? "btn-gold" : ""}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              finish();
-            }}
-          >
-            {ready ? "ENTERING…" : "SKIP ▸"}
-          </button>
+        <div key={tip} className="load-tip">
+          <span className="load-tip-k">TIP</span> {LOAD_TIPS[tip]}
         </div>
       </div>
     </div>
@@ -1620,6 +1663,142 @@ export function Guild({
   );
 }
 
+/**
+ * Fullscreen. Every browser spells this differently, and iOS Safari only really
+ * supports it on the video element — so we report the state we can see and let
+ * the button do whatever the platform allows.
+ */
+type FsDoc = Document & {
+  webkitFullscreenElement?: Element | null;
+  webkitExitFullscreen?: () => Promise<void> | void;
+  webkitFullscreenEnabled?: boolean;
+};
+type FsEl = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+
+export function fullscreenSupported() {
+  const d = document as FsDoc;
+  return !!(d.fullscreenEnabled || d.webkitFullscreenEnabled || (document as FsDoc).webkitFullscreenElement !== undefined);
+}
+
+export function fullscreenNow() {
+  const d = document as FsDoc;
+  return !!(d.fullscreenElement || d.webkitFullscreenElement);
+}
+
+export async function toggleFullscreen(on?: boolean) {
+  const d = document as FsDoc;
+  const el = document.documentElement as FsEl;
+  try {
+    const want = on ?? !fullscreenNow();
+    if (want) {
+      if (el.requestFullscreen) await el.requestFullscreen({ navigationUI: "hide" });
+      else if (el.webkitRequestFullscreen) await el.webkitRequestFullscreen();
+    } else if (d.exitFullscreen) await d.exitFullscreen();
+    else if (d.webkitExitFullscreen) await d.webkitExitFullscreen();
+    return true;
+  } catch {
+    // some mobile browsers refuse unless the call comes from a real gesture
+    return false;
+  }
+}
+
+/** live fullscreen state, updated by the browser, not by us */
+export function useFullscreen() {
+  const [on, setOn] = useState(fullscreenNow);
+  useEffect(() => {
+    const sync = () => setOn(fullscreenNow());
+    document.addEventListener("fullscreenchange", sync);
+    document.addEventListener("webkitfullscreenchange", sync as EventListener);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      document.removeEventListener("webkitfullscreenchange", sync as EventListener);
+    };
+  }, []);
+  const toggle = useCallback(async () => {
+    const next = !fullscreenNow();
+    const ok = await toggleFullscreen(next);
+    if (ok) setOn(next);
+    else if (next) {
+      // fall back to the browser telling us later
+      setOn(fullscreenNow());
+    }
+  }, []);
+  return { on, toggle };
+}
+
+/** the settings switch: a chunky knob that rolls across its rail */
+function KnobToggle({
+  on,
+  label,
+  testId,
+  onToggle,
+}: {
+  on: boolean;
+  label: string;
+  testId?: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      data-testid={testId}
+      className={`knob ${on ? "on" : ""}`}
+      onClick={onToggle}
+    >
+      <span className="knob-rail">
+        <span className="knob-glow" />
+      </span>
+      <span className="knob-head">
+        <span className="knob-grip" />
+      </span>
+      <span className="knob-ripple" />
+    </button>
+  );
+}
+
+/** bottom-left widget that floats the arena into a true fullscreen canvas */
+export function FullscreenButton({ compact = false }: { compact?: boolean }) {
+  const { on, toggle } = useFullscreen();
+  // always rendered: browsers that refuse the request simply leave the page as
+  // it was, and hiding the control on a capability guess confuses more than it helps
+  const ok = fullscreenSupported();
+  return (
+    <button
+      type="button"
+      data-testid="fullscreen-button"
+      aria-label={on ? "Exit fullscreen" : "Enter fullscreen"}
+      title={ok ? (on ? "Leave fullscreen" : "Play fullscreen") : "This browser may only allow fullscreen from the video player"}
+      className={`fs-btn ${compact ? "fs-btn-sm" : ""} ${on ? "on" : ""}`}
+      onClick={() => {
+        sfx.click();
+        void toggle();
+      }}
+    >
+      <svg width={compact ? 16 : 18} height={compact ? 16 : 18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+        {on ? (
+          <>
+            <path d="M9 3H5a2 2 0 0 0-2 2v4" />
+            <path d="M3 15v4a2 2 0 0 0 2 2h4" />
+            <path d="M15 3h4a2 2 0 0 1 2 2v4" />
+            <path d="M21 15v4a2 2 0 0 1-2 2h-4" />
+          </>
+        ) : (
+          <>
+            <path d="M4 9V4h5" />
+            <path d="M20 9V4h-5" />
+            <path d="M4 15v5h5" />
+            <path d="M20 15v5h-5" />
+          </>
+        )}
+      </svg>
+      {!compact && <span className="fs-btn-txt">{on ? "EXIT FULLSCREEN" : "FULLSCREEN"}</span>}
+    </button>
+  );
+}
+
 export function SettingsModal({
   save,
   mutate,
@@ -1634,9 +1813,8 @@ export function SettingsModal({
   const [copied, setCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
-  const [giftCode, setGiftCode] = useState("");
-  const [giftMsg, setGiftMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const { promptEvent, installed } = useInstallPrompt();
+  const fs = useFullscreen();
   const diagnostics = () => {
     const w = window as unknown as { __magictdBootErrors?: string[]; __magictdLastError?: string };
     return [
@@ -1694,17 +1872,15 @@ export function SettingsModal({
               <div className="font-bold">{label}</div>
               <div className="text-xs font-semibold text-[var(--dim)]">{d}</div>
             </div>
-            <button
-              className={`toggle ${save[key] ? "on" : ""}`}
-              data-testid={`toggle-${key}`}
-              aria-pressed={!!save[key]}
-              onClick={() => {
+            <KnobToggle
+              on={!!save[key]}
+              label={label}
+              testId={`toggle-${key}`}
+              onToggle={() => {
                 mutate((s) => { s[key] = !s[key] as never; });
                 sfx.click();
               }}
-            >
-              {save[key] ? "ON" : "OFF"}
-            </button>
+            />
           </div>
         ))}
       </div>
@@ -1734,68 +1910,27 @@ export function SettingsModal({
         </button>
       </div>
 
-      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">GIFT CODES</div>
-      <div className="mt-1.5 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-        <div className="font-bold">Redeem a code</div>
-        <div className="text-xs font-semibold text-[var(--dim)]">
-          Codes are announced on our socials — each one works once per save.
-        </div>
-        <div className="mt-2 flex gap-2">
-          <input
-            value={giftCode}
-            onChange={(e) => {
-              setGiftCode(e.target.value);
-              setGiftMsg(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") (e.currentTarget.nextElementSibling as HTMLButtonElement)?.click();
-            }}
-            placeholder="ENTER CODE"
-            aria-label="Gift code"
-            className="min-w-0 flex-1 rounded-md border border-[var(--line)] bg-black/50 px-3 py-2 text-sm font-bold tracking-[0.15em] text-[var(--txt)] uppercase outline-none placeholder:text-[var(--line2)] focus:border-[var(--cyan)]"
-          />
-          <button
-            className="btn btn-cyan shrink-0 px-4 py-2 text-sm"
-            disabled={!giftCode.trim()}
-            onClick={() => {
-              // redeem on a copy first so the UI can report the outcome immediately
-              const next: SaveData = JSON.parse(JSON.stringify(save));
-              const r = redeemGiftCode(next, giftCode);
-              if (r.ok) {
-                persistSave(next);
-                mutate((s) => {
-                  Object.assign(s, next);
-                });
-                sfx.gem();
-                setGiftCode("");
-                setGiftMsg({ ok: true, text: `${r.label} · ${r.summary}` });
-              } else {
-                sfx.error();
-                setGiftMsg({
-                  ok: false,
-                  text: r.reason === "used" ? "That code was already used on this save" : "That code is not valid",
-                });
-              }
-            }}
-          >
-            Redeem
-          </button>
-        </div>
-        {giftMsg && (
-          <div
-            data-testid="gift-msg"
-            className="mt-2 text-xs font-bold"
-            style={{ color: giftMsg.ok ? "#3dff8e" : "#ff4d5e" }}
-          >
-            {giftMsg.ok ? "✓ " : "✕ "}
-            {giftMsg.text}
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">DISPLAY</div>
+      <div className="row-card mt-1.5">
+        <div>
+          <div className="font-bold">Fullscreen</div>
+          <div className="text-xs font-semibold text-[var(--dim)]">
+            {fullscreenSupported()
+              ? fs.on
+                ? "The arena is running edge to edge"
+                : "Fill the whole screen — no browser chrome, no accidental swipes"
+              : "This browser only allows fullscreen from the video player"}
           </div>
-        )}
-        {save.redeemed.length > 0 && (
-          <div className="mt-2 text-[11px] font-semibold text-[var(--dim)]">
-            Redeemed so far: {save.redeemed.join(", ")}
-          </div>
-        )}
+        </div>
+        <KnobToggle
+          on={fs.on}
+          label="Fullscreen"
+          testId="toggle-fullscreen"
+          onToggle={() => {
+            sfx.click();
+            void fs.toggle();
+          }}
+        />
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">SAVE DATA</div>

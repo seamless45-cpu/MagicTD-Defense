@@ -366,3 +366,64 @@ and a live energy conduit pulsing from spawn to exit; ambient motes drifting ove
 the whole plate; and the portals rebuilt as stone-ringed wells with rune
 buttresses, counter-rotating rings, swirling vortex arms and motes streaming out
 of the spawn and into the exit.
+
+## Boot sequence, fullscreen, knob switches and the crit-damage pool
+
+**Launch intro** — opening the game now plays a cold open: black, a spark that
+collapses into the emblem, a shockwave, the logo snapping in with a spinning
+halo, then `MAGICTD` slamming down one letter at a time, `DEFENSE` stretching out
+under it and the tagline fading up. Tap or press any key to skip. Reduced motion
+jumps straight to the loading screen instead.
+
+**Loading screen, rebuilt** — the checklist, segments, build tag and skip button
+are gone. What's left is exactly two things: the logo and title pinned to the
+top, and a **rocket car** screaming along a light-track at the bottom. The car's
+position *is* the progress bar — the road fills behind it, the pips light up as
+it passes, and when the track is full it boosts off the top of the screen and
+drops you into the game. A single rotating tip line sits under the road.
+
+**No title inside the game** — the wordmark was removed from the in-game top bar,
+which stops the bar wrapping on narrow phones. Branding now lives on the boot
+screens only; the top bar is currencies, fullscreen and settings.
+
+**Fullscreen** — a fullscreen control in the top bar, another next to the arena
+zoom widget in battle, and a switch in Settings → Display. It uses the standard
+API with the WebKit fallbacks, and the switch reads the browser's real
+fullscreen state rather than guessing.
+
+**Knob switches** — every ON/OFF button in Settings is now a chunky knob toggle:
+a bordered rail, a rolling head with a grip, a green glow and a ripple when it
+throws. The accessibility contract is the same (`role="switch"`,
+`aria-checked`, `data-testid="toggle-*"`).
+
+**Gift codes removed** — the code field, the redeemed-code list and the
+underlying table, save field and helpers were all deleted.
+
+**Crit damage, merged account-wide** — crits now use one number built from every
+tower you own: **+8% crit damage for every upgrade level on every tower**, over a
+60% base, capped at **90,000%**. The Towers screen opens with a **CRIT DAMAGE**
+band showing the merged total, the upgrade count feeding it and the multiplier
+crits actually hit for; every upgrade ceremony lists the crit delta as its first
+row; and the battle HUD carries the stat next to a live crit counter and the
+biggest hit of the run.
+
+**Crit effects** — crits now come in four tiers instead of one. A tier-4
+"APOCALYPTIC!" crit throws layered shockwaves, a spark storm, star sparkles,
+spinning debris, a ground ring, a bolt of light back to the firing tower, a
+screen flash, a colour-split camera punch, a freeze-frame and its own heavier
+sound. Lower tiers scale the same package down so ordinary hits stay readable.
+The floating number is labelled, and tier-3+ crits print the multiplier.
+
+**Boss skills** — bosses now have kits instead of a fixed four:
+`Rift Call`, `Void Step`, `Bulwark` and `Blood Frenzy` are joined by
+**Null Field** (hexes up to four nearby towers, cutting their fire rate),
+**Soul Devour** (eats its own minions to heal), **Meteor Fall** (telegraphed
+rocks that knock towers offline), **Rift Chains** (shields every minion around
+it) and **Warp Surge** (wrenches the whole horde down the lane). The Devil walks
+in with six of them, the Rift Overlord with all nine, and the boss bar lists the
+kit it actually brings.
+
+**Six new towers** — Rime Cannon (splash + freeze), Soul Siphon (SP per kill),
+Quake Pylon (crater + stun), Storm Caller (five-way chain), Plague Mortar (huge
+crater, rot and slow) and the legendary **Railgun** (900 damage skewering six
+enemies, with Overpenetration and Rail Burn awakenings).

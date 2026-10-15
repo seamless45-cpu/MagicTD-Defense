@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
 import { addChips, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, heroLevel } from "../game/save";
+import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import {
   TOWERS,
@@ -23,12 +24,33 @@ import {
   REWARD_MUL,
   reward,
   isBossType,
-  BOSS_SKILLS,
+  BOSS_SKILL_BY_ID,
   BOSS_SUMMON_CD,
   BOSS_BLINK_CD,
   BOSS_WARD_CD,
   BOSS_WARD_TIME,
   BOSS_ENRAGE_AT,
+  BOSS_NULL_CD,
+  BOSS_NULL_RADIUS,
+  BOSS_NULL_SLOW,
+  BOSS_NULL_TIME,
+  BOSS_DEVOUR_CD,
+  BOSS_DEVOUR_HEAL,
+  BOSS_METEOR_CD,
+  BOSS_METEOR_COUNT,
+  BOSS_METEOR_DOWN,
+  BOSS_CHAINS_CD,
+  BOSS_CHAINS_RADIUS,
+  BOSS_CHAINS_TIME,
+  BOSS_CHAINS_DR,
+  BOSS_WARP_CD,
+  BOSS_WARP_DIST,
+  bossKit,
+  CRIT_CHANCE,
+  critBonusFrom,
+  critMultiplierFrom,
+  towerUpgradeCount,
+  fmtCritPct,
   HERO_BY_ID,
   HERO_MAX_LEVEL,
   heroCooldown,
@@ -159,6 +181,14 @@ interface Enemy {
   summonCd: number;
   blinkCd: number;
   wardCd: number;
+  /** Null Field / Soul Devour / Meteor Fall / Rift Chains / Warp Surge timers */
+  nullCd: number;
+  devourCd: number;
+  meteorCd: number;
+  chainsCd: number;
+  warpCd: number;
+  /** damage reduction from Rift Chains (minions shielded by their boss) */
+  link: number;
   /** seconds of damage reduction left on the Bulwark skill */
   ward: number;
   enraged: boolean;
@@ -192,7 +222,14 @@ interface BT {
   lineupIdx: number; // -1 = teammate
   owner: string;
   atkMul: number;
+  /** Null Field: seconds left hexed (fires much slower) */
+  hexT: number;
+  /** Meteor Fall: seconds left offline (cannot fire at all) */
+  downT: number;
 }
+/** a falling rock telegraphed by a boss — the shadow grows, then it lands */
+interface Met { x: number; y: number; t: number; total: number; uid: number; color: string; done?: boolean }
+
 interface Proj {
   x: number;
   y: number;
@@ -224,6 +261,8 @@ interface Proj {
   burnDur?: number;
   /** explosion radius on impact (m) */
   blast?: number;
+  /** ground-slam shots throw a bigger shockwave on impact */
+  shockwave?: boolean;
   /** splash damage as a share of the shot's own damage (1 = full damage) */
   blastDmg?: number;
   /** this shot always crits (overcharged lances, fireballs) */
@@ -329,6 +368,11 @@ interface G {
   fpsT: number;
   frames: number;
   sp: number;
+  /** crits landed this run + the biggest single hit, for the HUD */
+  crits: number;
+  bestHit: number;
+  /** Meteor Fall telegraphs waiting to land */
+  meteors: Met[];
   /** summons bought this run — drives the summon price */
   spSpend: number;
   /** ascents bought this run — drives the ascent price */
@@ -455,6 +499,9 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     skillCasts: 0,
     wavesCleared: 0,
     tokensAwarded: false,
+    crits: 0,
+    bestHit: 0,
+    meteors: [],
     final: null,
   };
   // no free placements: the opening SP is spent on summons by the player
@@ -592,6 +639,9 @@ export default function Battle({
     let boltCache: { x: number; y: number }[] = [];
 
     const fxOn = () => saveRef.current.fx;
+    /** the merged crit multiplier: base + 8% for every upgrade on the account.
+     *  Tower levels can't change mid-run, so this is resolved once. */
+    const runCritMul = critMultiplierFrom(saveRef.current.levels);
     /** screen shake that honours the Screen Shake setting */
     const fxShake = (n: number) => (saveRef.current.shakeFx ? Math.min(14, g.shake + n) : g.shake);
 
@@ -739,6 +789,52 @@ export default function Battle({
       hitStop(tier >= 2 ? 0.06 : 0.03);
     };
 
+    /** CRIT! / BIG CRIT! / MEGA CRIT! / APOCALYPTIC! per tier */
+    const CRIT_LABEL = ["", "CRIT!", "BIG CRIT!", "MEGA CRIT!", "APOCALYPTIC!"];
+
+    /**
+     * The crit package. Everything scales off the tier so a tier-1 poke stays
+     * readable and a tier-4 apocalypse rewrites the screen: layered shockwaves,
+     * a gold spark storm, star sparkles, spinning debris, an impact flash, a
+     * freeze-frame, camera punch and a colour split.
+     */
+    const critFx = (_e: Enemy, p: { x: number; y: number }, tier: number, mul: number, _dmg: number, tw?: BT) => {
+      void mul;
+      const heavy = tier >= 3;
+      const gold = tier >= 4 ? "#fff6c4" : tier >= 3 ? "#fff2b0" : "#ffd23f";
+      // --- the starburst itself
+      burst(p.x, p.y, gold, tier >= 4 ? 34 : tier >= 3 ? 24 : tier >= 2 ? 16 : 10, tier >= 3 ? 380 : 250);
+      burst(p.x, p.y, "#ff8c3d", tier >= 2 ? 12 : 5, 180);
+      // --- layered shockwaves: three rings at staggered radii
+      shock(p.x, p.y, gold, tier >= 4 ? 74 : tier >= 3 ? 58 : 42, 0.5);
+      ring(p.x, p.y, gold, tier >= 3 ? 62 : 44);
+      if (tier >= 2) ring(p.x, p.y, "#ff8c3d", tier >= 3 ? 88 : 64);
+      if (heavy) {
+        ring(p.x, p.y, "#ffffff", tier >= 4 ? 118 : 96);
+        glow(p.x, p.y, "#ffd23f", tier >= 4 ? 150 : 110, 0.5);
+      }
+      // --- debris + sparkles
+      if (tier >= 2) shards(p.x, p.y, gold, tier >= 4 ? 20 : tier >= 3 ? 14 : 8, tier >= 3 ? 320 : 220);
+      stars(p.x, p.y, gold, tier >= 4 ? 22 : tier >= 3 ? 14 : 7, tier >= 3 ? 90 : 54);
+      // --- a lance of light back to the tower that threw it
+      if (tw?.cell && g.bolts.length < 44) {
+        const tp = cellCenter(tw.cell.c, tw.cell.r);
+        g.bolts.push(randBolt(tp.x, tp.y, p.x, p.y, gold, tier >= 4 ? 7 : tier >= 3 ? 5 : 3, 0.22, performance.now()));
+      }
+      // --- screen-level drama
+      if (tier >= 2) flash(tier >= 4 ? "#fff2b0" : "#ffd23f", tier >= 4 ? 0.24 : 0.14);
+      if (tier >= 3) {
+        punch(tier >= 4 ? 0.9 : 0.55, tier >= 4 ? 0.8 : 0.4);
+        hitStop(tier >= 4 ? 0.11 : 0.06);
+      }
+      g.shake = fxShake(tier >= 4 ? 11 : tier >= 3 ? 7 : tier >= 2 ? 4 : 1.6);
+      // --- and a lingering ring of gold light on the ground where it landed
+      if (tier >= 4) shock(p.x, p.y, "#fff2b0", 150, 0.75);
+      // --- sound: the higher the tier, the fatter the hit
+      if (tier >= 3) sfx.critBig();
+      else sfx.crit();
+    };
+
     const summonCost = () => spCost(g.spSpend);
     /** ascent has its own price ladder so summoning never price-gouges upgrades */
     const ascCost = () => spCost(g.ascSpend);
@@ -838,13 +934,11 @@ export default function Battle({
     const dealDamage = (e: Enemy, raw: number, opt: { alwaysCrit?: boolean; tw?: BT; color?: string }) => {
       if (e.dead) return;
       let crit = opt.alwaysCrit ?? false;
-      if (!crit) {
-        const cc = 0.1;
-        crit = Math.random() < cc;
-      }
+      if (!crit) crit = Math.random() < CRIT_CHANCE;
       // note: tower/aura multipliers are already folded into `raw` by the caller
       let dmg = raw * (1 - e.armor);
       if (e.ward > 0) dmg *= 0.45; // boss Bulwark
+      if (e.link > 0) dmg *= 1 - BOSS_CHAINS_DR; // Rift Chains shield
       if (e.slowT > 0) dmg *= 1 + SLOW_VULN; // chilled enemies shatter easier
       if (e.encased > 0) dmg *= 2; // Absolute Zero: ice doubles everything that lands
       if (opt.tw?.def.id === "hellstorm") {
@@ -861,29 +955,47 @@ export default function Battle({
         const cap = tier > 0 ? opt.tw.def.awk2!.mult[tier - 1] : 0;
         dmg *= 1 + Math.min(cap, opt.tw.streak) * opt.tw.def.killStack;
       }
-      if (crit) dmg *= 1.6;
-      // crits are the loudest thing on screen: heavy number + shockwave + shake
-      const critTier = crit ? (dmg / Math.max(1, e.max) >= 0.5 ? 3 : dmg > 400 ? 2 : 1) : 0;
+      // the merged account crit stat, resolved once per run (see `runCritMul`)
+      if (crit) dmg *= runCritMul;
+      // crits are the loudest thing on screen: heavy number + shockwave + shake.
+      // The tier climbs with the multiplier *and* with how much of the target's
+      // health the hit ate, so a maxed account's crit is a genuine event.
+      const share = dmg / Math.max(1, e.max);
+      const critTier = crit
+        ? share >= 0.75 || runCritMul >= 12
+          ? 4
+          : share >= 0.35 || runCritMul >= 6
+            ? 3
+            : runCritMul >= 2.4 || dmg > 900
+              ? 2
+              : 1
+        : 0;
       e.hp -= dmg;
       const p = enemyPos(e);
       if (crit) {
-        // starburst: gold sparks fly out, a shockwave ring snaps open
-        burst(p.x, p.y, critTier >= 3 ? "#fff2b0" : "#ffd23f", critTier >= 3 ? 26 : critTier === 2 ? 18 : 12, critTier >= 3 ? 340 : 250);
-        ring(p.x, p.y, critTier >= 3 ? "#fff2b0" : "#ffcf4d", critTier >= 3 ? 60 : 44);
-        if (critTier >= 2) {
-          ring(p.x, p.y, "#ff8c3d", critTier >= 3 ? 86 : 62);
-          g.shake = fxShake(critTier >= 3 ? 7 : 4);
-        }
-        sfx.crit();
+        critFx(e, p, critTier, runCritMul, dmg, opt.tw);
+      } else if (fxOn()) {
+        // ordinary hits keep a modest pop so crits still stand out
+        pushPart({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.22, max: 0.22, size: 26, color: opt.color || "#ffffff", kind: "shock", add: true });
       }
       if (saveRef.current.dmgNums) {
-        const size = crit ? 26 + critTier * 7 : 15;
-        addText(p.x + (Math.random() - 0.5) * 18, p.y - 26, String(Math.round(dmg)), crit ? "#ffd23f" : "#ffffff", size, crit);
-        if (crit) addText(p.x, p.y - 52 - critTier * 4, critTier >= 3 ? "MEGA CRIT!" : "CRIT!", "#ff8c3d", 12 + critTier * 2, true);
+        const size = crit ? 24 + critTier * 6 : 15;
+        addText(p.x + (Math.random() - 0.5) * 18, p.y - 26, String(Math.round(dmg)), crit ? (critTier >= 3 ? "#fff6c4" : "#ffd23f") : "#ffffff", size, crit);
+        if (crit) addText(p.x, p.y - 54 - critTier * 5, CRIT_LABEL[critTier] || "CRIT!", "#ff8c3d", 12 + critTier * 2, true);
+        if (crit && critTier >= 3) addText(p.x, p.y - 74 - critTier * 5, `×${runCritMul.toFixed(2)} CRIT DMG`, "#ffb324", 12, true);
+      }
+      if (crit) {
+        g.crits++;
+        if (dmg > g.bestHit) g.bestHit = Math.round(dmg);
       }
       burst(p.x, p.y, opt.color || "#ffcf4d", crit ? 8 : 4);
       if (e.hp <= 0) {
         if (opt.tw && (opt.tw.def.id === "hellstorm" || opt.tw.def.killStack)) opt.tw.streak++;
+        // Soul Siphon pays the grid on every kill it lands
+        if (opt.tw?.def.spGain) {
+          g.sp += opt.tw.def.spGain;
+          glow(p.x, p.y, "#c44dff", 44, 0.35);
+        }
         killReward(e);
       }
     };
@@ -1127,6 +1239,78 @@ export default function Battle({
             const tp = enemyPos(e);
             push({ speed: 480, blast: radius, blastDmg: 0.7, kind: "cannon" }, tp, e);
           });
+          break;
+        }
+        // ---------- second wave of towers ----------
+        case "rime": {
+          // frost shell: wide splash plus a real freeze roll
+          const fr2 = Math.min(1, (t.def.freeze || 0) + (t.def.upFreeze || 0) * upg + (t.def.ascFreeze || 0) * asc);
+          push({
+            speed: 380,
+            kind: "cannon",
+            splash: (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc,
+            freezePct: fr2,
+          });
+          break;
+        }
+        case "siphon": {
+          // soul bolt: damage scales with every kill this tower has banked
+          push({ speed: 520, kind: "siphon" });
+          break;
+        }
+        case "quake": {
+          const stunS = (t.def.stun || 0) + (t.def.upStun || 0) * upg + (t.def.ascStun || 0) * asc;
+          const radius = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          // ground slam centred on the front enemy
+          push({ speed: 460, kind: "cannon", splash: radius, stunS, blastDmg: 0.85, shockwave: true });
+          g.shake = fxShake(2.5);
+          break;
+        }
+        case "storm": {
+          push({
+            speed: 700,
+            chain: Math.round((t.def.chain || 0) + (t.def.upChain || 0) * upg + (t.def.ascChain || 0) * asc),
+            kind: "tesla",
+          });
+          break;
+        }
+        case "plague": {
+          const radius = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          const pct2 = (t.def.burnPct || 0) + (t.def.upBurnPct || 0) * upg + (t.def.ascBurnPct || 0) * asc;
+          push({
+            speed: 420,
+            kind: "cannon",
+            splash: radius,
+            blastDmg: 0.75,
+            burnDps: dmg * pct2,
+            burnDur: t.def.burnDur || 5,
+            slow: (t.def.slow || 0) + (t.def.upSlow || 0) * upg,
+            slowDur: t.def.slowDur || 3,
+          });
+          break;
+        }
+        case "rail": {
+          const pierce = Math.round((t.def.pierce || 0) + (t.def.upPierce || 0) * upg + (t.def.ascPierce || 0) * asc);
+          const tier1 = saveRef.current.awn["rail"]?.[0] || 0;
+          const over = tier1 > 0 && Math.random() < t.def.awk1!.chance[tier1 - 1];
+          const mult = over ? 1 + t.def.awk1!.mult[tier1 - 1] : 1;
+          const tier2 = saveRef.current.awn["rail"]?.[1] || 0;
+          const burnDps = tier2 > 0 ? (t.def.awk2!.mult[tier2 - 1] * dmg) / 4 : 0;
+          push({
+            speed: 1000,
+            pierce,
+            hitIds: [],
+            dmg: dmg * mult,
+            burnDps,
+            burnDur: burnDps > 0 ? 4 : 0,
+            alwaysCrit: over,
+            kind: "plasma",
+          });
+          // muzzle flash + a slug trail straight down the firing line
+          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, over ? "#fff6c4" : "#7fe9ff", over ? 5 : 3, 0.2, performance.now()));
+          glow(p.x, p.y, "#7fe9ff", 60, 0.3);
+          g.shake = fxShake(2);
+          if (over) addText(ep.x, ep.y - 42, "OVER PENETRATION", "#7fe9ff", 14, true);
           break;
         }
         case "dragon": {
@@ -1701,7 +1885,7 @@ export default function Battle({
         g.towers.push({
           uid: uidC++, def, menuLv: saveRef.current.levels[id], bLv: 1, points: 0, cell,
           cd: 0.6, shots: 0, angle: 0, rapidT: 0, rapidCool: 5, streak: 0, flash: 0, lineupIdx: idx,
-          owner: "you", atkMul: 1,
+          owner: "you", atkMul: 1, hexT: 0, downT: 0,
         });
         const p = cellCenter(cell.c, cell.r);
         levelFlourish(p.x, p.y, RARITY[def.rarity].color, "DEPLOYED", def.rarity === "legendary" ? 3 : 1);
@@ -1876,6 +2060,8 @@ export default function Battle({
             spv: 6 + g.round * 2 + (boss ? 40 : 0), dead: false, wob: Math.random() * 7,
             slow: 0, slowT: 0, burnT: 0, burnDps: 0,
             summonCd: BOSS_SUMMON_CD, blinkCd: BOSS_BLINK_CD, wardCd: BOSS_WARD_CD, ward: 0,
+            nullCd: BOSS_NULL_CD, devourCd: BOSS_DEVOUR_CD, meteorCd: BOSS_METEOR_CD,
+            chainsCd: BOSS_CHAINS_CD, warpCd: BOSS_WARP_CD, link: 0,
             enraged: false, cast: 0,
             encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
           });
@@ -1918,63 +2104,196 @@ export default function Battle({
         if (e.dead) continue;
         // ---------- boss skills ----------
         if (isBossType(e.type)) {
+          const kit = bossKit(e.type);
+          const ep0 = enemyPos(e);
+          const NAME = ENEMY_TYPES[e.type].name;
+          /** fire a skill: banner + bar flash, all keyed off the shared table */
+          const castSkill = (id: keyof typeof BOSS_SKILL_BY_ID, tell?: string) => {
+            const sk = BOSS_SKILL_BY_ID[id];
+            e.cast = 1.15;
+            g.bossCast = { skill: sk.name, tell: tell ?? `${NAME} ${sk.tell}`, color: sk.color, t: 2.2 };
+          };
           e.cast = Math.max(0, e.cast - dt);
           e.ward = Math.max(0, e.ward - dt);
-          if (!e.enraged && e.hp / e.max <= BOSS_ENRAGE_AT) {
+
+          // --- Blood Frenzy: one-shot, below 45% health
+          if (kit.includes("enrage") && !e.enraged && e.hp / e.max <= BOSS_ENRAGE_AT) {
             e.enraged = true;
             e.speed *= 1.45;
             e.ward = Math.max(e.ward, 1.2);
-            e.cast = 1.2;
-            g.bossCast = { skill: "Blood Frenzy", tell: `${ENEMY_TYPES[e.type].name} ${BOSS_SKILLS[3].tell}`, color: BOSS_SKILLS[3].color, t: 2.2 };
-            burst(enemyPos(e).x, enemyPos(e).y, "#ff4d5e", 22, 240);
+            castSkill("enrage");
+            burst(ep0.x, ep0.y, "#ff4d5e", 22, 240);
+            shock(ep0.x, ep0.y, "#ff4d5e", 90, 0.6);
             sfx.leak();
           }
-          e.summonCd -= dt;
-          if (e.summonCd <= 0) {
-            e.summonCd = BOSS_SUMMON_CD;
-            const ep = enemyPos(e);
-            const et0 = ENEMY_TYPES[0];
-            const nSum = 2 + (g.round >= 16 ? 1 : 0);
-            for (let i = 0; i < nSum; i++) {
-              const hp = roundHp(g.round) * et0.hpMul * 0.6;
-              const back = Math.max(0, e.d - 30 - i * 26);
-              g.enemies.push({
-                id: eidC++, d: back, hp, max: hp, speed: et0.speed * (1 + g.round * 0.012) * 1.25, type: 0,
-                frozen: 0, stun: 0, armor: 0, lives: 1, gold: et0.gold + Math.floor(g.round / 4),
-                spv: 4 + g.round, dead: false, wob: Math.random() * 7,
-                slow: 0, slowT: 0, burnT: 0, burnDps: 0,
-                summonCd: 0, blinkCd: 0, wardCd: 0, ward: 0, enraged: false, cast: 0,
-                encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
-              });
-              ring(ep.x, ep.y, "#c44dff", 30 + i * 8);
+
+          // --- Rift Call
+          if (kit.includes("summon")) {
+            e.summonCd -= dt;
+            if (e.summonCd <= 0) {
+              e.summonCd = BOSS_SUMMON_CD;
+              const et0 = ENEMY_TYPES[0];
+              const nSum = 2 + (g.round >= 16 ? 1 : 0);
+              for (let i = 0; i < nSum; i++) {
+                const hp = roundHp(g.round) * et0.hpMul * 0.6;
+                const back = Math.max(0, e.d - 30 - i * 26);
+                g.enemies.push({
+                  id: eidC++, d: back, hp, max: hp, speed: et0.speed * (1 + g.round * 0.012) * 1.25, type: 0,
+                  frozen: 0, stun: 0, armor: 0, lives: 1, gold: et0.gold + Math.floor(g.round / 4),
+                  spv: 4 + g.round, dead: false, wob: Math.random() * 7,
+                  slow: 0, slowT: 0, burnT: 0, burnDps: 0,
+                  summonCd: 0, blinkCd: 0, wardCd: 0, ward: 0,
+                  nullCd: 0, devourCd: 0, meteorCd: 0, chainsCd: 0, warpCd: 0, link: 0,
+                  enraged: false, cast: 0,
+                  encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
+                });
+                ring(ep0.x, ep0.y, "#c44dff", 30 + i * 8);
+              }
+              castSkill("summon");
+              sfx.summon();
             }
-            e.cast = 1.1;
-            g.bossCast = { skill: BOSS_SKILLS[0].name, tell: `${ENEMY_TYPES[e.type].name} ${BOSS_SKILLS[0].tell}`, color: BOSS_SKILLS[0].color, t: 2.2 };
-            sfx.summon();
           }
-          e.blinkCd -= dt;
-          if (e.blinkCd <= 0) {
-            e.blinkCd = BOSS_BLINK_CD;
-            const from = enemyPos(e);
-            e.d = Math.min(e.d + 120, PATH_LEN - 4);
-            const to = enemyPos(e);
-            ring(from.x, from.y, "#35e0ff", 26);
-            ring(to.x, to.y, "#35e0ff", 34);
-            burst(to.x, to.y, "#35e0ff", 14, 200);
-            e.cast = 0.9;
-            g.bossCast = { skill: BOSS_SKILLS[1].name, tell: `${ENEMY_TYPES[e.type].name} ${BOSS_SKILLS[1].tell}`, color: BOSS_SKILLS[1].color, t: 2.2 };
-            sfx.hover();
+
+          // --- Void Step
+          if (kit.includes("blink")) {
+            e.blinkCd -= dt;
+            if (e.blinkCd <= 0) {
+              e.blinkCd = BOSS_BLINK_CD;
+              ring(ep0.x, ep0.y, "#35e0ff", 26);
+              e.d = Math.min(e.d + 120, PATH_LEN - 4);
+              const to = enemyPos(e);
+              ring(to.x, to.y, "#35e0ff", 34);
+              burst(to.x, to.y, "#35e0ff", 14, 200);
+              castSkill("blink");
+              sfx.hover();
+            }
           }
-          e.wardCd -= dt;
-          if (e.wardCd <= 0 && e.hp / e.max < 0.85) {
-            e.wardCd = BOSS_WARD_CD;
-            e.ward = BOSS_WARD_TIME;
-            e.cast = 1.1;
-            g.bossCast = { skill: BOSS_SKILLS[2].name, tell: `${ENEMY_TYPES[e.type].name} ${BOSS_SKILLS[2].tell}`, color: BOSS_SKILLS[2].color, t: 2.2 };
+
+          // --- Bulwark
+          if (kit.includes("ward")) {
+            e.wardCd -= dt;
+            if (e.wardCd <= 0 && e.hp / e.max < 0.85) {
+              e.wardCd = BOSS_WARD_CD;
+              e.ward = BOSS_WARD_TIME;
+              castSkill("ward");
+              shock(ep0.x, ep0.y, "#8fb0ff", 70, 0.5);
+            }
+          }
+
+          // --- Null Field: hex the towers guarding the lane
+          if (kit.includes("nullfield")) {
+            e.nullCd -= dt;
+            if (e.nullCd <= 0) {
+              const near = g.towers
+                .filter((t) => t.cell && Math.hypot(cellCenter(t.cell.c, t.cell.r).x - ep0.x, cellCenter(t.cell.c, t.cell.r).y - ep0.y) <= BOSS_NULL_RADIUS)
+                .slice(0, 4);
+              if (near.length) {
+                e.nullCd = BOSS_NULL_CD;
+                for (const t of near) {
+                  t.hexT = Math.max(t.hexT, BOSS_NULL_TIME);
+                  const tp = cellCenter(t.cell!.c, t.cell!.r);
+                  ring(tp.x, tp.y, "#b06bff", 44);
+                  glow(tp.x, tp.y, "#b06bff", 60, 0.5);
+                  if (g.bolts.length < 44) g.bolts.push(randBolt(ep0.x, ep0.y, tp.x, tp.y, "#c98cff", 2.6, 0.3, performance.now()));
+                }
+                castSkill("nullfield", `${NAME} hexes ${near.length} tower${near.length > 1 ? "s" : ""}`);
+                shock(ep0.x, ep0.y, "#b06bff", BOSS_NULL_RADIUS, 0.7);
+                sfx.zap();
+              }
+            }
+          }
+
+          // --- Soul Devour: eat its own minions to heal
+          if (kit.includes("devour")) {
+            e.devourCd -= dt;
+            if (e.devourCd <= 0 && e.hp / e.max < 0.92) {
+              const snacks = g.enemies.filter((o) => o !== e && !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= 300).slice(0, 3);
+              if (snacks.length) {
+                e.devourCd = BOSS_DEVOUR_CD;
+                for (const m of snacks) {
+                  const mp = enemyPos(m);
+                  m.dead = true;
+                  e.hp = Math.min(e.max, e.hp + e.max * BOSS_DEVOUR_HEAL);
+                  if (g.bolts.length < 44) g.bolts.push(randBolt(mp.x, mp.y, ep0.x, ep0.y, "#ff8c3d", 3, 0.3, performance.now()));
+                  burst(mp.x, mp.y, "#ff8c3d", 12, 160);
+                  stars(ep0.x, ep0.y, "#ffd23f", 6, 40);
+                }
+                castSkill("devour", `${NAME} devours ${snacks.length} minion${snacks.length > 1 ? "s" : ""} (+${Math.round(BOSS_DEVOUR_HEAL * snacks.length * 100)}% HP)`);
+                sfx.explosion();
+              }
+            }
+          }
+
+          // --- Meteor Fall: burning rocks knock towers offline
+          if (kit.includes("meteor")) {
+            e.meteorCd -= dt;
+            if (e.meteorCd <= 0) {
+              const targets = g.towers.filter((t) => t.cell && t.downT <= 0);
+              if (targets.length) {
+                e.meteorCd = BOSS_METEOR_CD;
+                for (let i = 0; i < BOSS_METEOR_COUNT; i++) {
+                  const t = targets[(i + Math.floor(g.t * 3)) % targets.length];
+                  const tp = cellCenter(t.cell!.c, t.cell!.r);
+                  g.meteors.push({ x: tp.x, y: tp.y, t: 0.75 + i * 0.12, total: 0.75 + i * 0.12, uid: t.uid, color: "#ff7a3d" });
+                }
+                castSkill("meteor");
+                sfx.hover();
+              }
+            }
+          }
+
+          // --- Rift Chains: shield every minion around it
+          if (kit.includes("chains")) {
+            e.chainsCd -= dt;
+            if (e.chainsCd <= 0) {
+              const herd = g.enemies.filter((o) => !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= BOSS_CHAINS_RADIUS);
+              if (herd.length) {
+                e.chainsCd = BOSS_CHAINS_CD;
+                for (const m of herd) {
+                  m.link = Math.max(m.link, BOSS_CHAINS_TIME);
+                  ring(enemyPos(m).x, enemyPos(m).y, "#4de8ff", 34);
+                }
+                castSkill("chains", `${NAME} shields ${herd.length} minion${herd.length > 1 ? "s" : ""}`);
+                shock(ep0.x, ep0.y, "#4de8ff", BOSS_CHAINS_RADIUS, 0.7);
+                sfx.freeze();
+              }
+            }
+          }
+
+          // --- Warp Surge: wrench the whole horde down the lane
+          if (kit.includes("warp")) {
+            e.warpCd -= dt;
+            if (e.warpCd <= 0) {
+              e.warpCd = BOSS_WARP_CD;
+              let moved = 0;
+              for (const m of g.enemies) {
+                if (m.dead || isBossType(m.type)) continue;
+                const before = enemyPos(m);
+                ring(before.x, before.y, "#ff4fd8", 26);
+                m.d = Math.min(m.d + BOSS_WARP_DIST, PATH_LEN - 4);
+                const after = enemyPos(m);
+                ring(after.x, after.y, "#ff4fd8", 30);
+                burst(after.x, after.y, "#ff4fd8", 6, 140);
+                moved++;
+              }
+              if (moved) {
+                castSkill("warp", `${NAME} warps ${moved} enem${moved > 1 ? "ies" : "y"} forward`);
+                g.shake = fxShake(6);
+                flash("#ff4fd8", 0.18);
+                sfx.summon();
+              }
+            }
           }
         }
         if (e.slowT > 0) e.slowT -= dt;
         // ---------- skill status effects ----------
+        if (e.link > 0) {
+          e.link -= dt;
+          if (Math.random() < dt * 5) {
+            const lp = enemyPos(e);
+            pushPart({ x: lp.x, y: lp.y, vx: (Math.random() - 0.5) * 40, vy: -30, life: 0.35, max: 0.35, size: 3, color: "#4de8ff", kind: "spark", add: true });
+          }
+        }
         e.encased = Math.max(0, e.encased - dt);
         e.mark = Math.max(0, e.mark - dt);
         if (e.pulled > 0) {
@@ -2122,6 +2441,16 @@ export default function Battle({
         rate /= 1 + g.bonusAspd; // run-shop attack speed
         if (g.odT > 0) rate /= 1 + OVERDRIVE_ASPD; // Overdrive hero buff
         if (t.def.rapid && t.rapidT > 0) rate *= 0.32;
+        // ---------- boss hexes ----------
+        t.hexT = Math.max(0, t.hexT - dt);
+        t.downT = Math.max(0, t.downT - dt);
+        if (t.hexT > 0) {
+          rate *= 1 + BOSS_NULL_SLOW; // Null Field
+          if (Math.random() < dt * 3) {
+            pushPart({ x: p.x + (Math.random() - 0.5) * 54, y: p.y + (Math.random() - 0.5) * 54, vx: (Math.random() - 0.5) * 30, vy: -40, life: 0.4, max: 0.4, size: 3, color: "#b06bff", kind: "spark", add: true });
+          }
+        }
+        if (t.downT > 0) rate = 999; // Meteor Fall: offline until it reboots
         t.cd -= dt;
         if (t.cd <= 0) {
           let target: Enemy | undefined;
@@ -2146,6 +2475,30 @@ export default function Battle({
             t.cd = 0.08;
           }
         }
+      }
+
+      // ---------- boss meteors: telegraphed rocks that take towers offline ----------
+      if (g.meteors.length) {
+        for (const m of g.meteors) {
+          m.t -= dt;
+          if (m.t <= 0 && !m.done) {
+            m.done = true;
+            const tw2 = g.towers.find((t) => t.uid === m.uid);
+            if (tw2) {
+              tw2.downT = Math.max(tw2.downT, BOSS_METEOR_DOWN);
+              tw2.flash = 0.3;
+            }
+            shock(m.x, m.y, "#ff7a3d", 96, 0.6);
+            burst(m.x, m.y, "#ffb324", 22, 280);
+            shards(m.x, m.y, "#ff7a3d", 12, 260);
+            embers(m.x, m.y, "#ffd23f", 10);
+            flash("#ff7a3d", 0.14);
+            punch(0.35, 0.25);
+            g.shake = fxShake(6);
+            sfx.explosion();
+          }
+        }
+        g.meteors = g.meteors.filter((m) => !m.done);
       }
 
       // projectiles
@@ -2344,6 +2697,39 @@ export default function Battle({
       const rec = t.flash > 0 ? t.flash * 30 : 0;
       const a = t.angle;
       const acc = t.def.accent || rc.color;
+      // a hexed tower sparks purple, an offline one is dark and smoking
+      if (t.hexT > 0 || t.downT > 0) {
+        const hex = t.hexT > 0;
+        const col = hex ? "#b06bff" : "#ff7a3d";
+        ctx.save();
+        ctx.globalAlpha = 0.35 + Math.sin(now / 90 + t.uid) * 0.15;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(x, y, 44, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 0.7;
+        ctx.lineWidth = 2;
+        for (let i = 0; i < 3; i++) {
+          const a0 = now / 220 + (i * Math.PI * 2) / 3;
+          ctx.beginPath();
+          ctx.arc(x, y, 38, a0, a0 + 0.7);
+          ctx.stroke();
+        }
+        if (!hex) {
+          ctx.globalAlpha = 0.8;
+          ctx.fillStyle = "#3a1206";
+          ctx.beginPath();
+          ctx.arc(x, y, 20, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = col;
+          ctx.font = "bold 20px system-ui";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("✕", x, y + 1);
+        }
+        ctx.restore();
+      }
       switch (towerArt(t.def)) {
         case "arrow":
           ctx.rotate(a);
@@ -3794,6 +4180,91 @@ export default function Battle({
         ctx.restore();
       }
 
+      // ---------- boss meteors: a growing shadow, then the rock itself ----------
+      for (const m of g.meteors) {
+        const k = 1 - Math.max(0, m.t) / m.total; // 0 -> 1 as it falls
+        ctx.save();
+        ctx.globalAlpha = 0.25 + k * 0.55;
+        ctx.strokeStyle = m.color;
+        ctx.lineWidth = 2 + k * 3;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 26 + (1 - k) * 60, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 0.2 + k * 0.4;
+        const shadow = ctx.createRadialGradient(m.x, m.y, 2, m.x, m.y, 40 + k * 16);
+        shadow.addColorStop(0, m.color);
+        shadow.addColorStop(1, "transparent");
+        ctx.fillStyle = shadow;
+        ctx.beginPath();
+        ctx.arc(m.x, m.y, 40 + k * 16, 0, Math.PI * 2);
+        ctx.fill();
+        // the rock, falling in from the top-right, with a fire trail
+        const rx = m.x + (1 - k) * 120;
+        const ry = m.y - (1 - k) * 300;
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = "lighter";
+        const trail = ctx.createLinearGradient(rx, ry, m.x, m.y);
+        trail.addColorStop(0, "transparent");
+        trail.addColorStop(1, m.color + "cc");
+        ctx.strokeStyle = trail;
+        ctx.lineWidth = 10;
+        ctx.beginPath();
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(m.x, m.y);
+        ctx.stroke();
+        ctx.globalCompositeOperation = "source-over";
+        ctx.fillStyle = "#3a1206";
+        ctx.strokeStyle = m.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(rx, ry, 12, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // ---------- Rift Chains: a living tether from the boss to each minion ----------
+      if (g.enemies.some((e) => !e.dead && e.link > 0)) {
+        const bosses = g.enemies.filter((e) => !e.dead && isBossType(e.type));
+        for (const m of g.enemies) {
+          if (m.dead || m.link <= 0 || isBossType(m.type)) continue;
+          const mp = enemyPos(m);
+          let best: Enemy | null = null;
+          let bd = 1e9;
+          for (const b of bosses) {
+            const bp = enemyPos(b);
+            const d = Math.hypot(bp.x - mp.x, bp.y - mp.y);
+            if (d < bd) {
+              bd = d;
+              best = b;
+            }
+          }
+          if (!best) continue;
+          const bp = enemyPos(best);
+          const fade = Math.min(1, m.link / 1.2);
+          ctx.save();
+          ctx.globalAlpha = 0.55 * fade;
+          ctx.globalCompositeOperation = "lighter";
+          ctx.strokeStyle = "#4de8ff";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([9, 6]);
+          ctx.lineDashOffset = -now / 26;
+          ctx.beginPath();
+          ctx.moveTo(bp.x, bp.y);
+          // sag the chain so it reads as weight, not a laser
+          ctx.quadraticCurveTo((bp.x + mp.x) / 2, (bp.y + mp.y) / 2 + 26, mp.x, mp.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 0.35 * fade;
+          ctx.beginPath();
+          ctx.arc(mp.x, mp.y, 20, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
       // ---------- ground zones, drawn under everything that stands on them ----------
       for (const z of g.zones) {
         const life = Math.max(0, Math.min(1, z.life / z.max));
@@ -4420,6 +4891,22 @@ export default function Battle({
             <span className="pill-dark text-[11px] text-[var(--dim)]">
               <span className="num">{g.enemies.length + g.spawnQ.length}</span> left
             </span>
+            {/* the merged crit stat, plus how many crits this run has landed */}
+            <span
+              className="pill-dark num-pop text-[11px] text-[#ffd23f]"
+              key={`crit-${g.crits}`}
+              style={{ borderColor: "#8a6a1a" }}
+              data-testid="crit-chip"
+              title={`Crit damage merged from ${towerUpgradeCount(save.levels)} tower upgrades`}
+            >
+              <span className="crit-chip-star">✦</span>
+              <span className="num" data-testid="crit-stat">{fmtCritPct(critBonusFrom(save.levels))}</span>
+              {g.crits > 0 && (
+                <span className="crit-chip-runs">
+                  · <span className="num">{g.crits}</span> crits · best <span className="num">{g.bestHit.toLocaleString("en-US")}</span>
+                </span>
+              )}
+            </span>
             {/* the run shop moved up here so the ascent cards get the whole bottom bar */}
             <button
               data-testid="battle-shop"
@@ -4493,20 +4980,26 @@ export default function Battle({
                     style={{ width: `${frac * 100}%`, background: `linear-gradient(90deg, ${et.color}, #ffcf4d)` }}
                   />
                 </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                  {BOSS_SKILLS.map((sk) => (
-                    <span
-                      key={sk.id}
-                      className="rounded px-1.5 py-0.5 text-[9px] font-bold leading-tight"
-                      style={{
-                        background: g.bossCast?.skill === sk.name ? sk.color : "rgba(0,0,0,0.45)",
-                        color: g.bossCast?.skill === sk.name ? "#160a2c" : sk.color,
-                        border: `1px solid ${sk.color}66`,
-                      }}
-                    >
-                      {sk.name}
-                    </span>
-                  ))}
+                <div className="mt-1.5 flex flex-wrap items-center gap-1" data-testid="boss-kit">
+                  {bossKit(e.type).map((id) => {
+                    const sk = BOSS_SKILL_BY_ID[id];
+                    const live = g.bossCast?.skill === sk.name;
+                    return (
+                      <span
+                        key={id}
+                        data-skill={id}
+                        className={`boss-chip ${live ? "on boss-chip-fire" : ""}`}
+                        style={{
+                          background: live ? sk.color : "rgba(0,0,0,0.45)",
+                          color: live ? "#160a2c" : sk.color,
+                          borderColor: `${sk.color}66`,
+                        }}
+                      >
+                        <i className="boss-chip-glyph">{sk.glyph}</i>
+                        {sk.name}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -4633,6 +5126,9 @@ export default function Battle({
           >
             +
           </button>
+        </div>
+        <div className="pointer-events-auto">
+          <FullscreenButton />
         </div>
       </div>
 
@@ -4792,16 +5288,20 @@ export default function Battle({
                 {g.cut.name.toUpperCase()}
               </div>
               <div className="mt-2 text-[13px] font-bold tracking-[0.3em] text-[var(--txt)]">{g.cut.sub}</div>
-              <div className="mt-3 flex items-center justify-center gap-2">
-                {BOSS_SKILLS.map((sk) => (
-                  <span
-                    key={sk.id}
-                    className="rounded-md border px-2 py-0.5 text-[10px] font-bold"
-                    style={{ borderColor: `${sk.color}88`, color: sk.color, background: "rgba(0,0,0,0.4)" }}
-                  >
-                    {sk.name}
-                  </span>
-                ))}
+              <div className="mt-3 flex max-w-[560px] flex-wrap items-center justify-center gap-1.5">
+                {bossKit(g.cut.type).map((id, i) => {
+                  const sk = BOSS_SKILL_BY_ID[id];
+                  return (
+                    <span
+                      key={id}
+                      className="boss-chip boss-chip-cut"
+                      style={{ borderColor: `${sk.color}88`, color: sk.color, background: "rgba(0,0,0,0.45)", animationDelay: `${i * 70}ms` }}
+                    >
+                      <i className="boss-chip-glyph">{sk.glyph}</i>
+                      {sk.name}
+                    </span>
+                  );
+                })}
               </div>
               <div className="mt-5 text-[11px] font-bold tracking-[0.25em] text-[var(--dim)]">
                 TAP TO CONTINUE · {Math.max(0, Math.ceil(g.cut.t))}s

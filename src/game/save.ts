@@ -6,7 +6,6 @@ import {
   TASK_MILESTONES,
   TASK_POINTS_TOTAL,
   DAILY_REWARDS,
-  GIFT_CODES,
   GUILD_BY_ID,
   GUILD_QUESTS,
   HERO_BY_ID,
@@ -17,13 +16,14 @@ import {
   TROPHY_LOSS,
   TROPHY_WIN,
   eventForDate,
+  critBonusFrom,
+  critMultiplierFrom,
   heroUpgradeCost,
   leagueFor,
-  normaliseCode,
+  towerUpgradeCount,
   type ChipBag,
   type ChipId,
   type DailyReward,
-  type GiftCode,
   type GuildShopItem,
   type Rarity,
   type TaskId,
@@ -113,8 +113,6 @@ export interface SaveData {
   lastSeen: number;
   /** arena zoom multiplier, 1 = fitted to the screen */
   zoom: number;
-  /** gift codes already redeemed (normalised form) */
-  redeemed: string[];
 }
 
 const KEY = "magictd_save_v1";
@@ -175,7 +173,6 @@ export function defaultSave(): SaveData {
     lastDaily: "",
     lastSeen: 0,
     zoom: 1.1,
-    redeemed: [],
   };
 }
 
@@ -203,7 +200,6 @@ function normalise(s: SaveData): SaveData {
   s.tasks.milestones = Array.isArray(s.tasks.milestones) ? s.tasks.milestones.map(Number) : [];
   s.streak = Math.max(0, Number.isFinite(s.streak) ? s.streak : 0);
   s.dailyStreak = Number.isFinite(s.dailyStreak) ? Math.max(0, Math.min(7, s.dailyStreak)) : 0;
-  s.redeemed = Array.isArray(s.redeemed) ? s.redeemed.map(String) : [];
   return s;
 }
 
@@ -734,53 +730,13 @@ export function claimCompetition(s: SaveData, gems: number, gold: number, chips:
   return true;
 }
 
-export type RedeemResult =
-  | { ok: true; code: string; label: string; summary: string; color: string }
-  | { ok: false; reason: "empty" | "unknown" | "used" };
-
-/**
- * Redeem a gift code. Codes live in GIFT_CODES (src/game/data.ts) and each one
- * can only be claimed once per save.
- */
-export function redeemGiftCode(s: SaveData, raw: string, codes: Record<string, GiftCode> = GIFT_CODES): RedeemResult {
-  const code = normaliseCode(raw);
-  if (!code) return { ok: false, reason: "empty" };
-  if (s.redeemed.includes(code)) return { ok: false, reason: "used" };
-  const gift = Object.entries(codes).find(([key]) => normaliseCode(key) === code)?.[1];
-  if (!gift) return { ok: false, reason: "unknown" };
-
-  const bits: string[] = [];
-  if (gift.gold) {
-    s.gold += gift.gold;
-    bits.push(`${gift.gold} gold`);
-  }
-  if (gift.gems) {
-    s.gems += gift.gems;
-    bits.push(`${gift.gems} gems`);
-  }
-  if (gift.tokens) {
-    s.tokens += gift.tokens;
-    bits.push(`${gift.tokens} tokens`);
-  }
-  if (gift.frags) {
-    for (let i = 0; i < gift.frags.n; i++) addFrag(s, randFrag(rarityBias(gift.frags.rarity)), 1);
-    bits.push(`${gift.frags.n} ${gift.frags.rarity} fragments`);
-  }
-  gift.towers?.forEach((t) => {
-    if (!TOWER_BY_ID[t.id]) return;
-    addFrag(s, t.id, t.n);
-    bits.push(`${t.n} ${TOWER_BY_ID[t.id].name} fragments`);
-  });
-
-  s.redeemed = [...s.redeemed, code];
-  return {
-    ok: true,
-    code,
-    label: gift.label,
-    summary: bits.length ? bits.join(" · ") : "nothing but good vibes",
-    color: gift.frags ? RARITY[gift.frags.rarity].color : "#ffcf4d",
-  };
-}
+// ---------- crit damage (merged from every tower upgrade) ----------
+/** total upgrade levels banked across every tower the player owns */
+export const towerUpgrades = (s: SaveData) => towerUpgradeCount(s.levels);
+/** merged account crit bonus: 0.6 base + 0.08 per tower upgrade, capped */
+export const critBonus = (s: SaveData) => critBonusFrom(s.levels);
+/** the multiplier every crit in the arena uses */
+export const critMul = (s: SaveData) => critMultiplierFrom(s.levels);
 
 export function unlockedTowers(s: SaveData): string[] {
   return Object.entries(s.levels)

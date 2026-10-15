@@ -30,6 +30,12 @@ export type TowerKind =
   | "spike"
   | "boomer"
   | "toxin"
+  | "rime"
+  | "siphon"
+  | "quake"
+  | "storm"
+  | "plague"
+  | "rail"
   | "axe"
   | "frost"
   | "mortar"
@@ -377,6 +383,67 @@ export const TOWERS: TowerDef[] = [
       mult: [1, 2, 3, 5, 8],
     },
   },
+  // ---------------------------------------------------------------
+  // SECOND WAVE OF TOWERS — 6 more, one for every niche
+  // ---------------------------------------------------------------
+  {
+    id: "rime", name: "Rime Cannon", rarity: "normal", kind: "cannon", art: "cannon", accent: "#9fe8ff",
+    target: "front",
+    desc: "Frost shells that burst wide and lock whole packs into ice.",
+    dmg: 90, upDmg: 7, ascDmg: 18, rate: 1.1, upRate: 0.018, ascRate: 0.02,
+    splash: 85, upSplash: 6, ascSplash: 8,
+    freeze: 0.22, upFreeze: 0.04, ascFreeze: 0.05, unlockFrags: 7,
+  },
+  {
+    id: "siphon", name: "Soul Siphon", rarity: "decent", kind: "siphon", art: "tube", accent: "#c44dff",
+    target: "front",
+    desc: "Every kill it lands feeds the grid: bonus SP and a rising damage aura.",
+    dmg: 96, upDmg: 14, ascDmg: 0, rate: 1.05, upRate: 0.02, ascRate: 0,
+    spGain: 9, unlockFrags: 10,
+  },
+  {
+    id: "quake", name: "Quake Pylon", rarity: "decent", kind: "quake", art: "spike", accent: "#ffd23f",
+    target: "front",
+    desc: "Slams the ground: wide crater plus a stun that stops the pack dead.",
+    dmg: 150, upDmg: 22, ascDmg: 0, rate: 1.6, upRate: 0.03, ascRate: 0,
+    splash: 190, upSplash: 12, ascSplash: 0,
+    stun: 1.1, upStun: 0.15, ascStun: 0, unlockFrags: 13,
+  },
+  {
+    id: "storm", name: "Storm Caller", rarity: "epic", kind: "storm", art: "beam", accent: "#a0e8ff",
+    target: "front",
+    desc: "Arc lightning that forks through five enemies at once.",
+    dmg: 120, upDmg: 20, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    chain: 5, upChain: 1, ascChain: 0, unlockFrags: 15,
+  },
+  {
+    id: "plague", name: "Plague Mortar", rarity: "epic", kind: "plague", art: "tube", accent: "#8effc4",
+    target: "front",
+    desc: "Lobs a plague canister: massive crater, creeping rot and a heavy slow.",
+    dmg: 260, upDmg: 34, ascDmg: 0, rate: 1.9, upRate: 0.035, ascRate: 0,
+    splash: 200, upSplash: 12, ascSplash: 0,
+    burnPct: 0.55, upBurnPct: 0.05, ascBurnPct: 0, burnDur: 5,
+    slow: 0.3, upSlow: 0.02, slowDur: 3, unlockFrags: 17,
+  },
+  {
+    id: "rail", name: "Railgun", rarity: "legendary", kind: "rail", art: "plasma", accent: "#7fe9ff",
+    target: "front",
+    desc: "One shot, one line of corpses: 900 raw damage skewers six enemies deep.",
+    dmg: 900, upDmg: 0, ascDmg: 0, rate: 1.35, upRate: 0.025, ascRate: 0,
+    pierce: 6, upPierce: 1, ascPierce: 0, exotic: true, unlockFrags: 1,
+    awk1: {
+      name: "Overpenetration",
+      desc: "Chance to load a hypervelocity slug: colossal damage that always crits.",
+      chance: [0.12, 0.18, 0.25, 0.4, 0.55],
+      mult: [2, 5, 14, 32, 55],
+    },
+    awk2: {
+      name: "Rail Burn",
+      desc: "The slug's friction leaves a searing heat trail on everything it pierces.",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1.5, 3, 5, 8, 13],
+    },
+  },
 ];
 
 /** tower id -> art family used by the canvas + the menu icon */
@@ -432,6 +499,47 @@ export const HP_GROWTH = 1.57;
  * and aura buffs come in as `atkMul`. Growth is multiplicative so it can keep up
  * with the 1.57x enemy curve.
  */
+// ---------- crit damage ----------------
+/**
+ * Crit damage is a single account-wide stat: the base crit multiplier plus a
+ * bonus banked from every tower upgrade the player has ever bought. Each menu
+ * level on every tower adds CRIT_DMG_PER_UPGRADE, and the running total is
+ * merged into one number that every crit in the arena multiplies by.
+ */
+export const CRIT_CHANCE = 0.1;
+/** multiplier a crit starts at before any upgrades (1.6x = +60%) */
+export const CRIT_DMG_BASE = 0.6;
+/** every single tower upgrade level adds +8% crit damage */
+export const CRIT_DMG_PER_UPGRADE = 0.08;
+/** hard ceiling on the merged bonus: 90,000% */
+export const CRIT_DMG_MAX = 900;
+/** 0.6 -> 60 (%) */
+export const critPct = (bonus: number) => Math.min(CRIT_DMG_MAX, bonus) * 100;
+
+/** every upgrade level bought across every tower */
+export function towerUpgradeCount(levels: Record<string, number>): number {
+  let n = 0;
+  for (const lv of Object.values(levels || {})) n += Math.max(0, Math.min(MAX_MENU_LEVEL, lv) - 1);
+  return n;
+}
+
+/** the merged account crit bonus, e.g. 3.4 = +340% */
+export function critBonusFrom(levels: Record<string, number>): number {
+  return Math.min(CRIT_DMG_MAX, CRIT_DMG_BASE + CRIT_DMG_PER_UPGRADE * towerUpgradeCount(levels));
+}
+
+/** the multiplier a crit applies, e.g. 4.4 */
+export const critMultiplierFrom = (levels: Record<string, number>) => 1 + critBonusFrom(levels);
+
+/** how much one more upgrade is worth, for the menus */
+export function critAfterUpgrade(levels: Record<string, number>): number {
+  return Math.min(CRIT_DMG_MAX, critBonusFrom(levels) + CRIT_DMG_PER_UPGRADE);
+}
+
+/** "27,400%" — the stat is meant to look enormous, so it gets thousands separators */
+export const fmtCritPct = (bonus: number) =>
+  `${Math.round(critPct(bonus)).toLocaleString("en-US")}%`;
+
 export function towerDamage(
   def: TowerDef,
   menuLv: number,
@@ -722,26 +830,80 @@ export const ENEMY_TYPES: EnemyType[] = [
 export const BOSS_TYPE = 4;
 export const isBossType = (type: number) => type >= BOSS_TYPE;
 
+export type BossSkillId =
+  | "summon"
+  | "blink"
+  | "ward"
+  | "enrage"
+  | "nullfield"
+  | "devour"
+  | "meteor"
+  | "chains"
+  | "warp";
+
 export interface BossSkillRow {
-  id: "summon" | "blink" | "enrage" | "ward";
+  id: BossSkillId;
   name: string;
   tell: string;
   color: string;
+  /** icon glyph drawn on the boss bar chip */
+  glyph: string;
 }
 
-/** Skill kit shown on the boss bar and called out in the arena when it fires. */
+/**
+ * Every skill a boss can pull out. Bosses do not all get the same kit — the
+ * Devil walks in with three, the Rift Overlord cycles all nine — and each skill
+ * fires off its own cooldown, so a long boss fight keeps changing shape.
+ */
 export const BOSS_SKILLS: BossSkillRow[] = [
-  { id: "summon", name: "Rift Call", tell: "calls minions through the rift", color: "#c44dff" },
-  { id: "blink", name: "Void Step", tell: "blinks down the path", color: "#35e0ff" },
-  { id: "ward", name: "Bulwark", tell: "shields itself for a moment", color: "#8fb0ff" },
-  { id: "enrage", name: "Blood Frenzy", tell: "enrages below 45% health", color: "#ff4d5e" },
+  { id: "summon", name: "Rift Call", tell: "calls minions through the rift", color: "#c44dff", glyph: "❖" },
+  { id: "blink", name: "Void Step", tell: "blinks down the path", color: "#35e0ff", glyph: "➤" },
+  { id: "ward", name: "Bulwark", tell: "shields itself for a moment", color: "#8fb0ff", glyph: "⬢" },
+  { id: "enrage", name: "Blood Frenzy", tell: "enrages below 45% health", color: "#ff4d5e", glyph: "✚" },
+  { id: "nullfield", name: "Null Field", tell: "hexes the towers around it", color: "#b06bff", glyph: "⊗" },
+  { id: "devour", name: "Soul Devour", tell: "eats its own minions to heal", color: "#ff8c3d", glyph: "✷" },
+  { id: "meteor", name: "Meteor Fall", tell: "drops burning rocks on the grid", color: "#ff7a3d", glyph: "☄" },
+  { id: "chains", name: "Rift Chains", tell: "shields every minion beside it", color: "#4de8ff", glyph: "⛓" },
+  { id: "warp", name: "Warp Surge", tell: "wrenches the whole horde forward", color: "#ff4fd8", glyph: "⇉" },
 ];
+
+export const BOSS_SKILL_BY_ID: Record<BossSkillId, BossSkillRow> = Object.fromEntries(
+  BOSS_SKILLS.map((s) => [s.id, s])
+) as Record<BossSkillId, BossSkillRow>;
+
+/** boss type -> the kit it cycles. Type 4 is the Devil, 5 the Rift Overlord. */
+export const BOSS_KITS: Record<number, BossSkillId[]> = {
+  4: ["summon", "blink", "ward", "enrage", "nullfield", "meteor"],
+  5: ["summon", "blink", "ward", "enrage", "nullfield", "devour", "meteor", "chains", "warp"],
+};
+
+export const bossKit = (type: number): BossSkillId[] => BOSS_KITS[type] || BOSS_KITS[BOSS_TYPE];
 
 export const BOSS_SUMMON_CD = 11;
 export const BOSS_BLINK_CD = 9;
 export const BOSS_WARD_CD = 14;
 export const BOSS_WARD_TIME = 3.4;
 export const BOSS_ENRAGE_AT = 0.45;
+/** Null Field: towers caught in the hex fire this much slower */
+export const BOSS_NULL_CD = 13;
+export const BOSS_NULL_RADIUS = 210;
+export const BOSS_NULL_TIME = 5;
+export const BOSS_NULL_SLOW = 0.62;
+/** Soul Devour: eats its own minions for a share of its max HP each */
+export const BOSS_DEVOUR_CD = 16;
+export const BOSS_DEVOUR_HEAL = 0.045;
+/** Meteor Fall: burning rocks that smash towers offline for a few seconds */
+export const BOSS_METEOR_CD = 12;
+export const BOSS_METEOR_COUNT = 3;
+export const BOSS_METEOR_DOWN = 4.5;
+/** Rift Chains: minions near the boss take much less damage */
+export const BOSS_CHAINS_CD = 15;
+export const BOSS_CHAINS_RADIUS = 230;
+export const BOSS_CHAINS_TIME = 5;
+export const BOSS_CHAINS_DR = 0.55;
+/** Warp Surge: drags the whole horde down the lane */
+export const BOSS_WARP_CD = 18;
+export const BOSS_WARP_DIST = 150;
 
 export function roundHp(round: number) {
   return 46 * Math.pow(HP_GROWTH, round - 1);
@@ -1488,34 +1650,3 @@ export const GUILD_QUESTS: GuildQuest[] = [
   { id: "chests", name: "Lockpicker", desc: "Open chests of any grade", need: 6, xp: 260, coins: 70 },
 ];
 
-// ---------- gift codes ----------
-/**
- * Gift codes are redeemed from Settings → Gift Codes. The key is what a player
- * types; matching ignores case, spaces and dashes, so "MAGIC-TD" and "magictd"
- * are the same code.
- *
- * Codes are intentionally NOT shipped by default — add your own rows to the
- * object below and they go live in the next build. `frags` rolls random towers
- * of the given rarity, `towers` grants named towers directly.
- */
-export interface GiftCode {
-  /** shown in the "code accepted" toast */
-  label: string;
-  gold?: number;
-  gems?: number;
-  tokens?: number;
-  /** random tower fragments of a rarity */
-  frags?: { rarity: Rarity; n: number };
-  /** specific tower ids with a fragment count */
-  towers?: { id: string; n: number }[];
-}
-
-export const GIFT_CODES: Record<string, GiftCode> = {
-  // ── add your codes here, e.g. ─────────────────────────────────────────────
-  // "LAUNCHDAY": { label: "Launch day cache", gold: 1000, gems: 10, tokens: 2 },
-  // "THUNDER": { label: "Thunder God blessing", frags: { rarity: "epic", n: 4 }, gems: 3 },
-  // ──────────────────────────────────────────────────────────────────────────
-};
-
-/** normalise player input so spacing / casing / dashes never matter */
-export const normaliseCode = (raw: string) => raw.trim().toUpperCase().replace(/[\s_-]+/g, "");

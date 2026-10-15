@@ -40,9 +40,23 @@ import {
   reward,
   isBossType,
   BOSS_SKILLS,
-  GIFT_CODES,
-  normaliseCode,
+  BOSS_KITS,
+  BOSS_CHAINS_DR,
+  BOSS_METEOR_COUNT,
+  BOSS_NULL_SLOW,
+  bossKit,
+  CRIT_CHANCE,
+  CRIT_DMG_BASE,
+  CRIT_DMG_MAX,
+  CRIT_DMG_PER_UPGRADE,
+  critBonusFrom,
+  critMultiplierFrom,
+  fmtCritPct,
+  towerArt,
+  towerUpgradeCount,
+  critAfterUpgrade,
 } from "../game/data";
+import { critBonus as critBonusFromSave, critMul } from "../game/save";
 import {
   defaultSave,
   loadSave,
@@ -61,7 +75,6 @@ import {
   clampZoom,
   ZOOM_MAX,
   ZOOM_MIN,
-  redeemGiftCode,
   bumpTask,
   taskProgress,
   taskComplete,
@@ -159,8 +172,8 @@ describe("tower data", () => {
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
-    // the roster grew from 15 to 27 towers
-    expect(TOWERS).toHaveLength(27);
+    // the roster grew from 15 to 27 towers, then to 33 with the second wave
+    expect(TOWERS).toHaveLength(33);
     // mechanics actually differ between them
     expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
     expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
@@ -470,7 +483,13 @@ describe("bosses", () => {
   });
 
   it("gives bosses a full skill kit", () => {
-    expect(BOSS_SKILLS.map((s) => s.id).sort()).toEqual(["blink", "enrage", "summon", "ward"]);
+    // the original four, plus the five skills added with the boss rework
+    for (const id of ["blink", "enrage", "summon", "ward"]) {
+      expect(BOSS_SKILLS.map((s) => s.id), id).toContain(id);
+    }
+    expect(BOSS_SKILLS.map((s) => s.id).sort()).toEqual([
+      "blink", "chains", "devour", "enrage", "meteor", "nullfield", "summon", "ward", "warp",
+    ]);
     for (const sk of BOSS_SKILLS) {
       expect(sk.name.length).toBeGreaterThan(2);
       expect(sk.tell.length).toBeGreaterThan(5);
@@ -489,54 +508,6 @@ describe("bosses", () => {
     expect(sawOverlord).toBe(true);
     expect(waveComp(3).filter(isBossType)).toHaveLength(0);
     expect(waveComp(4).filter(isBossType).length).toBeGreaterThan(0);
-  });
-});
-
-describe("gift codes", () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
-  it("normalises whatever the player pastes", () => {
-    expect(normaliseCode("  magic-td ")).toBe("MAGICTD");
-    expect(normaliseCode("MAGIC_TD")).toBe("MAGICTD");
-    expect(normaliseCode("magic td")).toBe("MAGICTD");
-  });
-
-  it("rejects empty, unknown and already-used codes", () => {
-    const s = defaultSave();
-    expect(redeemGiftCode(s, "   ")).toEqual({ ok: false, reason: "empty" });
-    expect(redeemGiftCode(s, "NOPE")).toEqual({ ok: false, reason: "unknown" });
-
-    const codes = { TESTCODE: { label: "Test cache", gold: 500, gems: 3 } };
-    const first = redeemGiftCode(s, "test-code", codes);
-    expect(first.ok).toBe(true);
-    if (first.ok) expect(first.summary).toContain("500 gold");
-    expect(s.gold).toBe(defaultSave().gold + 500);
-    expect(s.gems).toBe(defaultSave().gems + 3);
-    expect(redeemGiftCode(s, "TESTCODE", codes)).toEqual({ ok: false, reason: "used" });
-  });
-
-  it("grants named towers and rarity fragments", () => {
-    const s = defaultSave();
-    const codes = {
-      FRAGS: { label: "Fragment drop", frags: { rarity: "decent" as const, n: 4 } },
-      TOWER: { label: "Arrow gift", towers: [{ id: "arrow", n: 7 }] },
-    };
-    const before = Object.values(s.frags).reduce((a, b) => a + b, 0);
-    const f = redeemGiftCode(s, "FRAGS", codes);
-    expect(f.ok).toBe(true);
-    expect(Object.values(s.frags).reduce((a, b) => a + b, 0)).toBe(before + 4);
-
-    // the random "decent" roll above can also land on arrow, so measure the delta
-    const arrowBefore = s.frags.arrow;
-    redeemGiftCode(s, "TOWER", codes);
-    expect(s.frags.arrow).toBe(arrowBefore + 7);
-    expect(s.redeemed).toEqual(["FRAGS", "TOWER"]);
-  });
-
-  it("ships with an empty starter table so codes are added deliberately", () => {
-    expect(Object.keys(GIFT_CODES)).toHaveLength(0);
   });
 });
 
@@ -1153,5 +1124,112 @@ describe("payout rain thresholds", () => {
     const loot = { ...rollChest("legendary") };
     expect(loot.gold + loot.gems).toBeGreaterThan(0);
     expect(before).toBe(s.gems);
+  });
+});
+
+// ---------- crit damage, new towers and boss skill kits ----------
+describe("crit damage pool", () => {
+  it("starts at the base multiplier with nothing upgraded", () => {
+    expect(towerUpgradeCount({})).toBe(0);
+    expect(towerUpgradeCount({ arrow: 1 })).toBe(0);
+    expect(critBonusFrom({ arrow: 1 })).toBeCloseTo(CRIT_DMG_BASE, 5);
+    expect(critMultiplierFrom({ arrow: 1 })).toBeCloseTo(1 + CRIT_DMG_BASE, 5);
+  });
+
+  it("merges +8% into the total for every tower upgrade, across every tower", () => {
+    // arrow 1 -> nothing, arrow 4 -> three upgrades
+    expect(towerUpgradeCount({ arrow: 4 })).toBe(3);
+    expect(critBonusFrom({ arrow: 4 })).toBeCloseTo(CRIT_DMG_BASE + 3 * CRIT_DMG_PER_UPGRADE, 5);
+    // levels on different towers pool into one number
+    const mixed = { arrow: 4, cannon: 6, ice: 1 };
+    expect(towerUpgradeCount(mixed)).toBe(3 + 5);
+    expect(critBonusFrom(mixed)).toBeCloseTo(CRIT_DMG_BASE + 8 * CRIT_DMG_PER_UPGRADE, 5);
+    expect(CRIT_DMG_PER_UPGRADE).toBeCloseTo(0.08, 6);
+  });
+
+  it("ignores impossible levels and never passes the 90000% ceiling", () => {
+    // levels above MAX_MENU_LEVEL can't add anything extra
+    expect(towerUpgradeCount({ arrow: 9999 })).toBe(MAX_MENU_LEVEL - 1);
+    // 14 upgrades per tower, so a big enough roster does hit the ceiling
+    const wide: Record<string, number> = {};
+    for (let i = 0; i < Math.ceil(CRIT_DMG_MAX / (CRIT_DMG_PER_UPGRADE * (MAX_MENU_LEVEL - 1))); i++) {
+      wide[`t${i}`] = MAX_MENU_LEVEL;
+    }
+    expect(critBonusFrom(wide)).toBe(CRIT_DMG_MAX);
+    expect(critMultiplierFrom(wide)).toBe(1 + CRIT_DMG_MAX);
+    expect(fmtCritPct(CRIT_DMG_MAX)).toBe("90,000%");
+  });
+
+  it("reads the pool off a real save", () => {
+    const s = defaultSave();
+    const first = critBonusFrom(s.levels);
+    s.levels.arrow = (s.levels.arrow || 0) + 1;
+    expect(critBonusFrom(s.levels)).toBeCloseTo(first + CRIT_DMG_PER_UPGRADE, 5);
+    expect(critBonusFromSave(s)).toBeCloseTo(critBonusFrom(s.levels), 6);
+    expect(critMul(s)).toBeCloseTo(1 + critBonusFrom(s.levels), 6);
+    expect(critAfterUpgrade(s.levels)).toBeCloseTo(critBonusFrom(s.levels) + CRIT_DMG_PER_UPGRADE, 6);
+  });
+
+  it("keeps the crit chance where the arena expects it", () => {
+    expect(CRIT_CHANCE).toBeGreaterThan(0);
+    expect(CRIT_CHANCE).toBeLessThan(1);
+  });
+});
+
+describe("new towers", () => {
+  const NEW = ["rime", "siphon", "quake", "storm", "plague", "rail"];
+  it("ships all six with sane data", () => {
+    for (const id of NEW) {
+      const def = TOWER_BY_ID[id];
+      expect(def, id).toBeTruthy();
+      expect(def.unlockFrags).toBeGreaterThan(0);
+      expect(def.dmg).toBeGreaterThan(0);
+      expect(def.rate).toBeGreaterThan(0);
+    }
+  });
+
+  it("unlocks the Railgun from a single legendary fragment", () => {
+    expect(TOWER_BY_ID.rail.rarity).toBe("legendary");
+    expect(TOWER_BY_ID.rail.unlockFrags).toBe(1);
+    expect(TOWER_BY_ID.rail.awk1).toBeTruthy();
+    expect(TOWER_BY_ID.rail.awk2).toBeTruthy();
+  });
+
+  it("gives every new tower an art family the renderer knows", () => {
+    const KNOWN = new Set(["arrow", "cannon", "ice", "speaker", "tesla", "gatling", "core", "lightning", "hellstorm", "icestorm", "plant", "swarm", "chrono", "void", "plasma", "sling", "flame", "spike", "tube", "beam", "boomer", "toxin", "axe", "frost", "mortar", "laser", "missile", "dragon", "sun"]);
+    for (const id of NEW) expect(KNOWN.has(towerArt(TOWER_BY_ID[id])), id).toBe(true);
+  });
+
+  it("registers each new tower in the id index", () => {
+    for (const id of NEW) expect(TOWER_BY_ID[id].id).toBe(id);
+  });
+});
+
+describe("boss skills", () => {
+  it("gives each boss a distinct kit taken from the shared skill table", () => {
+    const ids = BOSS_SKILLS.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const [type, kit] of Object.entries(BOSS_KITS) as [string, string[]][]) {
+      expect(kit.length, type).toBeGreaterThanOrEqual(6);
+      for (const id of kit) expect(ids, `${type}/${id}`).toContain(id);
+    }
+    // only the Overlord gets the full court
+    expect(BOSS_KITS[5].length).toBeGreaterThan(BOSS_KITS[4].length);
+  });
+
+  it("falls back to the first boss kit for unknown types", () => {
+    expect(bossKit(4)).toEqual(BOSS_KITS[4]);
+    expect(bossKit(99)).toEqual(BOSS_KITS[4]);
+  });
+
+  it("has a tell and a colour for every skill", () => {
+    for (const sk of BOSS_SKILLS) {
+      expect(sk.tell.length).toBeGreaterThan(0);
+      expect(sk.color).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(sk.glyph.length).toBeGreaterThan(0);
+    }
+    expect(BOSS_NULL_SLOW).toBeGreaterThan(0);
+    expect(BOSS_METEOR_COUNT).toBeGreaterThan(1);
+    expect(BOSS_CHAINS_DR).toBeGreaterThan(0);
   });
 });
