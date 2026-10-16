@@ -54,14 +54,17 @@ import {
   Emblem,
   GemIcon,
   GuildIcon,
+  FpsBars,
   HeroIcon,
   Modal,
   RewardClaim,
+  SetIcon,
   ShardIcon,
   TokenIcon,
   TowerIcon,
   TrophyIcon,
   UpgradeCeremony,
+  type SetIconName,
 } from "../components/ui";
 import {
   TOWERS,
@@ -151,19 +154,27 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
 
   useEffect(() => {
     const timers = BOOT_BEATS.map((ms, i) => setTimeout(() => setBeat(i + 1), ms));
-    const out = setTimeout(finish, 3300);
+    const out = setTimeout(finish, 3600);
     return () => {
       timers.forEach(clearTimeout);
       clearTimeout(out);
     };
   }, [finish]);
 
-  // a tap anywhere skips the rest of the intro
+  // A tap skips the intro — but only once the wordmark has had time to land.
+  // The old listener armed on mount, so the very first tap of the session (the
+  // one that unlocks audio, or a tap-clearing of the prior screen's toast)
+  // killed the intro before it animated: that is the "intro is skipped" bug.
   useEffect(() => {
-    const h = () => finish();
-    window.addEventListener("pointerdown", h, { once: true });
-    window.addEventListener("keydown", h, { once: true });
+    const armed = setTimeout(() => {
+      window.addEventListener("pointerdown", h, { once: true });
+      window.addEventListener("keydown", h, { once: true });
+    }, 2200);
+    function h() {
+      finish();
+    }
     return () => {
+      clearTimeout(armed);
       window.removeEventListener("pointerdown", h);
       window.removeEventListener("keydown", h);
     };
@@ -203,7 +214,7 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
         </div>
       </div>
 
-      <div className={`boot-skip ${beat >= 2 ? "on" : ""}`}>TAP TO SKIP</div>
+      <div className={`boot-skip ${beat >= 4 ? "on" : ""}`}>TAP TO SKIP</div>
     </div>
   );
 }
@@ -868,15 +879,15 @@ export function Specials({
         <button
           className={`tab-btn relative ${tab === "tasks" ? "on" : ""}`}
           data-testid="tab-tasks"
-          onClick={() => { sfx.click(); setTab("tasks"); }}
+          onClick={() => { sfx.uiTab(); setTab("tasks"); }}
         >
           TASKS
           {ready > 0 && <span className="badge-ping">{ready}</span>}
         </button>
-        <button className={`tab-btn ${tab === "events" ? "on" : ""}`} data-testid="tab-events" onClick={() => { sfx.click(); setTab("events"); }}>
+        <button className={`tab-btn ${tab === "events" ? "on" : ""}`} data-testid="tab-events" onClick={() => { sfx.uiTab(); setTab("events"); }}>
           EVENTS
         </button>
-        <button className={`tab-btn ${tab === "competition" ? "on" : ""}`} data-testid="tab-competition" onClick={() => { sfx.click(); setTab("competition"); }}>
+        <button className={`tab-btn ${tab === "competition" ? "on" : ""}`} data-testid="tab-competition" onClick={() => { sfx.uiTab(); setTab("competition"); }}>
           COMPETITION
         </button>
         <span className="ml-auto text-[11px] font-bold tracking-widest text-[var(--dim)]">RESETS 07:00 · {resetCountdown()}</span>
@@ -1312,30 +1323,394 @@ function CompetitionPanel({
   );
 }
 
-// ---------- guild ----------
+// ---------- guild chat ----------
 
-const GUILD_CHATTER: Record<string, [string, string][]> = {
-  vanguard: [
-    ["Kael", "Anyone farming endless waves tonight?"],
-    ["Mira", "Just hit Awakening II on my Lightning Princess."],
-    ["Torin", "Power Plant next to a Chrono Spire is broken. In a good way."],
-  ],
-  storm: [
-    ["Vesper", "Storm day doubles gems — do not sleep on Sunday."],
-    ["Lumen", "Thunder God at Lv 10 clears wave 20 on its own."],
-    ["Rhen", "Donated the war chest, we are two levels off the next perk."],
-  ],
-  ember: [
-    ["Volkan", "Burn comp only run. Who is in?"],
-    ["Sable", "Trophy day is tomorrow, bank your wins."],
-    ["Brann", "Hellstorm + Toxic Sprayer melts the Rift Overlord."],
-  ],
-  null: [
-    ["Nyx", "Guild chest gave me four advanced chips. Null perk is real."],
-    ["Oryx", "We are rank 1 on the weekly board again."],
-    ["Quill", "Reminder: three donations a day, every day."],
-  ],
+type ChatChannel = "guild" | "world" | "party";
+
+interface ChatMsg {
+  id: number;
+  name: string;
+  text: string;
+  me?: boolean;
+  sys?: boolean;
+  role?: string;
+  react?: string;
+}
+
+interface Chatter {
+  name: string;
+  role: string;
+}
+
+const CH_ROLE_COLOR: Record<string, string> = {
+  LEADER: "#ffcf4d",
+  OFFICER: "#ff9be9",
+  MEMBER: "#35e0ff",
 };
+
+/** who talks in each guild, and what they say when you first walk in */
+const GUILD_CHATTER: Record<string, { members: Chatter[]; lines: [string, string][] }> = {
+  vanguard: {
+    members: [
+      { name: "Kael", role: "LEADER" },
+      { name: "Mira", role: "OFFICER" },
+      { name: "Torin", role: "MEMBER" },
+      { name: "Juno", role: "MEMBER" },
+      { name: "Selka", role: "MEMBER" },
+    ],
+    lines: [
+      ["Kael", "Anyone farming endless waves tonight? We are three short."],
+      ["Mira", "Just hit Awakening II on my Lightning Princess. Feels absurd."],
+      ["Torin", "Power Plant next to a Chrono Spire is broken. In a good way."],
+      ["Selka", "Reminder: drop your rotation into the tower tab, summons follow it."],
+    ],
+  },
+  storm: {
+    members: [
+      { name: "Vesper", role: "LEADER" },
+      { name: "Lumen", role: "OFFICER" },
+      { name: "Rhen", role: "MEMBER" },
+      { name: "Cyra", role: "MEMBER" },
+      { name: "Odell", role: "MEMBER" },
+    ],
+    lines: [
+      ["Vesper", "Storm day doubles gems — do not sleep on Sunday."],
+      ["Lumen", "Thunder God at Lv 10 clears wave 20 on its own. Proved it."],
+      ["Rhen", "Donated the war chest, we are two levels off the next perk."],
+      ["Cyra", "Chain towers + any freeze = free boss phase. Trust."],
+    ],
+  },
+  ember: {
+    members: [
+      { name: "Volkan", role: "LEADER" },
+      { name: "Sable", role: "OFFICER" },
+      { name: "Brann", role: "MEMBER" },
+      { name: "Halla", role: "MEMBER" },
+      { name: "Ivar", role: "MEMBER" },
+    ],
+    lines: [
+      ["Volkan", "Burn comp only run. Who is in?"],
+      ["Sable", "Trophy day is tomorrow, bank your wins before the reset."],
+      ["Brann", "Hellstorm + Toxic Sprayer melts the Rift Overlord."],
+      ["Halla", "Crit band at 140% now, everything just pops."],
+    ],
+  },
+  null: {
+    members: [
+      { name: "Nyx", role: "LEADER" },
+      { name: "Oryx", role: "OFFICER" },
+      { name: "Quill", role: "MEMBER" },
+      { name: "Vane", role: "MEMBER" },
+      { name: "Rook", role: "MEMBER" },
+    ],
+    lines: [
+      ["Nyx", "Guild chest gave me four advanced chips. Null perk is real."],
+      ["Oryx", "We are rank 1 on the weekly board again. Keep pushing."],
+      ["Quill", "Reminder: three donations a day, every day."],
+      ["Vane", "Null Rip on a stacked lane is a free wave, every time."],
+    ],
+  },
+};
+
+/** world is one shared firehose no matter which banner you fly */
+const WORLD_LINES: [string, string][] = [
+  ["Riftwalker", "Trade channel: swapping 3 epic chips for legendary frags."],
+  ["Solene", "Day 41 endless. The boss scaling is genuinely evil now."],
+  ["Grukk", "New player here — what is the first tower I should max?"],
+  ["Aurex", "Answer: Arrow. It carries you to wave 12 by itself."],
+  ["Nine", "Weekly competition closes in 6h, top 10 is brutal this time."],
+];
+
+const PARTY_LINES: [string, string][] = [
+  ["You", "Party code MLTD-4821. Two slots open for a co-op rift."],
+  ["Kael", "Joining. I will bring the freeze spires."],
+];
+
+/** keyword -> what the guild says back, so chat reacts to what you actually ask */
+const CHAT_INTENTS: [RegExp, string[]][] = [
+  [/hi|hey|hello|yo\b|sup/i, [
+    "Hey! Welcome to the hall.",
+    "o/ what is up",
+    "Yo. Rift later?",
+  ]],
+  [/help|how do|how to|guide|advice|tip/i, [
+    "Stack the rotation on one damage type, then let the summon button work.",
+    "Open chests with gold you are not saving — fragments are the real wall.",
+    "Put your best tower first in the rotation; summons reach for the top of the list.",
+  ]],
+  [/boss|overlord|elite/i, [
+    "Save your hero skill for the second boss phase, it one-shots the shield.",
+    "Slow towers first, then drop everything on it. Standard recipe.",
+    "The Rift Overlord ignores armour. Bring pure dps and cry a little.",
+  ]],
+  [/wave|endless|run|farm/i, [
+    "Endless gives the best gold per minute once you clear wave 18.",
+    "Count me in, I am free after the donation reset.",
+    "Open the tower tab and push your crit band first — it carries the late waves.",
+  ]],
+  [/chest|reward|loot|frag/i, [
+    "Chests are the only real source of epic fragments. Buy them in bulk.",
+    "I opened 6 today, got 2 legendary drops. Decent odds.",
+  ]],
+  [/join|recruit|party|team|invite/i, [
+    "Invite sent. We raid at the daily reset.",
+    "Hop in, the war objectives are nearly done.",
+  ]],
+  [/thanks|thx|ty\b|gg|nice|cool/i, [
+    "gg ✨",
+    "np o7",
+    "That is how it is done.",
+  ]],
+];
+
+const CHAT_FALLBACK: string[] = [
+  "Fair point, honestly.",
+  "Say more, I am listening.",
+  "Same here — tell the others in the war tab.",
+  "Noted. I will test it after the reset.",
+  "That tracks with what I have seen.",
+];
+
+const QUICK_CHAT = ["o7", "Need a party", "Boss strategy?", "GG ✨"];
+
+const CHANNELS: [ChatChannel, string, string][] = [
+  ["guild", "GUILD", "#35e0ff"],
+  ["world", "WORLD", "#ffcf4d"],
+  ["party", "PARTY", "#3dff8e"],
+];
+
+/** one message bubble: avatar, name plate, text, tappable reaction */
+function ChatBubble({ msg, onReact }: { msg: ChatMsg; onReact: () => void }) {
+  if (msg.sys) {
+    return (
+      <div className="chat-sys" data-testid="chat-msg">
+        <span>{msg.text}</span>
+      </div>
+    );
+  }
+  const tint = msg.me ? "#ffcf4d" : CH_ROLE_COLOR[msg.role || "MEMBER"] || "#35e0ff";
+  return (
+    <div className={`chat-row ${msg.me ? "me" : ""}`} data-testid="chat-msg">
+      <span className="chat-av" style={{ borderColor: tint, color: tint, background: `linear-gradient(140deg, ${tint}33, #0b0722)` }}>
+        {msg.name.slice(0, 1).toUpperCase()}
+      </span>
+      <div className="chat-body">
+        <div className="chat-head">
+          <span className="chat-name" style={{ color: tint }}>
+            {msg.name}
+          </span>
+          {msg.role && !msg.me && (
+            <span className="chat-badge" style={{ borderColor: tint + "66", color: tint }}>
+              {msg.role}
+            </span>
+          )}
+          {msg.me && (
+            <span className="chat-badge" style={{ borderColor: "#ffcf4d66", color: "#ffcf4d" }}>
+              YOU
+            </span>
+          )}
+        </div>
+        <button className="chat-text" onClick={onReact} title="Tap to react">
+          {msg.text}
+          {msg.react && <span className="chat-react">{msg.react}</span>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The guild chat: three live channels, member roles, an online strip, flowing
+ * replies that read the message you sent, a typing indicator, quick-chat and
+ * tap-to-react. Replaces the old flat list of canned lines.
+ */
+function ChatPanel({ guildId, guildName, color }: { guildId: string; guildName: string; color: string }) {
+  const data = GUILD_CHATTER[guildId] || GUILD_CHATTER.vanguard;
+  const [ch, setCh] = useState<ChatChannel>("guild");
+  const [input, setInput] = useState("");
+  const [typing, setTyping] = useState<string | null>(null);
+  const [reacted, setReacted] = useState(0);
+  const seq = useRef(0);
+  const logRef = useRef<HTMLDivElement>(null);
+  const [logs, setLogs] = useState<Record<ChatChannel, ChatMsg[]>>(() => ({
+    guild: [
+      { id: ++seq.current, name: "", text: `${guildName} chat is live — say hello`, sys: true },
+      ...data.lines.map(([n, t]) => ({
+        id: ++seq.current,
+        name: n,
+        text: t,
+        role: GUILD_CHATTER[guildId]?.members.find((m) => m.name === n)?.role || "MEMBER",
+      })),
+    ],
+    world: [
+      { id: ++seq.current, name: "", text: "World chat · all guilds · be excellent to each other", sys: true },
+      ...WORLD_LINES.map(([n, t]) => ({ id: ++seq.current, name: n, text: t, role: "MEMBER" })),
+    ],
+    party: [
+      { id: ++seq.current, name: "", text: "No party yet — invite a guildmate to start one", sys: true },
+      ...PARTY_LINES.map(([n, t]) => ({ id: ++seq.current, name: n, text: t, me: n === "You", role: n === "You" ? "MEMBER" : "OFFICER" })),
+    ],
+  }));
+
+  // keep the newest line in view (the log scrolls, the page does not)
+  useEffect(() => {
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [logs, ch, typing]);
+
+  // idle chatter: the hall keeps talking while you are standing in it
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (Math.random() < 0.45) return;
+      const who = data.members[Math.floor(Math.random() * data.members.length)];
+      const line = data.lines[Math.floor(Math.random() * data.lines.length)];
+      const msg: ChatMsg = { id: ++seq.current, name: who.name, text: line[1], role: who.role };
+      setLogs((l) => ({ ...l, guild: [...l.guild, msg] }));
+    }, 26000);
+    return () => clearInterval(t);
+  }, [data]);
+
+  const replyFor = (text: string): string => {
+    for (const [re, pool] of CHAT_INTENTS) {
+      if (re.test(text)) return pool[Math.floor(Math.random() * pool.length)];
+    }
+    return CHAT_FALLBACK[Math.floor(Math.random() * CHAT_FALLBACK.length)];
+  };
+
+  const send = (raw?: string) => {
+    const text = (raw ?? input).trim();
+    if (!text) return;
+    setInput("");
+    const mine: ChatMsg = { id: ++seq.current, name: "You", text, me: true, role: "MEMBER" };
+    setLogs((l) => ({ ...l, [ch]: [...l[ch], mine] }));
+    sfx.chatSend();
+    // world chat answers from strangers, party from whoever joined, guild by name
+    const who = data.members[Math.floor(Math.random() * data.members.length)];
+    setTyping(who.name);
+    sfx.chatTyping();
+    const delay = 700 + Math.random() * 700;
+    setTimeout(() => {
+      setTyping(null);
+      const msg: ChatMsg = { id: ++seq.current, name: who.name, text: replyFor(text), role: who.role };
+      setLogs((l) => ({ ...l, [ch]: [...l[ch], msg] }));
+      sfx.chatRecv();
+      // sometimes a second guildmate chimes in on top
+      if (Math.random() < 0.4) {
+        const other = data.members[Math.floor(Math.random() * data.members.length)];
+        setTimeout(() => {
+          setTyping(other.name);
+          setTimeout(() => {
+            setTyping(null);
+            setLogs((l) => ({ ...l, [ch]: [...l[ch], { id: ++seq.current, name: other.name, text: replyFor(text), role: other.role }] }));
+            sfx.chatRecv();
+          }, 900);
+        }, 500);
+      }
+    }, delay);
+  };
+
+  const react = (id: number) => {
+    const glyphs = ["✨", "🔥", "👑", "💀", "🛡️", "💎"];
+    const g = glyphs[reacted % glyphs.length];
+    setReacted((v) => v + 1);
+    sfx.uiPop();
+    setLogs((l) => ({ ...l, [ch]: l[ch].map((m) => (m.id === id ? { ...m, react: g } : m)) }));
+  };
+
+  const log = logs[ch];
+
+  return (
+    <div className="tile chat-panel p-3" data-testid="guild-chat">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="font-disp text-lg" style={{ color }}>
+          GUILD CHAT
+        </div>
+        <div className="chat-chans ml-auto">
+          {CHANNELS.map(([id, label, c]) => (
+            <button
+              key={id}
+              data-testid={`chat-chan-${id}`}
+              className={`chat-chan ${ch === id ? "on" : ""}`}
+              style={ch === id ? { borderColor: c, color: c, boxShadow: `0 0 14px -4px ${c}` } : undefined}
+              onClick={() => {
+                sfx.uiTab();
+                setCh(id);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="chat-online">
+        <span className="chat-online-dot" />
+        <span className="num">{data.members.length + 2}</span> online
+        <span className="chat-online-list">
+          {data.members.map((m) => (
+            <span key={m.name} className="chat-online-av" title={`${m.name} · ${m.role}`} style={{ borderColor: CH_ROLE_COLOR[m.role] || "#35e0ff" }}>
+              {m.name.slice(0, 1)}
+            </span>
+          ))}
+        </span>
+      </div>
+
+      <div className="chat-log scroll-thin" ref={logRef} data-testid="chat-log">
+        {log.map((m) => (
+          <ChatBubble key={m.id} msg={m} onReact={() => react(m.id)} />
+        ))}
+        {typing && (
+          <div className="chat-typing" data-testid="chat-typing">
+            <span className="chat-av" style={{ borderColor: color, color, background: `linear-gradient(140deg, ${color}33, #0b0722)` }}>
+              {typing.slice(0, 1)}
+            </span>
+            <span className="chat-dots">
+              <i />
+              <i />
+              <i />
+            </span>
+            <span className="chat-typing-t">{typing} is typing</span>
+          </div>
+        )}
+      </div>
+
+      <div className="chat-quick">
+        {QUICK_CHAT.map((q) => (
+          <button
+            key={q}
+            className="chip chip-btn"
+            onClick={() => {
+              sfx.uiPop();
+              send(q);
+            }}
+          >
+            {q}
+          </button>
+        ))}
+      </div>
+
+      <div className="chat-input">
+        <input
+          className="chat-field"
+          placeholder={`Message ${ch === "guild" ? guildName : ch === "world" ? "the world" : "your party"}…`}
+          value={input}
+          maxLength={140}
+          data-testid="chat-input"
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+        />
+        <button
+          className="btn btn-cyan px-4 py-2 text-[13px]"
+          data-testid="chat-send"
+          disabled={!input.trim()}
+          onClick={() => send()}
+        >
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Reworked Guild hall: real membership stored in the save, a contribution
@@ -1353,8 +1728,6 @@ export function Guild({
 }) {
   const [tab, setTab] = useState<"hall" | "store" | "war">("hall");
   const [claim, setClaim] = useState<ClaimData | null>(null);
-  const [msg, setMsg] = useState("");
-  const [chat, setChat] = useState<[string, string][]>([]);
   const guild = save.guild.id ? GUILDS.find((g) => g.id === save.guild.id) || null : null;
   const lvl = guildLevel(save.guild.xp);
 
@@ -1447,17 +1820,6 @@ export function Guild({
     push(`${q.name} complete · +${q.coins} coins`, guild?.color || "#ffcf4d");
   };
 
-  const send = () => {
-    const text = msg.trim();
-    if (!text) return;
-    setChat((c) => [...c, ["You", text]]);
-    setMsg("");
-    sfx.click();
-    const pool = GUILD_CHATTER[guild?.id || "vanguard"];
-    const reply = pool[Math.floor(Math.random() * pool.length)];
-    setTimeout(() => setChat((c) => [...c, reply]), 700);
-  };
-
   if (!guild) {
     return (
       <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1" data-testid="guild">
@@ -1544,7 +1906,7 @@ export function Guild({
 
       <div className="flex items-center gap-2">
         {(["hall", "store", "war"] as const).map((t) => (
-          <button key={t} className={`tab-btn ${tab === t ? "on" : ""}`} onClick={() => { sfx.click(); setTab(t); }}>
+          <button key={t} className={`tab-btn ${tab === t ? "on" : ""}`} onClick={() => { sfx.uiTab(); setTab(t); }}>
             {t === "hall" ? "HALL" : t === "store" ? "COIN STORE" : "GUILD WAR"}
           </button>
         ))}
@@ -1615,30 +1977,7 @@ export function Guild({
           </div>
 
           {/* chat */}
-          <div className="tile p-3">
-            <div className="font-disp text-lg text-[var(--cyan)]">Guild Chat</div>
-            <div className="mt-1.5 max-h-48 space-y-1 overflow-y-auto scroll-thin text-[14px] font-semibold">
-              {[...GUILD_CHATTER[guild.id], ...chat].map(([n, m], i) => (
-                <div key={`${n}-${i}`}>
-                  <span style={{ color: n === "You" ? "#ffcf4d" : "var(--cyan)" }}>{n}:</span>{" "}
-                  <span className="text-[var(--txt)]">{m}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-2 flex gap-2">
-              <input
-                className="min-w-0 flex-1 rounded-lg border border-[var(--line)] bg-black/40 px-3 py-2 text-[13px] font-semibold text-[var(--txt)] outline-none focus:border-[var(--cyan)]"
-                placeholder="Message the guild…"
-                value={msg}
-                maxLength={120}
-                onChange={(e) => setMsg(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && send()}
-              />
-              <button className="btn btn-cyan px-4 py-2 text-[13px]" onClick={send}>
-                Send
-              </button>
-            </div>
-          </div>
+          <ChatPanel guildId={guild.id} guildName={guild.name} color={guild.color} />
         </>
       )}
 
@@ -1872,16 +2211,16 @@ export function SettingsModal({
       `last render error: ${w.__magictdLastError || "none"}`,
     ].join("\n");
   };
-  const TOGGLES: [string, keyof SaveData & string, string][] = [
-    ["Battle SFX", "sfx", "Sound effects during battle and menus"],
-    ["Rich FX", "fx", "Extra particles, smoke and hit effects"],
-    ["Damage Numbers", "dmgNums", "Floating damage values over every hit"],
-    ["Screen Shake", "shakeFx", "Impact shake on explosions and hero skills"],
-    ["Battlefield Guides", "guides", "Grid, buildable-cell and range circles"],
-    ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves"],
-    ["Reduced Motion", "reducedMotion", "Calms looping menu animations"],
-    ["Performance HUD", "perf", "FPS and live entity counter in battle"],
-    ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate"],
+  const TOGGLES: [string, keyof SaveData & string, string, SetIconName, string][] = [
+    ["Battle SFX", "sfx", "Sound effects during battle and menus", "sfx", "#35e0ff"],
+    ["Rich FX", "fx", "Extra particles, smoke and hit effects", "fx", "#ff4fd8"],
+    ["Damage Numbers", "dmgNums", "Floating damage values over every hit", "dmg", "#ffcf4d"],
+    ["Screen Shake", "shakeFx", "Impact shake on explosions and hero skills", "shake", "#ff8a3d"],
+    ["Battlefield Guides", "guides", "Grid, buildable-cell and range circles", "guides", "#8effc4"],
+    ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves", "fast", "#b98bff"],
+    ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
+    ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
+    ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
   ];
   return (
     <Modal onClose={onClose} w={470}>
@@ -1889,7 +2228,8 @@ export function SettingsModal({
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">AUDIO</div>
       <div className="row-card mt-1.5">
-        <div>
+        <SetIcon name="volume" color="#35e0ff" />
+        <div className="min-w-0 flex-1">
           <div className="font-bold">Master Volume</div>
           <div className="text-xs font-semibold text-[var(--dim)]">{Math.round(save.vol * 100)}%</div>
         </div>
@@ -1910,33 +2250,36 @@ export function SettingsModal({
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
       <div className="mt-1.5 space-y-3">
-        <div className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="max-fps-row">
-          <div>
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="max-fps-row">
+          <SetIcon name="fps" color="#3dff8e" />
+          <div className="min-w-[130px] flex-1">
             <div className="font-bold">Max Frame Rate</div>
             <div className="text-xs font-semibold text-[var(--dim)]">Caps how hard the renderer works</div>
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex w-full flex-wrap gap-1.5 sm:w-auto">
             {[0, 30, 60, 120, 144, 240].map((fps) => (
               <button
                 key={fps}
                 data-testid={"fps-" + fps}
                 title={fps === 0 ? "Unlimited" : fps + " FPS"}
-                className={"chip chip-btn" + (save.maxFps === fps ? " on" : "")}
+                className={"chip chip-btn chip-ico" + (save.maxFps === fps ? " on" : "")}
                 onClick={() => {
-                  sfx.click();
+                  sfx.uiTab();
                   mutate((s) => {
                     s.maxFps = fps;
                   });
                 }}
               >
-                {fps === 0 ? "∞" : fps}
+                <FpsBars fps={fps} active={save.maxFps === fps} />
+                {fps === 0 ? "" : fps}
               </button>
             ))}
           </div>
         </div>
-        {TOGGLES.map(([label, key, d]) => (
-          <div key={key} className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-            <div>
+        {TOGGLES.map(([label, key, d, icon, color]) => (
+          <div key={key} className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+            <SetIcon name={icon} color={color} />
+            <div className="min-w-0 flex-1">
               <div className="font-bold">{label}</div>
               <div className="text-xs font-semibold text-[var(--dim)]">{d}</div>
             </div>
@@ -1945,8 +2288,10 @@ export function SettingsModal({
               label={label}
               testId={`toggle-${key}`}
               onToggle={() => {
+                const next = !save[key];
                 mutate((s) => { s[key] = !s[key] as never; });
-                sfx.click();
+                if (next) sfx.uiPop();
+                else sfx.uiOff();
               }}
             />
           </div>
@@ -1954,8 +2299,9 @@ export function SettingsModal({
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">APP</div>
-      <div className="mt-1.5 flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-        <div>
+      <div className="mt-1.5 flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+        <SetIcon name="download" color="#ffcf4d" />
+        <div className="min-w-0 flex-1">
           <div className="font-bold">Install App</div>
           <div className="text-xs font-semibold text-[var(--dim)]">
             {installed
@@ -1980,7 +2326,8 @@ export function SettingsModal({
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">DISPLAY</div>
       <div className="row-card mt-1.5">
-        <div>
+        <SetIcon name="expand" color="#35e0ff" />
+        <div className="min-w-0 flex-1">
           <div className="font-bold">Fullscreen</div>
           <div className="text-xs font-semibold text-[var(--dim)]">
             {fullscreenSupported()
@@ -2003,8 +2350,9 @@ export function SettingsModal({
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">SAVE DATA</div>
       <div className="mt-1.5 space-y-3">
-        <div className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-          <div>
+        <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+          <SetIcon name="backup" color="#8effc4" />
+          <div className="min-w-0 flex-1">
             <div className="font-bold">Backup</div>
             <div className="text-xs font-semibold text-[var(--dim)]">Copy your progress as text, or paste one back in</div>
           </div>
@@ -2064,8 +2412,9 @@ export function SettingsModal({
             </button>
           </div>
         )}
-        <div className="flex items-center justify-between rounded-lg border border-[#ff4d5e55] bg-black/30 px-4 py-3">
-          <div>
+        <div className="flex items-center gap-3 rounded-lg border border-[#ff4d5e55] bg-black/30 px-4 py-3">
+          <SetIcon name="reset" color="#ff4d5e" />
+          <div className="min-w-0 flex-1">
             <div className="font-bold text-[#ff4d5e]">Reset Progress</div>
             <div className="text-xs font-semibold text-[var(--dim)]">Wipes gold, gems, tokens, towers and lineup</div>
           </div>
@@ -2086,8 +2435,9 @@ export function SettingsModal({
             {confirmReset ? "Confirm?" : "Reset"}
           </button>
         </div>
-        <div className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-          <div>
+        <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+          <SetIcon name="replay" color="#ff9be9" />
+          <div className="min-w-0 flex-1">
             <div className="font-bold">Loading Screen</div>
             <div className="text-xs font-semibold text-[var(--dim)]">Play the boot sequence again</div>
           </div>
@@ -2103,8 +2453,9 @@ export function SettingsModal({
           </button>
         </div>
         <div className="rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+          <div className="flex items-center gap-3">
+            <SetIcon name="diag" color="#b98bff" />
+            <div className="min-w-0 flex-1">
               <div className="font-bold">Diagnostics</div>
               <div className="text-xs font-semibold text-[var(--dim)]">
                 Environment details — useful if the game misbehaves

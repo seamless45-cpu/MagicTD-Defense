@@ -13,7 +13,6 @@ import {
   upgradeFragCost,
   ascentAllCost,
   awakenCost,
-  CRIT_DMG_PER_UPGRADE,
   critBonusFrom,
   fmtCritPct,
   towerStatRows,
@@ -44,6 +43,8 @@ export default function Towers({
   const [drag, setDrag] = useState<Drag | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const slotRefs = useRef<(HTMLDivElement | null)[]>([]);
+  /** the scroll strip the rotation chips live in (drag-to-reorder drop zone) */
+  const stripRef = useRef<HTMLDivElement | null>(null);
   const [shakeCard, setShakeCard] = useState<string | null>(null);
   const [twFilter, setTwFilter] = useState<"all" | "line" | "locked" | "ready">("all");
   /** tower id shown in the preview panel (clicking a card opens it) */
@@ -81,12 +82,29 @@ export default function Towers({
         openPreview(d.id);
         return;
       }
-      for (let i = 0; i < 6; i++) {
+      // dropped on a chip -> that exact slot
+      for (let i = 0; i < slotRefs.current.length; i++) {
         const el = slotRefs.current[i];
         if (!el) continue;
         const r = el.getBoundingClientRect();
         if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
           addLineup(d.id, i);
+          return;
+        }
+      }
+      // dropped anywhere else on the rotation strip -> nearest slot by position
+      const strip = stripRef.current;
+      if (strip) {
+        const r = strip.getBoundingClientRect();
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+          let at = 0;
+          for (let i = 0; i < slotRefs.current.length; i++) {
+            const el = slotRefs.current[i];
+            if (!el) continue;
+            const c = el.getBoundingClientRect();
+            if (e.clientX > c.left + c.width / 2) at = i + 1;
+          }
+          addLineup(d.id, at);
           return;
         }
       }
@@ -302,70 +320,52 @@ export default function Towers({
 
   return (
     <div className="flex h-full flex-col gap-2.5">
-      {/* SUMMON ROTATION — a preference list, not a wall of six slots. Any
-          unlocked tower can be summoned; this order decides which ones the
-          summon button reaches for first, and what the ascent bar shows. */}
-      <div className="tile tile-gold shrink-0 p-2.5" data-testid="lineup-row">
-        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-          <div className="font-disp text-[15px] tracking-wide text-[#ffcf4d]">
-            SUMMON ROTATION <span className="text-[var(--txt)]">· <span className="num">{save.lineup.length}</span> towers</span>
+      {/* SUMMON ROTATION — one horizontal strip that never wraps, so the grid
+          below keeps its height no matter how many towers are queued. Order
+          decides which towers a summon reaches for first. */}
+      <div className="tile tile-gold shrink-0 p-2" data-testid="lineup-row">
+        <div className="flex items-center gap-2">
+          <div className="rota-head shrink-0" title="Summons draw from the top of this list">
+            <span className="rota-head-t">SUMMON ROTATION</span>
+            <span className="rota-head-n num">{save.lineup.length}</span>
           </div>
-          <div className="hidden text-[10.5px] font-semibold text-[var(--dim)] sm:block">
-            Tap for details · drag to set the order · summons draw from the top six
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {save.lineup.map((id, i) => {
-            const def = TOWER_BY_ID[id];
-            if (!def) return null;
-            const rc = RARITY[def.rarity];
-            return (
-              <div
-                key={id}
-                ref={(el) => {
-                  slotRefs.current[i] = el;
-                }}
-                className="tw-chip"
-                style={{ borderColor: rc.color, background: "rgba(8,5,26,0.55)" }}
-                title={`#${i + 1} in the rotation`}
-              >
-                <span className="tw-chip-i num">{i + 1}</span>
-                <TowerIcon def={def} size={30} />
-                <span className="tw-chip-name" style={{ color: rc.color }}>{def.name}</span>
-                <span className="tw-chip-lv num">{save.levels[def.id]}</span>
-                <button
-                  className="tw-chip-x"
-                  data-testid={`chip-x-${id}`}
-                  title="Remove from rotation"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={() => toggleLineup(id)}
+          <div className="rota-strip scroll-thin" ref={stripRef}>
+            {save.lineup.map((id, i) => {
+              const def = TOWER_BY_ID[id];
+              if (!def) return null;
+              const rc = RARITY[def.rarity];
+              return (
+                <div
+                  key={id}
+                  ref={(el) => {
+                    slotRefs.current[i] = el;
+                  }}
+                  className="tw-chip"
+                  style={{ borderColor: rc.color, background: "rgba(8,5,26,0.55)" }}
+                  title={`#${i + 1} in the rotation · ${def.name}`}
                 >
-                  ✕
-                </button>
-              </div>
-            );
-          })}
-          {save.lineup.length === 0 && (
-            <span className="text-[12px] font-semibold text-[var(--line2)]">
-              Empty — summons will pick at random until you set an order.
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* MERGED CRIT DAMAGE — every tower upgrade on the account pools into this */}
-      <div className="crit-band shrink-0" data-testid="crit-band">
-        <span className="crit-band-icon">✦</span>
-        <div className="min-w-0">
-          <div className="crit-band-label">CRIT DAMAGE</div>
-          <div className="crit-band-sub">
-            <span className="num" data-testid="crit-upgrades">{towerUpgrades(save)}</span> upgrades merged · +
-            {Math.round(CRIT_DMG_PER_UPGRADE * 100)}% each
+                  <span className="tw-chip-i num">{i + 1}</span>
+                  <TowerIcon def={def} size={26} />
+                  <span className="tw-chip-name" style={{ color: rc.color }}>{def.name}</span>
+                  <span className="tw-chip-lv num">{save.levels[def.id]}</span>
+                  <button
+                    className="tw-chip-x"
+                    data-testid={`chip-x-${id}`}
+                    title="Remove from rotation"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => toggleLineup(id)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              );
+            })}
+            {save.lineup.length === 0 && (
+              <span className="self-center text-[11.5px] font-semibold text-[var(--line2)]">
+                Empty — summons pick at random until you set an order.
+              </span>
+            )}
           </div>
-        </div>
-        <div className="crit-band-val">
-          <span className="num" data-testid="crit-total">{fmtCritPct(critBonus(save))}</span>
-          <span className="crit-band-x">×{(1 + critBonus(save)).toFixed(2)} CRITS</span>
         </div>
       </div>
 
@@ -397,12 +397,26 @@ export default function Towers({
               {label}
             </button>
           ))}
-          <span className="ml-auto text-[10px] font-bold tracking-[0.14em] text-[var(--dim)]">
-            <span className="num">{twVisible.length}</span> / <span className="num">{TOWERS.length}</span> SHOWN
+          <span className="text-[10px] font-bold tracking-[0.14em] text-[var(--dim)]">
+            <span className="num">{twVisible.length}</span>/<span className="num">{TOWERS.length}</span>
           </span>
+          {/* MERGED CRIT DAMAGE — folded into this row so it costs no height */}
+          <div className="crit-band ml-auto" data-testid="crit-band" title="Every tower upgrade on the account pools into your crit damage">
+            <span className="crit-band-icon">✦</span>
+            <span className="crit-band-label">CRIT DAMAGE</span>
+            <span className="crit-band-val">
+              <span className="num" data-testid="crit-total">{fmtCritPct(critBonus(save))}</span>
+            </span>
+            <span className="crit-band-x">
+              ×{(1 + critBonus(save)).toFixed(2)}
+            </span>
+            <span className="crit-band-sub">
+              <span className="num" data-testid="crit-upgrades">{towerUpgrades(save)}</span> merged
+            </span>
+          </div>
         </div>
 
-        <div className="tower-scroll grid content-start gap-1 overflow-y-auto scroll-thin pr-1">
+        <div className="tower-scroll stagger grid content-start gap-1 overflow-y-auto scroll-thin pr-1">
           {(["legendary", "epic", "decent", "normal"] as const).map((rarity) => {
             const group = twVisible.filter((def) => def.rarity === rarity);
             if (!group.length) return null;

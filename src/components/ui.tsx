@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { sfx } from "../game/audio";
 import type { ChipId, TowerDef } from "../game/data";
 import { HERO_BY_ID, RARITY, TOWER_BY_ID, leagueFor, towerArt } from "../game/data";
@@ -852,6 +852,186 @@ export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () =>
   );
 }
 
+/** ---------- setting glyphs (one shared 24px stroke set) ---------- */
+export type SetIconName =
+  | "volume"
+  | "sfx"
+  | "fx"
+  | "dmg"
+  | "shake"
+  | "guides"
+  | "fast"
+  | "calm"
+  | "perf"
+  | "interp"
+  | "fps"
+  | "download"
+  | "expand"
+  | "backup"
+  | "reset"
+  | "replay"
+  | "diag";
+
+const SET_PATHS: Record<SetIconName, ReactNode> = {
+  volume: (
+    <>
+      <path d="M4 9h3l5-4v14l-5-4H4z" />
+      <path d="M16 8.6a5 5 0 0 1 0 6.8" />
+      <path d="M18.6 6a8.4 8.4 0 0 1 0 12" />
+    </>
+  ),
+  sfx: (
+    <>
+      <path d="M9 18V6l10-2.4V16" />
+      <circle cx="6.4" cy="18" r="2.6" />
+      <circle cx="16.4" cy="16" r="2.6" />
+    </>
+  ),
+  fx: (
+    <>
+      <path d="M11 3.2l1.7 4.3 4.3 1.7-4.3 1.7L11 15.2 9.3 10.9 5 9.2l4.3-1.7z" />
+      <path d="M18 15.4l.85 2.15 2.15.85-2.15.85L18 21.4l-.85-2.15-2.15-.85 2.15-.85z" />
+    </>
+  ),
+  dmg: (
+    <>
+      <path d="M9.5 4 8 20" />
+      <path d="M16 4l-1.5 16" />
+      <path d="M4.6 9h15" />
+      <path d="M3.9 15h15" />
+    </>
+  ),
+  shake: (
+    <>
+      <rect x="8" y="3" width="8" height="18" rx="2.4" />
+      <path d="M4.4 8.5v7" />
+      <path d="M2 10.5v3" />
+      <path d="M19.6 8.5v7" />
+      <path d="M22 10.5v3" />
+    </>
+  ),
+  guides: (
+    <>
+      <circle cx="12" cy="12" r="7.6" />
+      <circle cx="12" cy="12" r="1.7" />
+      <path d="M12 1.6v4.2M12 18.2v4.2M1.6 12h4.2M18.2 12h4.2" />
+    </>
+  ),
+  fast: (
+    <>
+      <path d="M4 5.6 11 12l-7 6.4z" />
+      <path d="M13 5.6 20 12l-7 6.4z" />
+    </>
+  ),
+  calm: (
+    <>
+      <path d="M2.6 12c2.4-5 4.8-5 7.2 0s4.8 5 7.2 0" />
+      <path d="M4.5 20 19.5 4" />
+    </>
+  ),
+  perf: (
+    <>
+      <path d="M3.6 18.4a9 9 0 1 1 16.8 0" />
+      <path d="M12 18.4l4.6-6.6" />
+      <circle cx="12" cy="18.4" r="1.3" />
+    </>
+  ),
+  interp: (
+    <>
+      <path d="M2 12c2.2-6.4 4.4-6.4 6.6 0s4.4 6.4 6.6 0 4.4-6.4 6.6 0" />
+      <path d="M3 20h18" />
+    </>
+  ),
+  fps: (
+    <>
+      <path d="M4 18V9" />
+      <path d="M9.3 18V5" />
+      <path d="M14.7 18v-8" />
+      <path d="M20 18V7" />
+    </>
+  ),
+  download: (
+    <>
+      <path d="M12 3v11.5" />
+      <path d="M7.2 10.4 12 15.2l4.8-4.8" />
+      <path d="M4 20h16" />
+    </>
+  ),
+  expand: (
+    <>
+      <path d="M4 9V4h5" />
+      <path d="M20 9V4h-5" />
+      <path d="M4 15v5h5" />
+      <path d="M20 15v5h-5" />
+    </>
+  ),
+  backup: (
+    <>
+      <ellipse cx="12" cy="6" rx="7.4" ry="3.1" />
+      <path d="M4.6 6v12c0 1.7 3.3 3.1 7.4 3.1s7.4-1.4 7.4-3.1V6" />
+      <path d="M4.6 12c0 1.7 3.3 3.1 7.4 3.1s7.4-1.4 7.4-3.1" />
+    </>
+  ),
+  reset: (
+    <>
+      <path d="M4 7h16" />
+      <path d="M9.2 7V4.4h5.6V7" />
+      <path d="M6.2 7l1.1 13h9.4L17.8 7" />
+      <path d="M10.4 11v5.6M13.6 11v5.6" />
+    </>
+  ),
+  replay: (
+    <>
+      <path d="M3.4 12a8.6 8.6 0 1 0 2.9-6.4" />
+      <path d="M3 4v5h5" />
+    </>
+  ),
+  diag: <path d="M2.6 12h3.8l2.4-6.2 3.8 12.4 2.4-6.2h5.6" />,
+};
+
+/**
+ * A rounded glyph tile used down the left side of every settings row, so each
+ * option reads at a glance instead of being a wall of identical paragraphs.
+ */
+export function SetIcon({ name, color = "#35e0ff", size = 34 }: { name: SetIconName; color?: string; size?: number }) {
+  return (
+    <span className="set-ico" style={{ color, width: size, height: size, borderColor: color + "66", background: `radial-gradient(circle at 30% 20%, ${color}33, rgba(0,0,0,0.55))` }}>
+      <svg
+        width={size * 0.56}
+        height={size * 0.56}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.9"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        {SET_PATHS[name]}
+      </svg>
+    </span>
+  );
+}
+
+/** mini frame-rate bars for the max-FPS chips (unlimited gets the infinity loop) */
+export function FpsBars({ fps, active }: { fps: number; active: boolean }) {
+  if (fps === 0) {
+    return (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" aria-hidden="true">
+        <path d="M6.4 12c0-2 1.3-3.4 3-3.4 2.6 0 5.2 6.8 7.8 6.8 1.7 0 3-1.4 3-3.4s-1.3-3.4-3-3.4c-2.6 0-5.2 6.8-7.8 6.8-1.7 0-3-1.4-3-3.4z" />
+      </svg>
+    );
+  }
+  const bars = fps <= 30 ? 1 : fps <= 60 ? 2 : fps <= 120 ? 3 : 4;
+  return (
+    <span className="fps-bars" data-active={active ? "1" : "0"} aria-hidden="true">
+      {[0, 1, 2, 3].map((i) => (
+        <i key={i} style={{ height: 4 + i * 2.6, opacity: i < bars ? 1 : 0.25 }} />
+      ))}
+    </span>
+  );
+}
+
 export function Modal({
   children,
   onClose,
@@ -923,6 +1103,11 @@ export function ClaimChest({
             <stop offset="0%" stopColor="#6b4e22" />
             <stop offset="100%" stopColor="#2a1c0a" />
           </linearGradient>
+          <linearGradient id={`chestShaft-${color.slice(1)}`} x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0%" stopColor={color} stopOpacity="0.85" />
+            <stop offset="55%" stopColor="#ffffff" stopOpacity="0.35" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
         </defs>
 
         {/* light pouring out of the seams once it cracks */}
@@ -946,7 +1131,16 @@ export function ClaimChest({
           <circle cx="45" cy="48" r={cracked ? 40 : 26} fill={`url(#chestGlow-${color.slice(1)})`} opacity={cracked ? 0.95 : 0.5} className="chest-core" />
         )}
 
+        {/* the light column: a shaft of raw reward shooting skyward as it opens */}
+        {lidOff && (
+          <g className="chest-shaft" style={{ transformOrigin: "45px 60px" }}>
+            <rect x="30" y="-190" width="30" height="250" fill={`url(#chestShaft-${color.slice(1)})`} opacity="0.85" />
+            <rect x="41" y="-190" width="8" height="250" fill="#ffffff" opacity="0.75" />
+          </g>
+        )}
         <ellipse cx="45" cy="78" rx="30" ry="5" fill="#000" opacity="0.45" />
+        {/* the floor splits under the pressure right before the lid gives way */}
+        {cracked && <ellipse className="chest-floor" cx="45" cy="79" rx="34" ry="7" fill="none" stroke={color} strokeWidth="2" opacity="0.65" />}
         {/* body */}
         <rect x="12" y="34" width="66" height="40" rx="6" fill={`url(#chestBody-${color.slice(1)})`} stroke={color} strokeWidth="3" />
         {/* metal banding gives it some heft */}
@@ -1098,27 +1292,43 @@ function CurrencyRain({ gold, gems }: { gold: number; gems: number }) {
  */
 export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () => void }) {
   const wantsChest = data.chest !== false && !!data.chest;
-  const [phase, setPhase] = useState<"charge" | "shake" | "crack" | "burst" | "loot">(wantsChest ? "charge" : "loot");
+  const [phase, setPhase] = useState<"wind" | "rattle" | "crack" | "burst" | "loot">(wantsChest ? "wind" : "loot");
 
   const gold = data.lines.find((l) => l.kind === "gold")?.n || 0;
   const gems = data.lines.find((l) => l.kind === "gems")?.n || 0;
   const jackpot = gold >= GOLD_RAIN_MIN || gems >= GEM_RAIN_MIN;
 
-  // the open sequence, beat by beat
+  // the open sequence, beat by beat:
+  // wind     the arena dims and every mote of light is dragged into the lock
+  // rattle   the chest fights back — violent shake, lid hammering, floor cracks
+  // crack    the seams split and beams tear out of the gaps
+  // burst    the lid is torn clean off, a light column erupts, shards fly
+  // loot     the haul lands tile by tile with a rising chime cascade
   useEffect(() => {
     if (!wantsChest) return;
-    sfx.chestCharge();
+    sfx.chestWind();
     const ts = [
-      setTimeout(() => setPhase("shake"), 620),
+      setTimeout(() => {
+        setPhase("rattle");
+        sfx.chestRattle();
+      }, 700),
       setTimeout(() => {
         setPhase("crack");
+        sfx.chestSlam();
         sfx.chestCrack();
-      }, 1180),
-      setTimeout(() => setPhase("burst"), 1480),
-      setTimeout(() => setPhase("loot"), 1980),
+      }, 1420),
+      setTimeout(() => {
+        setPhase("burst");
+        sfx.chestBlast();
+        sfx.chestLid();
+      }, 1760),
+      setTimeout(() => {
+        setPhase("loot");
+        sfx.chestLoot(data.lines.length || 3);
+      }, 2440),
     ];
     return () => ts.forEach(clearTimeout);
-  }, [wantsChest]);
+  }, [wantsChest, data.lines.length]);
 
   // the jackpot rain and its sound fire the instant the loot is revealed
   useEffect(() => {
@@ -1169,12 +1379,61 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
     [data.color]
   );
 
+  // motes of light dragged inward during the wind-up
+  const motes = useMemo(
+    () =>
+      Array.from({ length: 22 }, (_, i) => {
+        const a = (i / 22) * Math.PI * 2 + Math.random() * 0.3;
+        const r = 150 + Math.random() * 190;
+        return {
+          id: i,
+          x: Math.cos(a) * r,
+          y: Math.sin(a) * r * 0.7,
+          size: 3 + Math.random() * 6,
+          delay: Math.random() * 0.6,
+          color: ["#ffffff", "#ffcf4d", data.color][i % 3],
+        };
+      }),
+    [data.color]
+  );
+
+  // shockwave rings thrown out at the crack and again at the burst
+  const waves = useMemo(
+    () =>
+      Array.from({ length: 4 }, (_, i) => ({
+        id: i,
+        delay: i * 0.11,
+        size: 60 + i * 26,
+        color: [data.color, "#ffffff", "#ffcf4d", data.color][i % 4],
+      })),
+    [data.color]
+  );
+
+  // embers rising out of the opened chest
+  const embers = useMemo(
+    () =>
+      Array.from({ length: 18 }, (_, i) => ({
+        id: i,
+        x: (Math.random() - 0.5) * 130,
+        size: 3 + Math.random() * 5,
+        delay: Math.random() * 0.5,
+        dur: 0.9 + Math.random() * 0.9,
+        color: ["#ffcf4d", "#ffb324", data.color, "#ffffff"][i % 4],
+      })),
+    [data.color]
+  );
+
   const chestCount = Math.max(1, data.chestCount || 1);
   const opening = phase !== "loot";
-  const chestStage = phase === "loot" ? "open" : phase;
+  const chestStage = phase === "loot" ? "open" : phase === "wind" ? "charge" : phase === "rattle" ? "shake" : phase;
+  const shaking = phase === "rattle" || phase === "crack";
 
   return (
-    <div className="claim-root fixed inset-0 z-[90] flex items-center justify-center p-4" data-testid="reward-claim" onPointerDown={onClose}>
+    <div
+      className={`claim-root fixed inset-0 z-[90] flex items-center justify-center p-4 ${shaking ? "claim-quake" : ""} ${phase === "wind" ? "claim-vacuum" : ""}`}
+      data-testid="reward-claim"
+      onPointerDown={onClose}
+    >
       <div
         className="claim-rays pointer-events-none absolute"
         style={{ background: `conic-gradient(from 0deg, ${data.color}00, ${data.color}55, ${data.color}00, ${data.color}55, ${data.color}00)` }}
@@ -1210,12 +1469,65 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
                 <ClaimChest color={data.color} size={138} stage={chestStage} />
               </div>
             ))}
+            {phase === "wind" &&
+              motes.map((m) => (
+                <span
+                  key={m.id}
+                  className="chest-mote absolute"
+                  style={
+                    {
+                      width: m.size,
+                      height: m.size,
+                      background: m.color,
+                      boxShadow: `0 0 10px ${m.color}`,
+                      animationDelay: `${m.delay}s`,
+                      "--mx": `${m.x}px`,
+                      "--my": `${m.y}px`,
+                    } as React.CSSProperties
+                  }
+                />
+              ))}
             {(phase === "crack" || phase === "burst") && (
               <>
+                {waves.map((w) => (
+                  <span
+                    key={`w-${w.id}`}
+                    className="chest-wave absolute"
+                    style={
+                      {
+                        width: w.size,
+                        height: w.size,
+                        borderColor: w.color,
+                        animationDelay: `${w.delay}s`,
+                      } as React.CSSProperties
+                    }
+                  />
+                ))}
                 <span className="claim-ring absolute" style={{ borderColor: data.color }} />
                 <span className="claim-ring absolute" style={{ borderColor: "#ffffff", animationDelay: "100ms" }} />
-                <span className="claim-ring absolute" style={{ borderColor: data.color, animationDelay: "220ms" }} />
                 <span className="claim-flash absolute inset-0" style={{ background: `radial-gradient(circle, ${data.color}cc, transparent 65%)` }} />
+              </>
+            )}
+            {phase === "burst" && (
+              <>
+                <span className="chest-blastwave absolute" style={{ background: `radial-gradient(circle, #ffffff, ${data.color}00 62%)` }} />
+                {embers.map((e) => (
+                  <span
+                    key={`e-${e.id}`}
+                    className="chest-ember absolute"
+                    style={
+                      {
+                        width: e.size,
+                        height: e.size,
+                        background: e.color,
+                        boxShadow: `0 0 10px ${e.color}`,
+                        animationDelay: `${e.delay}s`,
+                        animationDuration: `${e.dur}s`,
+                        "--ex": `${e.x}px`,
+                      } as React.CSSProperties
+                    }
+                  />
+                ))}
               </>
             )}
             {phase === "burst" &&

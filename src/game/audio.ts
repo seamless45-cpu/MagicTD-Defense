@@ -322,6 +322,34 @@ export const sfx = {
     fm(1040, 2.01, 2.4, 0.14, 0.18);
     tone(1560, 0.16, "triangle", 0.14, 300, 0.05, { verb: 0.5 });
   },
+  /** tiny UI pop for toggles, tabs and chips */
+  uiPop: () => {
+    tone(900, 0.045, "triangle", 0.14, 260, 0, { cutoff: 4200 });
+    tone(1350, 0.06, "sine", 0.08, 180, 0.02, { verb: 0.3 });
+  },
+  uiOff: () => {
+    tone(520, 0.07, "square", 0.12, -180, 0, { cutoff: 2200 });
+    tone(310, 0.09, "sine", 0.09, -70, 0.02);
+  },
+  /** tab switch: a small two-note blip */
+  uiTab: () => {
+    tone(1150, 0.04, "triangle", 0.12, 0, 0, { cutoff: 5200 });
+    tone(1520, 0.06, "triangle", 0.1, 200, 0.045, { verb: 0.4 });
+  },
+  /** chat: the sender's own message ticking into the log */
+  chatSend: () => {
+    tone(1200, 0.05, "sine", 0.12, 260, 0, { verb: 0.35 });
+    tone(1800, 0.07, "sine", 0.07, 200, 0.035, { verb: 0.45 });
+  },
+  /** chat: an incoming message landing */
+  chatRecv: () => {
+    tone(760, 0.07, "triangle", 0.11, 180, 0, { verb: 0.45 });
+    tone(570, 0.09, "sine", 0.08, -60, 0.05, { verb: 0.4 });
+  },
+  /** chat: someone is typing */
+  chatTyping: () => {
+    [0, 1].forEach((i) => tone(640 + i * 90, 0.035, "square", 0.05, 60, i * 0.07, { cutoff: 3000 }));
+  },
   goldRain: () => {
     for (let i = 0; i < 9; i++) {
       fm(1200 + i * 90, 2.01, 2.6, 0.16, 0.13, i * 0.055, 0.6);
@@ -335,7 +363,53 @@ export const sfx = {
     noise(0.5, 0.1, 5200, { type: "highpass", sweep: 0.4, verb: 0.8 });
   },
 
-  // ---------- chests ----------
+  // ---------- chests (the full ceremony) ----------
+  /** charge: a ratcheting riser with an accelerating tick pattern */
+  chestWind: () => {
+    riser(1.1, 0.2, 90, 1500);
+    [0, 0.09, 0.16, 0.22, 0.27, 0.31, 0.345, 0.375, 0.4].forEach((t, i) => {
+      tone(700 + i * 120, 0.05, "square", 0.07 + i * 0.006, -120, t, { cutoff: 4200, verb: 0.3 });
+    });
+    tone(150, 0.9, "triangle", 0.1, 700, 0, { q: 9, sub: true, verb: 0.4 });
+  },
+  /** shake: low grind + wood creak, pacing up */
+  chestRattle: () => {
+    noise(0.9, 0.14, 380, { sweep: 1.6, q: 1.1, noiseType: "brown", verb: 0.35 });
+    [0.12, 0.34, 0.52, 0.66, 0.78].forEach((t, i) => {
+      tone(90 + i * 22, 0.1, "square", 0.1, -30, t, { cutoff: 700, q: 4 });
+      noise(0.07, 0.1, 2200, { type: "bandpass", q: 2.4, delay: t, sweep: 0.5 });
+    });
+  },
+  /** crack: splintering wood, stressed metal, and a sub thump */
+  chestSlam: () => {
+    noise(0.1, 0.42, 3200, { type: "highpass", q: 0.7 });
+    noise(0.3, 0.32, 460, { sweep: 0.22, noiseType: "brown", verb: 0.7 });
+    fm(190, 1.31, 3.2, 0.3, 0.3);
+    fm(320, 2.7, 2.2, 0.2, 0.16, 0.02);
+    boom(105, 0.42, 0.3, 0, 2.6);
+  },
+  /** burst: the lid leaving, a light-blast and a shimmer tail */
+  chestBlast: () => {
+    noise(0.28, 0.3, 5200, { type: "highpass", q: 1.2, verb: 0.7 });
+    noise(0.3, 0.28, 2000, { sweep: 0.15, q: 0.85, verb: 0.7, noiseType: "pink" });
+    boom(140, 0.34, 0.24);
+    tone(1600, 0.5, "sine", 0.1, 900, 0.02, { verb: 0.9 });
+    [0, 4, 7, 12].forEach((st, i) => clang(880 * Math.pow(2, st / 12), 0.4, 0.05, 0.06 + i * 0.05, 0.9));
+  },
+  /** loot: an ascending chime cascade that scales with how much dropped */
+  chestLoot: (n = 3) => {
+    const steps = Math.max(1, Math.min(10, n));
+    for (let i = 0; i < steps; i++) {
+      tone(660 * Math.pow(2, (i % 5) / 12), 0.22, "sine", 0.14, 140, i * 0.07, { verb: 0.85 });
+      if (i % 2 === 0) clang(1046 * Math.pow(2, (i % 4) / 12), 0.24, 0.05, i * 0.07 + 0.03, 0.8);
+    }
+    tone(1320, 0.5, "triangle", 0.09, 320, steps * 0.07, { verb: 0.9 });
+  },
+  /** the lid tumbling away */
+  chestLid: () => {
+    tone(280, 0.45, "triangle", 0.16, 900, 0, { q: 5, verb: 0.6 });
+    noise(0.4, 0.14, 1800, { type: "bandpass", q: 1.6, sweep: 2.6 });
+  },
   chest: () => {
     noise(0.3, 0.26, 900, { sweep: 0.2, verb: 0.6, noiseType: "pink" });
     fm(520, 1.5, 2, 0.24, 0.2, 0.16);
