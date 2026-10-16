@@ -6670,23 +6670,32 @@ export default function Battle({
 
       // bolts
       // ---------- vertical lightning pillars ----------
+      // Demon Execution drops one pillar per enemy on the field, so a big wave
+      // can put twenty of these on screen at once. The halo gradient and the two
+      // side filaments are the expensive half: past the first ten pillars (or
+      // whenever the frame governor is throttling) only the white core spine is
+      // drawn, which still reads as a strike from across the arena.
+      let pillarIdx = 0;
       for (const st of g.strikes) {
         const k = Math.max(0, Math.min(1, st.life / st.max)); // 1 -> 0
         const punch2 = 1 - k; // 0 -> 1 as the column fades
         const top = -30;
         const w = st.width * (0.75 + k * 0.5);
+        const detailed = pillarIdx++ < 10 && fxQ() >= 0.7;
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         // wide outer halo
-        const halo = ctx.createLinearGradient(st.x - w * 3, 0, st.x + w * 3, 0);
-        halo.addColorStop(0, "transparent");
-        halo.addColorStop(0.5, st.color + "66");
-        halo.addColorStop(1, "transparent");
-        ctx.globalAlpha = 0.5 + k * 0.5;
-        ctx.fillStyle = halo;
-        ctx.fillRect(st.x - w * 3, top, w * 6, st.y - top);
+        if (detailed) {
+          const halo = ctx.createLinearGradient(st.x - w * 3, 0, st.x + w * 3, 0);
+          halo.addColorStop(0, "transparent");
+          halo.addColorStop(0.5, st.color + "66");
+          halo.addColorStop(1, "transparent");
+          ctx.globalAlpha = 0.5 + k * 0.5;
+          ctx.fillStyle = halo;
+          ctx.fillRect(st.x - w * 3, top, w * 6, st.y - top);
+        }
         // the core column: three jagged filaments sharing one spine
-        for (let f = -1; f <= 1; f++) {
+        for (let f = detailed ? -1 : 0; f <= 1; f++) {
           const segments = 7;
           const jitter = (st.seed + f * 13) % 7;
           ctx.globalAlpha = (f === 0 ? 0.95 : 0.45) * (0.4 + k * 0.6);
@@ -6703,13 +6712,19 @@ export default function Battle({
           }
           ctx.stroke();
         }
-        // the impact pool where the column meets the ground
+        // the impact pool where the column meets the ground (a flat disc when
+        // the pillar is on the cheap path)
         ctx.globalAlpha = 0.6 * (0.35 + k * 0.65);
-        const pool = ctx.createRadialGradient(st.x, st.y, 1, st.x, st.y, w * 4.5);
-        pool.addColorStop(0, "#ffffff");
-        pool.addColorStop(0.4, st.color);
-        pool.addColorStop(1, "transparent");
-        ctx.fillStyle = pool;
+        if (detailed) {
+          const pool = ctx.createRadialGradient(st.x, st.y, 1, st.x, st.y, w * 4.5);
+          pool.addColorStop(0, "#ffffff");
+          pool.addColorStop(0.4, st.color);
+          pool.addColorStop(1, "transparent");
+          ctx.fillStyle = pool;
+        } else {
+          ctx.globalAlpha *= 0.5;
+          ctx.fillStyle = st.color;
+        }
         ctx.beginPath();
         ctx.ellipse(st.x, st.y, w * 4.5, w * 2.1, 0, 0, Math.PI * 2);
         ctx.fill();
