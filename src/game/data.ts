@@ -56,7 +56,18 @@ export type TowerKind =
   | "laser"
   | "missile"
   | "dragon"
-  | "sun";
+  | "sun"
+  | "clone"
+  | "gale"
+  | "bombardment"
+  | "wildfire"
+  | "hades"
+  | "ion"
+  | "aether"
+  | "scythe"
+  | "sandstorm"
+  | "bloodstone"
+  | "venom";
 
 export type GameMode = "battle" | "endless";
 
@@ -80,7 +91,9 @@ export type AwkFx =
   | "aura" // aura towers: stronger aura at all times
   | "execute" // instantly kill enemies under a share of their max HP
   | "leech" // heal lives back on kills
-  | "quake"; // chance to stun everything in the blast
+  | "quake" // chance to stun everything in the blast
+  | "clonesuper" // Clone tower: chance to copy towers with any points + haste
+  | "cloneperfect"; // Clone tower: chance the copy gains bonus points
 
 export interface AwkSpec {
   name: string;
@@ -194,6 +207,8 @@ export interface TowerDef {
   pulseRate?: number;
   /** shots that leave a burning pool on the ground where they land */
   lava?: boolean;
+  /** active skill key (see skills.ts); the tower auto-casts it on a cooldown */
+  skill?: string;
   /** support towers: how far a pulse drags enemies back along the path */
   pull?: number;
   upPull?: number;
@@ -785,6 +800,107 @@ export const TOWERS: TowerDef[] = [
     awk1: awking("Siege Core", "heavy", "Chance to load a siege shell that cracks the target wide open.", [0.2, 0.6], [0.8, 6]),
     awk2: awking("Colossus Rage", "critup", "Chance the shell lands as a guaranteed crit.", [0.14, 0.45], [0.4, 2]),
   },
+  // ---------- the Clone tower ----------
+  {
+    id: "clone", name: "Clone", rarity: "legendary", kind: "clone", art: "clone", accent: "#8effc4",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Drag any tower with matching points onto it to grow a second copy of that tower — the original stays. Awakened, it can copy anything.",
+    dmg: 300, upDmg: 9, ascDmg: 12, rate: 0.85, upRate: 0.018, ascRate: 0.025,
+    aspd: 0.05, upAspd: 0.01, ascAspd: 0.015, chain: 1, upChain: 1,
+    awk1: awking("Super Clone", "clonesuper", "Chance to become a super clone: copies towers with ANY points and gains +200% attack speed for 6 seconds.", [0.2, 0.2], [2, 2]),
+    awk2: awking("Perfect Replica", "cloneperfect", "Chance the copy also grows +1 point the moment it is made.", [0.35, 1], [1, 2]),
+  },
+  // ---------- mythic arsenal III: the ten casters ----------
+  {
+    id: "gale", name: "Gale Blade", rarity: "legendary", kind: "gale", art: "beam", accent: "#7ef0ff",
+    target: "front", exotic: true, unlockFrags: 1, skill: "gale",
+    desc: "Wind-forged blade launcher; every few seconds it looses a cyclone of skewering blades.",
+    dmg: 340, upDmg: 9, ascDmg: 12, rate: 0.75, upRate: 0.015, ascRate: 0.02,
+    pierce: 3, upPierce: 1, ascPierce: 1, aspd: 0.06, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Wind Pressure", "heavy", "Chance to fire a shot with far more damage.", [0.15, 0.5], [0.5, 3]),
+    awk2: awking("Twin Fangs", "volley", "Chance to loose an extra blade at another enemy.", [0.25, 1], [1, 3]),
+  },
+  {
+    id: "bombardment", name: "Thousand-Pounder", rarity: "legendary", kind: "bombardment", art: "howitzer", accent: "#ffb324",
+    target: "front", exotic: true, unlockFrags: 1, skill: "bombardment",
+    desc: "A siege legend. Its shells flatten clusters, and its skill walks bombardment across the horde.",
+    dmg: 520, upDmg: 14, ascDmg: 18, rate: 1.35, upRate: 0.025, ascRate: 0.03,
+    splash: 95, upSplash: 5, ascSplash: 7, stun: 0.6, upStun: 0.03, ascStun: 0.04, aspd: 0.03, upAspd: 0.008, ascAspd: 0.012,
+    awk1: awking("Siege Doctrine", "splash", "Chance for the shell to crater far wider.", [0.25, 1], [0.3, 1.2]),
+    awk2: awking("Deep Pockets", "volley", "Chance to fire a second shell at another enemy.", [0.2, 0.7], [1, 2]),
+  },
+  {
+    id: "wildfire", name: "Wildfire", rarity: "legendary", kind: "wildfire", art: "flame", accent: "#ff7a3d",
+    target: "front", exotic: true, unlockFrags: 1, skill: "wildfire",
+    desc: "Burns a little — then a lot. Every kill feeds the fire, and Firestorm sets the lane alight.",
+    dmg: 210, upDmg: 6, ascDmg: 8, rate: 0.35, upRate: 0.01, ascRate: 0.015,
+    burnPct: 1.2, upBurnPct: 0.05, ascBurnPct: 0.07, burnDur: 4, killStack: 0.04, aspd: 0.08, upAspd: 0.012, ascAspd: 0.018,
+    awk1: awking("Fire Mastery", "burn", "Chance to leave a far hotter, longer blaze.", [0.3, 1], [0.6, 3]),
+    awk2: awking("Kindling", "sp", "Chance a kill feeds spell power back into the grid.", [0.25, 0.9], [4, 16]),
+  },
+  {
+    id: "hades", name: "Hades Gate", rarity: "legendary", kind: "hades", art: "gate", accent: "#ff4d1f",
+    target: "front", exotic: true, unlockFrags: 1, skill: "hades",
+    desc: "A gate to somewhere worse. Slow, enormous shots — and its skill rips a burning gate open on the lane.",
+    dmg: 600, upDmg: 16, ascDmg: 22, rate: 1.25, upRate: 0.025, ascRate: 0.03,
+    splash: 140, upSplash: 8, ascSplash: 10, lava: true, burnPct: 1.0, upBurnPct: 0.05, burnDur: 5, aspd: 0.03, upAspd: 0.008, ascAspd: 0.012,
+    awk1: awking("Abyssal Reach", "splash", "Chance the detonation reaches much further.", [0.2, 0.8], [0.3, 1.2]),
+    awk2: awking("Soul Burn", "burn", "Chance to leave a burning soul on whatever it hits.", [0.3, 1], [0.5, 2.5]),
+  },
+  {
+    id: "ion", name: "Ion Storm", rarity: "legendary", kind: "ion", art: "ion", accent: "#c9a7ff",
+    target: "front", exotic: true, unlockFrags: 1, skill: "ion",
+    desc: "Ball lightning in a bottle: chaining arcs on every shot, and a Chain Ring on a leash.",
+    dmg: 190, upDmg: 5, ascDmg: 7, rate: 0.55, upRate: 0.012, ascRate: 0.018,
+    chain: 5, upChain: 1, ascChain: 1, aspd: 0.08, upAspd: 0.012, ascAspd: 0.018,
+    awk1: awking("Overcharge", "critup", "Chance the arc lands as a guaranteed crit.", [0.18, 0.55], [0.4, 2]),
+    awk2: awking("Ionized Air", "chain", "Chance the arc forks into more enemies.", [0.25, 1], [2, 6]),
+  },
+  {
+    id: "aether", name: "Aether Prism", rarity: "legendary", kind: "aether", art: "aether", accent: "#8fe9ff",
+    target: "front", exotic: true, unlockFrags: 1, skill: "aether",
+    desc: "Light folded until it cuts. Shots split toward many enemies; the skill blinks a shard through all of them.",
+    dmg: 150, upDmg: 4, ascDmg: 6, rate: 0.5, upRate: 0.01, ascRate: 0.015,
+    multi: 3, burnPct: 0.5, upBurnPct: 0.03, burnDur: 3, aspd: 0.1, upAspd: 0.012, ascAspd: 0.018,
+    awk1: awking("Refraction", "volley", "Chance to split one more beam toward another enemy.", [0.3, 1], [1, 3]),
+    awk2: awking("Spectrum", "burn", "Chance the beam leaves a burning spectrum.", [0.25, 0.9], [0.4, 1.8]),
+  },
+  {
+    id: "scythe", name: "Death Scythe", rarity: "legendary", kind: "scythe", art: "scythe", accent: "#b18cff",
+    target: "front", exotic: true, unlockFrags: 1, skill: "scythe",
+    desc: "Harvests the wounded: every shot carves a chunk of max HP, and Death Mark reaps the marked.",
+    dmg: 380, upDmg: 10, ascDmg: 14, rate: 0.95, upRate: 0.02, ascRate: 0.025,
+    pctHp: 0.12, upPctHp: 0.005, ascPctHp: 0.007, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Soul Harvest", "execute", "Chance to reap anything already under a quarter of its health.", [0.15, 0.5], [0.15, 0.3]),
+    awk2: awking("Grave Momentum", "heavy", "Chance to land a far heavier swing.", [0.18, 0.6], [0.5, 3]),
+  },
+  {
+    id: "sandstorm", name: "Sandstorm", rarity: "legendary", kind: "sandstorm", art: "sling", accent: "#e8d9a0",
+    target: "front", exotic: true, unlockFrags: 1, skill: "sandstorm",
+    desc: "Slow, wide, relentless — scarabs that grind everything down, and a storm that drags them back.",
+    dmg: 230, upDmg: 6, ascDmg: 9, rate: 0.8, upRate: 0.016, ascRate: 0.022,
+    splash: 85, upSplash: 4, ascSplash: 6, slow: 0.5, upSlow: 0.015, ascSlow: 0.02, slowDur: 3, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Desert Curse", "slow", "Chance to leave the target crawling for far longer.", [0.3, 1], [0.2, 0.6]),
+    awk2: awking("Bury Them", "quake", "Chance the impact buries everything nearby in place.", [0.2, 0.8], [0.4, 1.5]),
+  },
+  {
+    id: "bloodstone", name: "Bloodstone Spire", rarity: "legendary", kind: "bloodstone", art: "spire", accent: "#ff5566",
+    target: "front", exotic: true, unlockFrags: 1, skill: "bloodstone",
+    desc: "A relic of the crimson war: pulses of blood energy, and a meteor rain when the stone is sated.",
+    dmg: 300, upDmg: 8, ascDmg: 11, rate: 0.7, upRate: 0.015, ascRate: 0.02,
+    pulse: 180, upPulse: 12, pulseRate: 2.2, pulseRadius: 170, spGain: 3, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Blood Siphon", "sp", "Chance a kill pays extra spell power.", [0.3, 1], [6, 24]),
+    awk2: awking("Stone Heart", "aura", "Chance the pulse hits far harder.", [0.25, 1], [0.25, 1]),
+  },
+  {
+    id: "venom", name: "Venom Spitter", rarity: "legendary", kind: "venom", art: "venom", accent: "#8effc4",
+    target: "front", exotic: true, unlockFrags: 1, skill: "venom",
+    desc: "Spits corrosive venom that pools under the horde — everything standing in it melts and slows.",
+    dmg: 190, upDmg: 5, ascDmg: 8, rate: 0.55, upRate: 0.012, ascRate: 0.018,
+    burnPct: 0.9, upBurnPct: 0.05, ascBurnPct: 0.07, burnDur: 5, slow: 0.45, upSlow: 0.015, slowDur: 2.5, lava: true, aspd: 0.06, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Corrosive", "burn", "Chance to spit a far more corrosive venom.", [0.3, 1], [0.5, 2.2]),
+    awk2: awking("Toxic Bloom", "splash", "Chance the venom pools far wider.", [0.25, 1], [0.3, 1.1]),
+  },
 ];
 
 /** tower id -> art family used by the canvas + the menu icon */
@@ -1042,14 +1158,18 @@ export interface RunShopItem {
 }
 
 export const RUN_SHOP: RunShopItem[] = [
-  { id: "dmg", name: "Forged Ammo", desc: "+15% tower damage for the rest of the run", cost: 90, step: 1.35, max: 6 },
-  { id: "aspd", name: "Quickspring", desc: "+12% attack speed for the rest of the run", cost: 90, step: 1.35, max: 6 },
-  { id: "sp", name: "Mana Battery", desc: "Instantly gain 150 SP", cost: 60, step: 1.15, max: 8 },
-  { id: "life", name: "Ward Stone", desc: "+3 lives for the rest of the run", cost: 140, step: 1.3, max: 5 },
-  { id: "points", name: "Point Surge", desc: "+2 points on a random tower", cost: 130, step: 1.3, max: 5 },
-  { id: "hero", name: "Hero Sigil", desc: "Reset your hero's cooldown right now", cost: 80, step: 1.2, max: 6 },
-  { id: "ascend", name: "Ascension Scroll", desc: "Ascend a random tower to its next battle level", cost: 200, step: 1.35, max: 4 },
-  { id: "meteor", name: "Meteor Strike", desc: "Smash every enemy on the field for 25% of its max HP", cost: 240, step: 1.4, max: 4 },
+  // balance: upgrade caps are 20 across the board, but the two pure-stat items
+  // (damage/attack speed) are held to max 5 with juicier per-purchase numbers
+  { id: "dmg", name: "Forged Ammo", desc: "+18% tower damage for the rest of the run", cost: 90, step: 1.35, max: 5 },
+  { id: "aspd", name: "Quickspring", desc: "+21% attack speed for the rest of the run", cost: 90, step: 1.35, max: 5 },
+  { id: "critrate", name: "Keen Sight", desc: "+5% crit rate for the rest of the run", cost: 110, step: 1.3, max: 10 },
+  { id: "critdmg", name: "Killing Edge", desc: "+15% crit damage for the rest of the run", cost: 110, step: 1.3, max: 10 },
+  { id: "sp", name: "Mana Battery", desc: "Instantly gain 150 SP", cost: 60, step: 1.15, max: 20 },
+  { id: "life", name: "Ward Stone", desc: "+3 lives for the rest of the run", cost: 140, step: 1.3, max: 20 },
+  { id: "points", name: "Point Surge", desc: "+2 points on a random tower", cost: 130, step: 1.3, max: 20 },
+  { id: "hero", name: "Hero Sigil", desc: "Reset your hero's cooldown right now", cost: 80, step: 1.2, max: 20 },
+  { id: "ascend", name: "Ascension Scroll", desc: "Ascend a random tower to its next battle level", cost: 200, step: 1.35, max: 20 },
+  { id: "meteor", name: "Meteor Strike", desc: "Smash every enemy on the field for 25% of its max HP", cost: 240, step: 1.4, max: 20 },
 ];
 
 export function runShopCost(item: RunShopItem, bought: number) {

@@ -65,6 +65,7 @@ import {
   towerUpgradeCount,
   critAfterUpgrade,
 } from "../game/data";
+import { SKILLS } from "../game/skills";
 import { critBonus as critBonusFromSave, critMul } from "../game/save";
 import {
   defaultSave,
@@ -181,8 +182,8 @@ describe("tower data", () => {
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
-    // the roster grew 15 -> 27 -> 33 -> 37, then to 47 with the second mythic wave
-    expect(TOWERS).toHaveLength(47);
+    // the roster grew 15 -> 27 -> 33 -> 37 -> 47 -> 48, then 58 with the casters
+    expect(TOWERS).toHaveLength(58);
     // mechanics actually differ between them
     expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
     expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
@@ -192,6 +193,60 @@ describe("tower data", () => {
     expect(TOWER_BY_ID.frost.slowAura).toBeGreaterThan(0);
     expect(TOWER_BY_ID.sun.target).toBe("all");
     expect(TOWER_BY_ID.dragon.killStack).toBeGreaterThan(0);
+  });
+
+  it("ships the ten casters with skills and awakenings", () => {
+    const casters = [
+      "gale", "bombardment", "wildfire", "hades", "ion",
+      "aether", "scythe", "sandstorm", "bloodstone", "venom",
+    ];
+    expect(casters).toHaveLength(10);
+    for (const id of casters) {
+      const def = TOWER_BY_ID[id];
+      expect(def, id).toBeDefined();
+      expect(def.rarity, id).toBe("legendary");
+      expect(def.exotic, id).toBe(true);
+      expect(def.skill, id).toBe(id);
+      const sk = SKILLS[def.skill!];
+      expect(sk, id + " skill").toBeDefined();
+      expect(sk.cd, id).toBeGreaterThan(3);
+      expect(sk.mult, id).toBeGreaterThan(0);
+      expect(sk.hits, id).toBeGreaterThan(0);
+      expect(def.awk1, id).toBeDefined();
+      expect(def.awk2, id).toBeDefined();
+      expect(def.awk1!.chance, id).toHaveLength(5);
+      expect(def.art, id + " art family").toBeTruthy();
+    }
+    // every skill name is its own effect
+    expect(SKILLS.gale.fx).toBe("blade2");
+    expect(SKILLS.bombardment.fx).toBe("bombard");
+    expect(SKILLS.wildfire.fx).toBe("blaze");
+    expect(SKILLS.hades.fx).toBe("blast3");
+    expect(SKILLS.ion.fx).toBe("chainring");
+    expect(SKILLS.aether.fx).toBe("teleport");
+    expect(SKILLS.scythe.fx).toBe("deathmark");
+    expect(SKILLS.sandstorm.fx).toBe("tornado");
+    expect(SKILLS.bloodstone.fx).toBe("meteor");
+    expect(SKILLS.venom.fx).toBe("blast1");
+    // every tower art resolves to a family the renderer knows
+    for (const def of TOWERS) expect(towerArt(def), def.id).toBeTruthy();
+  });
+
+  it("ships the Clone tower with copy mechanics and its own awakenings", () => {
+    const def = TOWER_BY_ID.clone;
+    expect(def).toBeDefined();
+    expect(def.rarity).toBe("legendary");
+    expect(def.exotic).toBe(true);
+    expect(def.kind).toBe("clone");
+    expect(def.art).toBe("clone");
+    // Super Clone: 20% proc at every tier, +200% attack speed (mult 2)
+    expect(def.awk1!.fx).toBe("clonesuper");
+    expect(def.awk1!.chance).toEqual([0.2, 0.2, 0.2, 0.2, 0.2]);
+    expect(def.awk1!.mult).toEqual([2, 2, 2, 2, 2]);
+    // Perfect Replica: chance to grow the copy +1..2 points
+    expect(def.awk2!.fx).toBe("cloneperfect");
+    expect(def.awk2!.chance[0]).toBeGreaterThan(0);
+    expect(def.awk2!.mult[4]).toBeGreaterThanOrEqual(2);
   });
 
   it("ships the ten mythic legendaries with distinct mechanics", () => {

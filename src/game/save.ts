@@ -127,6 +127,10 @@ export interface SaveData {
   vol: number;
   /** floating damage numbers */
   dmgNums: boolean;
+  /** render frame-rate cap, 0 = unlimited */
+  maxFps: number;
+  /** draw between sim steps for smoother motion */
+  frameInterp: boolean;
   /** camera shake on explosions */
   shakeFx: boolean;
   /** grid + range guides on the battlefield */
@@ -204,6 +208,8 @@ export function defaultSave(): SaveData {
     fx: true,
     vol: 0.7,
     dmgNums: true,
+    maxFps: 0,
+    frameInterp: true,
     shakeFx: true,
     guides: true,
     fastWaves: false,

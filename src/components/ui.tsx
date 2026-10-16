@@ -363,6 +363,101 @@ export function TowerIcon({
           </g>
         );
       // ---------- mythic arsenal II ----------
+      case "beam":
+        return (
+          <g>
+            <rect x="6" y="21" width="26" height="7" rx="3" fill={c} />
+            <circle cx="36" cy="24.5" r="5" fill="#fff" opacity="0.9" />
+            <circle cx="36" cy="24.5" r="8" fill="none" stroke={c} strokeWidth="2" opacity="0.5" />
+            <path d="M10 14v-4M18 13V8M26 14v-4" stroke={c} strokeWidth="2.4" strokeLinecap="round" opacity="0.7" />
+          </g>
+        );
+      case "howitzer":
+        return (
+          <g>
+            <rect x="8" y="26" width="32" height="12" rx="4" fill="#2d3748" stroke={c} strokeWidth="2" />
+            <rect x="14" y="12" width="26" height="10" rx="5" fill={c} transform="rotate(-18 27 17)" />
+            <circle cx="13" cy="32" r="3.4" fill={a} />
+            <circle cx="23" cy="32" r="3.4" fill={a} />
+            <circle cx="33" cy="32" r="3.4" fill={a} />
+          </g>
+        );
+      case "flame":
+        return (
+          <g>
+            <path d="M24 5c4 9 13 12 13 22a13 13 0 0 1-26 0c0-7 4-9 7-15 2 4 4 5 6-7z" fill={c} />
+            <path d="M24 17c2 5 7 6 7 12a7 7 0 0 1-14 0c0-4 3-5 5-10 1 2 2 3 2-2z" fill="#fff2b0" />
+            <path d="M10 40h28" stroke={c} strokeWidth="3" strokeLinecap="round" opacity="0.5" />
+          </g>
+        );
+      case "gate":
+        return (
+          <g>
+            <path d="M10 42V22a14 14 0 0 1 28 0v20h-7V22a7 7 0 0 0-14 0v20z" fill={c} />
+            <path d="M18 42V24a6 6 0 0 1 12 0v18z" fill="#1a0b0b" />
+            <circle cx="24" cy="30" r="3" fill={a} />
+            <path d="M8 12l4 6M40 12l-4 6" stroke={c} strokeWidth="2.6" strokeLinecap="round" />
+          </g>
+        );
+      case "ion":
+        return (
+          <g>
+            <circle cx="24" cy="24" r="12" fill="none" stroke={c} strokeWidth="2.5" />
+            <circle cx="24" cy="24" r="5" fill={a} />
+            <path d="M24 4v6M24 38v6M4 24h6M38 24h6M10 10l4 4M38 38l-4-4M10 38l4-4M38 10l-4 4" stroke={c} strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        );
+      case "aether":
+        return (
+          <g>
+            <path d="M24 8l8 12-8 20-8-20z" fill={c} opacity="0.9" />
+            <path d="M24 8l8 12-8 4-8-4z" fill="#fff" opacity="0.85" />
+            <path d="M8 24h8M32 24h8M14 14l5 5M34 34l-5-5" stroke={a} strokeWidth="2.6" strokeLinecap="round" />
+          </g>
+        );
+      case "scythe":
+        return (
+          <g>
+            <path d="M34 8c-14 2-24 12-26 26l5 5c2-12 10-20 21-23z" fill={c} />
+            <path d="M12 38l-4 6h8z" fill={a} />
+            <path d="M34 8l4-3 2 6z" fill="#fff" opacity="0.8" />
+          </g>
+        );
+      case "sling":
+        return (
+          <g>
+            <path d="M12 10c8 4 8 12 8 20" stroke={c} strokeWidth="3" strokeLinecap="round" fill="none" />
+            <path d="M36 10c-8 4-8 12-8 20" stroke={c} strokeWidth="3" strokeLinecap="round" fill="none" />
+            <ellipse cx="24" cy="34" rx="8" ry="6" fill={a} />
+            <path d="M6 40c6-2 12-2 18 0s12 2 18 0" stroke={c} strokeWidth="2.4" strokeLinecap="round" fill="none" opacity="0.7" />
+          </g>
+        );
+      case "spire":
+        return (
+          <g>
+            <path d="M24 4l9 22-9 18-9-18z" fill="#3a1420" stroke={c} strokeWidth="2" />
+            <path d="M24 14l5 10-5 9-5-9z" fill={a} />
+            <path d="M12 42h24" stroke={c} strokeWidth="3" strokeLinecap="round" opacity="0.6" />
+          </g>
+        );
+      case "venom":
+        return (
+          <g>
+            <ellipse cx="24" cy="18" rx="11" ry="13" fill={c} />
+            <path d="M24 12c2 4 5 5 5 9a5 5 0 0 1-10 0c0-3 3-4 5-9z" fill="#d9ffe9" opacity="0.8" />
+            <path d="M16 30l-3 8M24 32v9M32 30l3 8" stroke={c} strokeWidth="3" strokeLinecap="round" />
+            <circle cx="20" cy="41" r="2.4" fill={a} />
+            <circle cx="28" cy="43" r="2.4" fill={a} />
+          </g>
+        );
+      case "clone":
+        return (
+          <g>
+            <path d="M20 9l10 9-10 9-10-9z" fill="#2f6f52" stroke="#8effc4" strokeWidth="1.6" />
+            <path d="M28 21l10 9-10 9-10-9z" fill="#8effc4" stroke="#d9ffe9" strokeWidth="1.6" opacity="0.95" />
+            <path d="M7 7h6M7 7v6M41 41h-6M41 41v-6" stroke="#d9ffe9" strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        );
       case "nova":
         return (
           <g>

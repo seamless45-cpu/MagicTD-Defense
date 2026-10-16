@@ -301,17 +301,17 @@ export default function Towers({
   const pv = preview ? TOWER_BY_ID[preview] : null;
 
   return (
-    <div className="flex h-full flex-col gap-4">
+    <div className="flex h-full flex-col gap-2.5">
       {/* SUMMON ROTATION — a preference list, not a wall of six slots. Any
           unlocked tower can be summoned; this order decides which ones the
           summon button reaches for first, and what the ascent bar shows. */}
-      <div className="tile tile-gold shrink-0 p-3" data-testid="lineup-row">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div className="tile tile-gold shrink-0 p-2.5" data-testid="lineup-row">
+        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
           <div className="font-disp text-[15px] tracking-wide text-[#ffcf4d]">
             SUMMON ROTATION <span className="text-[var(--txt)]">· <span className="num">{save.lineup.length}</span> towers</span>
           </div>
-          <div className="text-[11px] font-semibold text-[var(--dim)]">
-            Tap a tower for details · drag it in to set the order · summons draw from the top six
+          <div className="hidden text-[10.5px] font-semibold text-[var(--dim)] sm:block">
+            Tap for details · drag to set the order · summons draw from the top six
           </div>
         </div>
         <div className="flex flex-wrap gap-1.5">
@@ -402,7 +402,7 @@ export default function Towers({
           </span>
         </div>
 
-        <div className="tower-scroll grid grid-cols-4 content-start gap-x-1.5 gap-y-1 overflow-y-auto scroll-thin pr-1 sm:grid-cols-6 xl:grid-cols-8">
+        <div className="tower-scroll grid content-start gap-1 overflow-y-auto scroll-thin pr-1">
           {(["legendary", "epic", "decent", "normal"] as const).map((rarity) => {
             const group = twVisible.filter((def) => def.rarity === rarity);
             if (!group.length) return null;
@@ -438,7 +438,7 @@ export default function Towers({
                       onPointerDown={(e) => startDrag(def.id, e)}
                     >
                       <span className="tw-cell-art">
-                        <TowerIcon def={def} size={46} locked={locked} />
+                        <TowerIcon def={def} size={42} locked={locked} />
                       </span>
                       <span className="tw-cell-lv" style={{ color: locked ? "var(--dim)" : rc.color }}>
                         {locked ? "LOCKED" : maxed ? "MAX" : "LV " + lv}
@@ -465,7 +465,7 @@ export default function Towers({
       </div>
 
       {/* ASCENT ALL */}
-      <div className="panel flex shrink-0 items-center justify-between gap-4 px-4 py-3" style={{ borderColor: "rgba(53,224,255,0.4)" }}>
+      <div className="panel flex shrink-0 items-center justify-between gap-4 px-3 py-2" style={{ borderColor: "rgba(53,224,255,0.4)" }}>
         <div>
           <div className="font-disp text-base text-[#35e0ff]">Ascent All</div>
           <div className="text-[12px] font-semibold text-[var(--dim)]">Upgrade every unlocked tower +1 level. No fragments required.</div>

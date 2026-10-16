@@ -8,11 +8,11 @@ import { ChipIcon, CoinIcon, ClaimChest, GemIcon, Modal, RewardClaim, ShardIcon,
 /** gold price of one fragment of each rarity */
 const FRAG_PRICE: Record<Rarity, number> = { normal: 120, decent: 320, epic: 750, legendary: 1400 };
 
-// gem prices scaled by 1.9 (balance patch: magic token exchange +90%)
+// gem prices scaled up hard (balance patch: magic token exchange +16x again)
 const TOKEN_PACKS = [
-  { tokens: 1, gems: 2 },
-  { tokens: 5, gems: 8 },
-  { tokens: 12, gems: 17 },
+  { tokens: 1, gems: 32 },
+  { tokens: 5, gems: 128 },
+  { tokens: 12, gems: 272 },
 ];
 
 export default function Shop({

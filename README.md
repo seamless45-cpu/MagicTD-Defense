@@ -271,6 +271,7 @@ counters, a roster pulled from the ladder, and a chat you can post in.
 | Chrono Lock | Legendary | Freezing shots, staggered blasts and a long chill — time stops around the target (Deep Lock, Clockwork Chill) |
 | Grave Bloom | Legendary | Heavy percent-of-max-HP strikes on the wounded, and a purse for every kill (Grave Tithe, Bloom Offering) |
 | Rift Colossus | Legendary | Slow siege shells that **shatter armour** on impact and flatten a whole cell (Siege Core, Colossus Rage) |
+| Clone | Legendary | Drag any equal-point tower onto it to **copy** that tower — the original stays. Awakened: Super Clone (any points + +200% attack speed), Perfect Replica (bonus point) |
 
 ## Mailbox
 
@@ -572,3 +573,53 @@ enemies, with Overpenetration and Rail Burn awakenings).
 - **Tower section rebuilt (again).** One flat grid in rarity order with **sticky rarity headers**
   (legendary first), filters ALL / IN ROTATION / LOCKED / READY — the nested-group layout is gone,
   so cells, columns and scroll behaviour are back to the simple, stable arrangement.
+
+## Clone tower, run-shop crit upgrades, frame-rate settings and a dense tower grid
+
+- **Clone tower (legendary)** — 48 towers now. Drag any tower with matching points onto a Clone and
+  it grows a **second copy** of that tower (type and levels); the original is never consumed. Its
+  awakenings: **Super Clone** (20% per attempt) copies towers with ANY point spread and surges the
+  copy with **+200% attack speed for 6 seconds**, and **Perfect Replica** chances the copy into
+  +1–2 points the moment it is made. The copy keeps the Clone's own cell and points.
+- **Gameplay shop reworked.** Upgrade caps are now **20** across the board — except the two pure
+  stat items, which are held to **max 5** with juicier numbers: Forged Ammo gives **+18%** damage
+  (was 15%) and Quickspring **+21%** attack speed (was 12%). Two new items join: **Keen Sight**
+  (+5% crit rate, max 10) and **Killing Edge** (+15% crit damage, max 10).
+- **Magic token exchange** costs far more gems again (32 / 128 / 272 for 1 / 5 / 12 tokens).
+- **Max frame rate + advanced frame interpolation** in Settings. The renderer can be capped at
+  30/60/120/144/240 FPS (or unlimited), and frame interpolation draws between fixed 1/60 sim steps
+  so a capped or uneven frame rate still glides. Simulation speed is now display-independent.
+- **Crit FX are GPU-friendly.** Additive glows draw from pre-rendered sprite cache instead of a
+  fresh gradient per particle per frame (the source of the lag spikes), full crit starbursts fire at
+  most once per 90ms with a cheap ring in between, damage numbers self-limit, and ordinary hit pops
+  are sampled.
+- **Tower grid is dense again.** The icon grid auto-fills compact ~86px cells (no more giant empty
+  boxes), the rotation tile and Ascent bar are tightened up so the grid gets the screen, and rarity
+  headers stay sticky while scrolling.
+
+## Mythic arsenal III: the ten casters, their skills and their sounds
+
+- **Ten new legendary casters** — 58 towers in total. Each has its own look, its own firing sound,
+  two five-tier awakenings, and an **active skill that auto-casts on a cooldown** while enemies are
+  on the field (banner + unique skill sound included):
+
+  | Tower | Skill | Effect family |
+  | --- | --- | --- |
+  | Gale Blade | Blade Cyclone | three skewering blades down the lane (`blade2`) |
+  | Thousand-Pounder | Rolling Bombardment | shells walking across the densest cluster (`bombard`) |
+  | Wildfire | Firestorm | a wall of fire across the front of the lane (`blaze`) |
+  | Hades Gate | Hellgate | one colossal gate-detonation (`blast3`) |
+  | Ion Storm | Chain Ring | lightning arcing between eight enemies (`chainring`) |
+  | Aether Prism | Refraction Burst | a shard blinking through every target (`teleport`) |
+  | Death Scythe | Death Mark | marks the strongest enemy and reaps it when wounded (`deathmark`) |
+  | Sandstorm | Tornado | a storm that chews and drags the horde backwards (`tornado`) |
+  | Bloodstone Spire | Meteor Rain | five burning rocks on random enemies (`meteor`) |
+  | Venom Spitter | Toxic Pool | festering pools under the front enemies (`blast1`) |
+
+- **`src/game/skills.ts`** is the shared skill-effect library: `blast1/2/3`, `starburst`, `blade2`,
+  `boomerang`, `tornado`, `bombard`, `chainring`, `armorbreak`, `teleport`, `meteor`, `blaze`,
+  `deathmark` and `onKill` — one spec per skill (cooldown, damage multiple, radius, hit count) that
+  the battle engine reads instead of hardcoding numbers per tower.
+- **Unique sound per tower and per skill** — ten new `sfx.shoot` voices (blade slice, siege thump,
+  fire bloom, gate grind, ball lightning, glass ping, scythe swing, sand grit, heart-throb, venom
+  glop) plus the `blast1/2/3` skill family and an `onKill` payout chime.

@@ -414,6 +414,11 @@ export const sfx = {
         tone(120, 0.16, "sine", 0.16, -50, 0, { sub: true });
         noise(0.12, 0.14, 900, { sweep: 0.3, noiseType: "pink" });
         break;
+      case "clone":
+        // a mirror-chirp: two quick pings a fifth apart
+        tone(880, 0.05, "sine", 0.1, 320, 0, { verb: 0.4 });
+        tone(1320, 0.07, "sine", 0.08, 200, 0.045, { verb: 0.5 });
+        break;
       case "nova":
         // a shell salvo: a bright transient over a heavy boom
         tone(220, 0.12, "square", 0.12, -80, 0, { cutoff: 3200, q: 2 });
@@ -461,6 +466,56 @@ export const sfx = {
         // the well breathing: a slow sub drop
         tone(180, 0.3, "sine", 0.14, -110, 0, { sub: true, verb: 0.3 });
         break;
+      case "gale":
+        // a blade tearing air: quick band-passed slice + high tick
+        noise(0.09, 0.12, 2600, { type: "bandpass", q: 5, sweep: 0.45 });
+        tone(1500, 0.06, "triangle", 0.1, -700, 0, { verb: 0.35 });
+        break;
+      case "bombardment":
+        // siege thump with a hard transient
+        tone(110, 0.22, "sine", 0.2, -60, 0, { sub: true });
+        noise(0.16, 0.18, 1100, { sweep: 0.35, noiseType: "pink" });
+        fm(180, 1.41, 1.8, 0.16, 0.1);
+        break;
+      case "wildfire":
+        // a crackling bloom of fire
+        noise(0.16, 0.12, 900, { type: "bandpass", q: 1.4, sweep: 2.2, noiseType: "brown" });
+        tone(240, 0.12, "triangle", 0.08, 120);
+        break;
+      case "hades":
+        // a gate grinding open: deep sub + cracking air
+        tone(85, 0.3, "sawtooth", 0.2, -30, 0, { sub: true, q: 6, verb: 0.5 });
+        noise(0.22, 0.16, 700, { sweep: 0.4, noiseType: "brown", verb: 0.5 });
+        break;
+      case "ion":
+        // crackling ball lightning
+        noise(0.08, 0.12, 5200, { type: "highpass", q: 2.2 });
+        tone(2200, 0.07, "sawtooth", 0.09, -1200, 0, { cutoff: 9000 });
+        break;
+      case "aether":
+        // folded light: a glassy ping
+        tone(1900, 0.1, "sine", 0.1, 700, 0, { verb: 0.55, cutoff: 9000 });
+        clang(2400, 0.12, 0.05, 0, 0.7);
+        break;
+      case "scythe":
+        // a heavy swing through cloth
+        noise(0.14, 0.13, 1400, { type: "bandpass", q: 2.2, sweep: 0.35, noiseType: "pink" });
+        tone(320, 0.12, "triangle", 0.1, -140, 0.02);
+        break;
+      case "sandstorm":
+        // a gust of grit
+        noise(0.2, 0.11, 2000, { type: "bandpass", q: 1.2, sweep: 0.5, noiseType: "brown" });
+        break;
+      case "bloodstone":
+        // a throbbing heart of stone
+        tone(160, 0.16, "sine", 0.16, -50, 0, { sub: true, verb: 0.35 });
+        tone(620, 0.1, "triangle", 0.08, 180, 0.03);
+        break;
+      case "venom":
+        // wet glop with a hiss
+        noise(0.16, 0.11, 600, { type: "bandpass", q: 1.8, sweep: 1.8, noiseType: "pink" });
+        tone(200, 0.12, "triangle", 0.09, -70);
+        break;
       case "lightning":
         noise(0.24, 0.2, 4000, { type: "highpass", q: 1.5, verb: 0.7 });
         tone(180, 0.3, "sine", 0.18, -60, 0.02, { sub: true, verb: 0.5 });
@@ -472,6 +527,28 @@ export const sfx = {
   zap: () => {
     noise(0.12, 0.2, 4600, { type: "highpass", q: 2, sweep: 0.3, verb: 0.6 });
     tone(3200, 0.1, "sawtooth", 0.1, -2200, 0, { cutoff: 9000 });
+  },
+  /** skill blast family — one per tier of big */
+  blast1: () => {
+    noise(0.2, 0.22, 1800, { sweep: 0.2, q: 0.9, verb: 0.55, noiseType: "pink" });
+    tone(170, 0.24, "sine", 0.18, -70, 0, { sub: true });
+  },
+  blast2: () => {
+    noise(0.3, 0.28, 2000, { sweep: 0.15, q: 0.85, verb: 0.7, noiseType: "pink" });
+    boom(140, 0.34, 0.24);
+    stab([392, 523], 0.18, 0.1, 0.02, "triangle");
+  },
+  blast3: () => {
+    noise(0.44, 0.34, 2200, { sweep: 0.12, q: 0.8, verb: 0.85, noiseType: "pink" });
+    boom(110, 0.5, 0.32);
+    tone(70, 0.55, "triangle", 0.26, -30, 0.01, { sub: true, cutoff: 300 });
+    stab([262, 392, 523], 0.34, 0.12, 0.04, "sawtooth");
+    impact(0.3, 1.2);
+  },
+  /** death-side trigger for onKill skills */
+  onKill: () => {
+    tone(520, 0.12, "triangle", 0.12, -260, 0, { verb: 0.4 });
+    noise(0.12, 0.1, 2600, { type: "bandpass", q: 3, sweep: 0.4 });
   },
   superbolt: () => {
     noise(0.4, 0.3, 3000, { type: "highpass", q: 1.2, verb: 0.9 });

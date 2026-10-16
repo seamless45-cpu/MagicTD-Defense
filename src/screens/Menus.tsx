@@ -1881,6 +1881,7 @@ export function SettingsModal({
     ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves"],
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations"],
     ["Performance HUD", "perf", "FPS and live entity counter in battle"],
+    ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate"],
   ];
   return (
     <Modal onClose={onClose} w={470}>
@@ -1909,6 +1910,30 @@ export function SettingsModal({
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
       <div className="mt-1.5 space-y-3">
+        <div className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="max-fps-row">
+          <div>
+            <div className="font-bold">Max Frame Rate</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Caps how hard the renderer works</div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {[0, 30, 60, 120, 144, 240].map((fps) => (
+              <button
+                key={fps}
+                data-testid={"fps-" + fps}
+                title={fps === 0 ? "Unlimited" : fps + " FPS"}
+                className={"chip chip-btn" + (save.maxFps === fps ? " on" : "")}
+                onClick={() => {
+                  sfx.click();
+                  mutate((s) => {
+                    s.maxFps = fps;
+                  });
+                }}
+              >
+                {fps === 0 ? "∞" : fps}
+              </button>
+            ))}
+          </div>
+        </div>
         {TOGGLES.map(([label, key, d]) => (
           <div key={key} className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
             <div>

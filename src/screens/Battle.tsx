@@ -79,6 +79,7 @@ import {
   type HeroKind,
   type RunShopItem,
 } from "../game/data";
+import { SKILLS } from "../game/skills";
 import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon, GemIcon, TokenIcon, ShardIcon } from "../components/ui";
 
 /**
@@ -158,7 +159,7 @@ function pathPos(d: number) {
  * the Singularity pull has dragged it to. Everything that targets, draws or
  * measures an enemy goes through this, so skill displacement is consistent.
  */
-function enemyPos(e: { d: number; ox: number; oy: number }) {
+function enemyPos(e: { d: number; ox: number; oy: number; pd?: number }) {
   const p = pathPos(e.d);
   return { x: p.x + e.ox, y: p.y + e.oy };
 }
@@ -167,6 +168,8 @@ function enemyPos(e: { d: number; ox: number; oy: number }) {
 interface Enemy {
   id: number;
   d: number;
+  /** previous-frame distance along the path, for frame interpolation */
+  pd?: number;
   hp: number;
   max: number;
   speed: number;
@@ -235,6 +238,12 @@ interface BT {
   hexT: number;
   /** Meteor Fall: seconds left offline (cannot fire at all) */
   downT: number;
+  /** seconds until this tower's active skill auto-casts again */
+  skillCd?: number;
+  /** Super Clone surge: seconds left of the attack-speed rush */
+  hasteT: number;
+  /** Super Clone surge: extra attack-speed multiplier (2 = +200%) */
+  hasteMul: number;
 }
 /** one vertical lightning pillar: a column from the top of the screen to the ground */
 interface Strike { x: number; y: number; life: number; max: number; width: number; color: string; seed: number }
@@ -296,6 +305,9 @@ interface Proj {
   blastDmg?: number;
   /** this shot always crits (overcharged lances, fireballs) */
   alwaysCrit?: boolean;
+  /** previous-frame position, for frame interpolation */
+  px?: number;
+  py?: number;
   dead: boolean;
   age: number;
 }
@@ -388,6 +400,10 @@ interface G {
   heroLv: number;
   /** shop-bought damage bonus for this run (+% as a fraction) */
   dmgBonus: number;
+  /** Keen Sight purchases: flat crit chance added for this run */
+  critRate: number;
+  /** Killing Edge purchases: flat crit damage added for this run */
+  critDmg: number;
   /** extra attack speed bought in the run shop */
   bonusAspd: number;
   /** what has been bought in the run shop this battle */
@@ -484,6 +500,8 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     heroId: HERO_BY_ID[save.hero] ? save.hero : "nova",
     heroLv: heroLevel(save, HERO_BY_ID[save.hero] ? save.hero : "nova"),
     dmgBonus: 0,
+    critRate: 0,
+    critDmg: 0,
     t: 0,
     phase: "deploy",
     phaseT: mode === "endless" ? 6 : 7,
@@ -595,6 +613,36 @@ const summonRef: { current: () => void } = { current: () => {} };
 const ascendRef: { current: (uid: number) => void } = { current: () => {} };
 const shopRef: { current: (item: RunShopItem) => void } = { current: () => {} };
 
+/**
+ * Pre-rendered glow sprites. Drawing an additive glow via createRadialGradient
+ * every frame per particle was the single biggest source of lag during dense
+ * crit streaks; one tiny canvas per colour, drawn with drawImage, is ~free.
+ */
+/** where in the current sim step to draw (1 = now, 0 = start of step) */
+let renderAlpha = 1;
+const glowSprites = new Map<string, HTMLCanvasElement>();
+function glowSprite(color: string): HTMLCanvasElement | null {
+  let c = glowSprites.get(color);
+  if (c) return c;
+  try {
+    c = document.createElement("canvas");
+    c.width = 64;
+    c.height = 64;
+    const x = c.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!x) return null;
+    const gr = x.createRadialGradient(32, 32, 1, 32, 32, 32);
+    gr.addColorStop(0, color);
+    gr.addColorStop(0.35, color.length === 7 ? color + "88" : color);
+    gr.addColorStop(1, "transparent");
+    x.fillStyle = gr;
+    x.fillRect(0, 0, 64, 64);
+    glowSprites.set(color, c);
+    return c;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- component ----------
 export default function Battle({
   mode,
@@ -667,6 +715,7 @@ export default function Battle({
     gRef.current = g;
     let raf = 0;
     let last = performance.now();
+    let lastDraw = performance.now();
     let lastHud = 0;
     let boltCache: { x: number; y: number }[] = [];
 
@@ -678,7 +727,8 @@ export default function Battle({
     const fxShake = (n: number) => (saveRef.current.shakeFx ? Math.min(14, g.shake + n) : g.shake);
 
     const addText = (x: number, y: number, txt: string, color: string, size: number, crit: boolean) => {
-      if (g.texts.length > 50) g.texts.splice(0, g.texts.length - 50);
+      // tight cap: a wall of damage numbers is the fastest way to melt a frame
+      if (g.texts.length > 28) g.texts.splice(0, g.texts.length - 28);
       g.texts.push({ x, y, txt, color, size, life: 0.9, crit });
     };
     const burst = (x: number, y: number, color: string, n: number, spd = 160) => {
@@ -843,9 +893,10 @@ export default function Battle({
       void mul;
       const heavy = tier >= 3;
       const nowFx = performance.now();
-      if (!heavy && nowFx - lastCritFxAt < 55) {
+      if (nowFx - lastCritFxAt < 90) {
         // the cheap spark for the crits we skip: keeps the beat without the cost
-        ring(p.x, p.y, "#ffd23f", 30);
+        ring(p.x, p.y, heavy ? "#fff2b0" : "#ffd23f", heavy ? 42 : 30);
+        if (heavy) glow(p.x, p.y, "#ffd23f", 40, 0.25);
         return;
       }
       lastCritFxAt = nowFx;
@@ -954,7 +1005,7 @@ export default function Battle({
         ring(p.x, p.y, "#ffd23f", 40);
       }
       // death now pops: a shock ring, hot core glow and spinning debris
-      burst(p.x, p.y, et.color, 14, 200);
+      burst(p.x, p.y, et.color, e.elite ? 12 : 7, 200);
       shock(p.x, p.y, et.color, isBossType(e.type) ? 44 : 20, isBossType(e.type) ? 0.8 : 0.45);
       glow(p.x, p.y, et.accent, isBossType(e.type) ? 110 : 34, 0.4);
       shards(p.x, p.y, et.color, isBossType(e.type) ? 24 : 7, isBossType(e.type) ? 360 : 200);
@@ -987,7 +1038,7 @@ export default function Battle({
     const dealDamage = (e: Enemy, raw: number, opt: { alwaysCrit?: boolean; tw?: BT; color?: string }) => {
       if (e.dead) return;
       let crit = opt.alwaysCrit ?? false;
-      if (!crit) crit = Math.random() < CRIT_CHANCE;
+      if (!crit) crit = Math.random() < CRIT_CHANCE + g.critRate;
       // note: tower/aura multipliers are already folded into `raw` by the caller
       let dmg = raw * (1 - e.armor);
       if (e.ward > 0) dmg *= 0.45; // boss Bulwark
@@ -1009,7 +1060,7 @@ export default function Battle({
         dmg *= 1 + Math.min(cap, opt.tw.streak) * opt.tw.def.killStack;
       }
       // the merged account crit stat, resolved once per run (see `runCritMul`)
-      if (crit) dmg *= runCritMul;
+      if (crit) dmg *= runCritMul + g.critDmg;
       // crits are the loudest thing on screen: heavy number + shockwave + shake.
       // The tier climbs with the multiplier *and* with how much of the target's
       // health the hit ate, so a maxed account's crit is a genuine event.
@@ -1031,7 +1082,7 @@ export default function Battle({
         // ordinary hits keep a modest pop (on a sample of hits) so crits still stand out
         pushPart({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.22, max: 0.22, size: 26, color: opt.color || "#ffffff", kind: "shock", add: true });
       }
-      if (saveRef.current.dmgNums) {
+      if (saveRef.current.dmgNums && (crit || g.texts.length < 14)) {
         const size = crit ? 24 + critTier * 6 : 15;
         addText(p.x + (Math.random() - 0.5) * 18, p.y - 26, String(Math.round(dmg)), crit ? (critTier >= 3 ? "#fff6c4" : "#ffd23f") : "#ffffff", size, crit);
         if (crit) addText(p.x, p.y - 54 - critTier * 5, CRIT_LABEL[critTier] || "CRIT!", "#ff8c3d", 12 + critTier * 2, true);
@@ -1041,7 +1092,7 @@ export default function Battle({
         g.crits++;
         if (dmg > g.bestHit) g.bestHit = Math.round(dmg);
       }
-      burst(p.x, p.y, opt.color || "#ffcf4d", crit ? 8 : 4);
+      burst(p.x, p.y, opt.color || "#ffcf4d", crit ? 5 : 2);
       if (e.hp <= 0) {
         if (opt.tw && (opt.tw.def.id === "hellstorm" || opt.tw.def.killStack)) opt.tw.streak++;
         // Soul Siphon + the SP-type awakenings pay the grid on every kill
@@ -1070,6 +1121,11 @@ export default function Battle({
             const extra = Math.round(e.gold * goldMul);
             g.gold += extra;
             addText(p.x, p.y - 34, `+${extra}`, "#ffcf4d", 12, false);
+          }
+          // onKill skill family: pay-out triggers on the kill
+          if (sp > 0 || goldMul > 0) {
+            sfx.onKill();
+            stars(p.x, p.y, "#ffd23f", 5, 50);
           }
           // leech awakenings: kills claw lives back
           let heal = 0;
@@ -1682,6 +1738,82 @@ export default function Battle({
           glow(p.x, p.y, "#8effc4", 44, 0.25);
           break;
         }
+        case "gale":
+          push({
+            speed: 760,
+            kind: "arrow",
+            pierce: Math.round((t.def.pierce || 0) + (t.def.upPierce || 0) * upg + (t.def.ascPierce || 0) * asc),
+          });
+          break;
+        case "bombardment": {
+          const radius = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          push({ speed: 360, kind: "cannon", splash: radius, blastDmg: 0.85, shockwave: true, stunS: (t.def.stun || 0) + (t.def.upStun || 0) * upg });
+          g.shake = fxShake(2.5);
+          break;
+        }
+        case "wildfire":
+          push({
+            speed: 560,
+            kind: "swarm",
+            burnDps: dmg * ((t.def.burnPct || 0) + (t.def.upBurnPct || 0) * upg + (t.def.ascBurnPct || 0) * asc),
+            burnDur: t.def.burnDur || 4,
+          });
+          break;
+        case "hades": {
+          const radius = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          push({ speed: 320, kind: "cannon", fireball: 1.25, blast: radius });
+          break;
+        }
+        case "ion":
+          push({
+            speed: 950,
+            kind: "swarm",
+            chain: Math.round((t.def.chain || 0) + (t.def.upChain || 0) * upg + (t.def.ascChain || 0) * asc),
+          });
+          break;
+        case "aether": {
+          const picks = g.enemies.filter((e) => !e.dead).sort((x, y) => y.d - x.d).slice(0, t.def.multi || 3);
+          const list = picks.length ? picks : [target];
+          list.forEach((e) => {
+            const tp = enemyPos(e);
+            push({ speed: 820, kind: "void", blast: 18, burnDps: dmg * ((t.def.burnPct || 0) + (t.def.upBurnPct || 0) * upg), burnDur: 3 }, tp, e);
+          });
+          break;
+        }
+        case "scythe":
+          push({
+            speed: 720,
+            kind: "void",
+            pctHp: (t.def.pctHp || 0) + (t.def.upPctHp || 0) * upg + (t.def.ascPctHp || 0) * asc,
+          });
+          break;
+        case "sandstorm": {
+          const radius = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          const slow = (t.def.slow || 0) + (t.def.upSlow || 0) * upg + (t.def.ascSlow || 0) * asc;
+          push({ speed: 440, kind: "chrono", splash: radius, blastDmg: 0.5, slow, slowDur: t.def.slowDur || 3 });
+          break;
+        }
+        case "bloodstone":
+          push({ speed: 620, kind: "void", blast: 42, blastDmg: 0.55 });
+          break;
+        case "venom":
+          push({
+            speed: 520,
+            kind: "cannon",
+            blast: 36,
+            blastDmg: 0.45,
+            slow: (t.def.slow || 0) + (t.def.upSlow || 0) * upg,
+            slowDur: t.def.slowDur || 2.5,
+            burnDps: dmg * ((t.def.burnPct || 0) + (t.def.upBurnPct || 0) * upg + (t.def.ascBurnPct || 0) * asc),
+            burnDur: t.def.burnDur || 5,
+          });
+          break;
+        case "clone": {
+          // a mirrored lance that forks once on impact
+          push({ speed: 760, kind: "plasma", blast: 18 });
+          glow(p.x, p.y, "#8effc4", 40, 0.25);
+          break;
+        }
         case "colossus": {
           const blast = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
           push({
@@ -1983,6 +2115,52 @@ export default function Battle({
       }
     };
 
+    /**
+     * The Clone tower copies the tower you drag onto it. The original is NOT
+     * consumed — the copy takes its type and levels and keeps the clone's own
+     * cell and points. Awakened: Super Clone procs copy ANY point spread and
+     * surge +200% attack speed for 6s; Perfect Replica grows the copy points.
+     */
+    const cloneTower = (a: BT, b: BT) => {
+      const cp = b.cell!;
+      const p = cellCenter(cp.c, cp.r);
+      const t1 = saveRef.current.awn["clone"]?.[0] || 0;
+      const spec1 = t1 > 0 && b.def.id === "clone" ? b.def.awk1 : undefined;
+      const superClone = !!spec1 && Math.random() < spec1.chance[t1 - 1];
+      if (a.points !== b.points && !superClone) {
+        sfx.error();
+        toastRef.current(`Points must match to clone (${a.points} vs ${b.points})`, "#ff4d5e");
+        return;
+      }
+      const t2 = saveRef.current.awn["clone"]?.[1] || 0;
+      const spec2 = t2 > 0 && b.def.id === "clone" ? b.def.awk2 : undefined;
+      const grow = spec2 && Math.random() < spec2.chance[t2 - 1] ? Math.max(1, Math.round(spec2.mult[t2 - 1])) : 0;
+      const nd = a.def;
+      b.def = nd;
+      b.menuLv = a.menuLv;
+      b.bLv = a.bLv;
+      b.streak = 0;
+      b.shots = 0;
+      b.cd = 0.25;
+      if (grow > 0) b.points = Math.min(MAX_POINTS, b.points + grow);
+      if (superClone) {
+        b.hasteT = 6;
+        b.hasteMul = Math.max(1, spec1!.mult[t1 - 1]);
+        addText(p.x, p.y - 56, "SUPER CLONE", "#8effc4", 17, true);
+        shock(p.x, p.y, "#8effc4", 90, 0.6);
+      }
+      if (grow > 0) addText(p.x, p.y - 38, `+${grow} PT`, "#ffd23f", 13, true);
+      ring(p.x, p.y, "#8effc4", 70);
+      burst(p.x, p.y, RARITY[nd.rarity].color, 20, 240);
+      glow(p.x, p.y, "#8effc4", 70, 0.4);
+      sfx.merge();
+      addText(p.x, p.y - 22, "CLONED!", "#8effc4", 18, true);
+      toastRef.current(
+        superClone ? `SUPER CLONE — ${nd.name} copied` : `${nd.name} cloned — the original stays`,
+        "#8effc4"
+      );
+    };
+
     const mergeTowers = (a: BT, b: BT) => {
       const cell = b.cell!;
       const p = cellCenter(cell.c, cell.r);
@@ -2046,10 +2224,16 @@ export default function Battle({
       sfx.buy();
       switch (item.id) {
         case "dmg":
-          g.dmgBonus += 0.15;
+          g.dmgBonus += 0.18;
           break;
         case "aspd":
-          g.bonusAspd = (g.bonusAspd || 0) + 0.12;
+          g.bonusAspd = (g.bonusAspd || 0) + 0.21;
+          break;
+        case "critrate":
+          g.critRate += 0.05;
+          break;
+        case "critdmg":
+          g.critDmg += 0.15;
           break;
         case "sp":
           g.sp += 150;
@@ -2435,7 +2619,7 @@ export default function Battle({
       g.towers.push({
         uid: uidC++, def, menuLv: saveRef.current.levels[id], bLv: 1, points: 0, cell,
         cd: 0.6, shots: 0, angle: 0, rapidT: 0, rapidCool: 5, streak: 0, flash: 0,
-        owner: "you", atkMul: 1, hexT: 0, downT: 0,
+        owner: "you", atkMul: 1, hexT: 0, downT: 0, hasteT: 0, hasteMul: 0,
       });
       const p = cellCenter(cell.c, cell.r);
       levelFlourish(p.x, p.y, RARITY[def.rarity].color, "DEPLOYED", def.rarity === "legendary" ? 3 : 1);
@@ -2527,6 +2711,13 @@ export default function Battle({
     };
 
     const update = (rawDt: number) => {
+      // remember where everything was: with frame interpolation on, the draw
+      // pass glides between this snapshot and the post-step positions
+      for (const e of g.enemies) e.pd = e.d;
+      for (const pr of g.projs) {
+        pr.px = pr.x;
+        pr.py = pr.y;
+      }
       // hit-stop freezes the simulation for a few frames on heavy impacts, and
       // Time Dilation scales the whole world down — both leave FX running.
       if (g.hitStop > 0) {
@@ -3010,6 +3201,181 @@ export default function Battle({
         }
       }
 
+      // ---------- tower active skills (game/skills.ts) ----------
+      // Each mythic tower auto-casts its skill on a cooldown while enemies are
+      // on the field. The effects are the shared skill vocabulary: blast1/2/3,
+      // blade2, bombard, blaze, chainring, teleport, deathmark, tornado, meteor.
+      for (const t of g.towers) {
+        if (!t.cell || !t.def.skill) continue;
+        const sk = SKILLS[t.def.skill];
+        if (!sk) continue;
+        t.skillCd = (t.skillCd ?? sk.cd * 0.6) - dt;
+        if (t.skillCd > 0) continue;
+        if (!g.enemies.some((e) => !e.dead)) continue;
+        t.skillCd = sk.cd;
+        const p = cellCenter(t.cell.c, t.cell.r);
+        const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul() * killStackMul(t) * sk.mult;
+        addText(p.x, p.y - 52, sk.name.toUpperCase(), sk.color, 14, true);
+        glow(p.x, p.y, sk.color, 60, 0.4);
+        const living = g.enemies.filter((e) => !e.dead);
+        const front = [...living].sort((x, y) => y.d - x.d);
+        const now2 = performance.now();
+        switch (sk.fx) {
+          case "blade2": {
+            // spinning blades that skewer a file of enemies each
+            for (let i = 0; i < sk.hits && i < front.length; i++) {
+              const e = front[i];
+              const ep = enemyPos(e);
+              g.projs.push({
+                x: p.x, y: p.y, tid: e.id, lx: ep.x, ly: ep.y, speed: 640, dmg: base,
+                kind: "arrow", tw: t, pierce: 6, hitIds: [], dead: false, age: 0,
+              } as Proj);
+            }
+            sfx.zap();
+            break;
+          }
+          case "bombard": {
+            // shells walking across the densest cluster
+            for (let i = 0; i < sk.hits && i < front.length; i++) {
+              const e = front[Math.floor(Math.random() * front.length)];
+              const ep = enemyPos(e);
+              g.meteors.push({ x: ep.x, y: ep.y, t: 0.5 + i * 0.12, total: 0.5 + i * 0.12, uid: t.uid, color: sk.color, dmg: base, blast: sk.radius, tw: t });
+            }
+            sfx.meteor();
+            break;
+          }
+          case "blaze": {
+            // a wall of fire across the front of the lane
+            for (let i = 0; i < sk.hits; i++) {
+              const d = Math.max(0, (front[0]?.d ?? 100) - i * 70);
+              const gp = pathPos(d);
+              const dur = 3.2;
+              addZone({ kind: "lava", x: gp.x, y: gp.y, r: sk.radius * 0.55, life: dur, max: dur, dps: base / 2.2, slow: 0.15, color: sk.color });
+            }
+            sfx.explosion();
+            break;
+          }
+          case "blast3": {
+            // one colossal detonation on the lead enemy
+            const e = front[0];
+            if (e) {
+              const ep = enemyPos(e);
+              g.projs.push({
+                x: p.x, y: p.y, tid: e.id, lx: ep.x, ly: ep.y, speed: 380, dmg: base / 1.6,
+                kind: "cannon", tw: t, fireball: 1.6, blast: sk.radius, dead: false, age: 0,
+              } as Proj);
+            }
+            flash(sk.color, 0.12);
+            g.shake = fxShake(6);
+            sfx.blast3();
+            break;
+          }
+          case "chainring": {
+            // lightning arcing between enemies in a ring
+            const targets = front.slice(0, sk.hits);
+            let from = p;
+            targets.forEach((e) => {
+              const ep = enemyPos(e);
+              if (g.bolts.length < 44) g.bolts.push(randBolt(from.x, from.y, ep.x, ep.y, sk.color, 2.4, 0.24, now2));
+              dealDamage(e, base, { tw: t, color: sk.color });
+              from = ep;
+            });
+            if (targets.length) {
+              shock(p.x, p.y, sk.color, sk.radius, 0.5);
+              sfx.superbolt();
+            }
+            break;
+          }
+          case "teleport": {
+            // a shard blinking through every target at once
+            front.slice(0, sk.hits).forEach((e, i) => {
+              const ep = enemyPos(e);
+              schedule(i * 0.05, () => {
+                if (!e.dead) dealDamage(e, base, { tw: t, color: sk.color });
+              });
+              stars(ep.x, ep.y, sk.color, 6, 60);
+              if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, sk.color, 2, 0.18, now2));
+            });
+            sfx.zap();
+            break;
+          }
+          case "deathmark": {
+            // mark the strongest enemy; the swing reaps it if it is wounded
+            const e = front[0];
+            if (e) {
+              const ep = enemyPos(e);
+              e.mark = Math.max(e.mark, 3);
+              ring(ep.x, ep.y, sk.color, 60);
+              addText(ep.x, ep.y - 44, "DEATH MARK", sk.color, 13, true);
+              dealDamage(e, base, { tw: t, color: sk.color });
+              if (!e.dead && e.hp / e.max <= 0.35) {
+                addText(ep.x, ep.y - 60, "REAPED", sk.color, 16, true);
+                shock(ep.x, ep.y, sk.color, 90, 0.55);
+                dealDamage(e, e.hp + 1, { alwaysCrit: true, tw: t, color: sk.color });
+              }
+              sfx.superbolt();
+            }
+            break;
+          }
+          case "tornado": {
+            // a storm walking the lane: damage + drag everything back
+            const anchor = front[0];
+            const d0 = anchor ? anchor.d : 60;
+            for (const e of living) {
+              const ep = enemyPos(e);
+              const gp = pathPos(d0);
+              if (Math.hypot(ep.x - gp.x, ep.y - gp.y) > sk.radius * 1.6 && Math.abs(e.d - d0) > 120) continue;
+              dealDamage(e, base, { tw: t, color: sk.color });
+              e.d = Math.max(0, e.d - 42);
+              e.slow = Math.max(e.slow, 0.5);
+              e.slowT = Math.max(e.slowT, 2);
+              const ep2 = enemyPos(e);
+              ring(ep2.x, ep2.y, sk.color, 26);
+            }
+            shock(p.x, p.y, sk.color, sk.radius, 0.6);
+            sfx.meteor();
+            break;
+          }
+          case "meteor": {
+            for (let i = 0; i < sk.hits; i++) {
+              const e = front[Math.floor(Math.random() * front.length)];
+              if (!e) break;
+              const ep = enemyPos(e);
+              g.meteors.push({ x: ep.x, y: ep.y, t: 0.55 + i * 0.14, total: 0.55 + i * 0.14, uid: t.uid, color: sk.color, dmg: base, blast: sk.radius, tw: t });
+            }
+            sfx.meteor();
+            break;
+          }
+          case "blast1": {
+            // venom pools under the front enemies
+            front.slice(0, sk.hits).forEach((e) => {
+              const ep = enemyPos(e);
+              const dur = 3;
+              addZone({ kind: "lava", x: ep.x, y: ep.y, r: sk.radius * 0.5, life: dur, max: dur, dps: base / 2.5, slow: 0.35, color: sk.color });
+            });
+            sfx.blast1();
+            break;
+          }
+          case "blast2":
+          case "starburst":
+          case "boomerang":
+          case "armorbreak": {
+            // generic area detonation / burst / debuff family
+            for (const e of front.slice(0, sk.hits)) {
+              const ep = enemyPos(e);
+              dealDamage(e, base, { tw: t, color: sk.color });
+              ring(ep.x, ep.y, sk.color, 34);
+              if (sk.fx === "armorbreak") e.armor = Math.max(0, e.armor - 0.08);
+            }
+            shock(p.x, p.y, sk.color, sk.radius, 0.5);
+            sfx.blast2();
+            break;
+          }
+          default:
+            break;
+        }
+      }
+
       // chrono time fields: chill everything inside the aura
       for (const t of g.towers) {
         if (!t.cell || t.def.id !== "chrono" || !t.def.slowAura) continue;
@@ -3047,6 +3413,8 @@ export default function Battle({
         rate /= 1 + g.bonusAspd; // run-shop attack speed
         if (g.odT > 0) rate /= 1 + OVERDRIVE_ASPD; // Overdrive hero buff
         if (t.def.rapid && t.rapidT > 0) rate *= 0.32;
+        if (t.hasteT > 0) rate /= 1 + t.hasteMul; // Super Clone surge
+        t.hasteT = Math.max(0, t.hasteT - dt);
         // ---------- boss hexes ----------
         t.hexT = Math.max(0, t.hexT - dt);
         t.downT = Math.max(0, t.downT - dt);
@@ -3354,6 +3722,191 @@ export default function Battle({
         ctx.restore();
       }
       switch (towerArt(t.def)) {
+        case "beam": {
+          // a rail with a charging glow at the muzzle
+          ctx.rotate(a);
+          ctx.fillStyle = "#243447";
+          ctx.fillRect(-10 - rec, -5, 34, 10);
+          ctx.fillStyle = "#7ef0ff";
+          ctx.fillRect(16 - rec, -3, 12, 6);
+          ctx.beginPath();
+          ctx.arc(30 - rec, 0, 5 + Math.sin(now / 200) * 1.2, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case "howitzer": {
+          // a fat siege barrel on a heavy mount
+          ctx.rotate(a);
+          ctx.fillStyle = "#3a2c14";
+          ctx.fillRect(-14 - rec, -12, 30, 24);
+          ctx.fillStyle = "#8a6a1a";
+          ctx.fillRect(-6 - rec, -8, 38, 16);
+          ctx.fillStyle = "#ffb324";
+          ctx.beginPath();
+          ctx.arc(30 - rec, 0, 7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.rotate(-a);
+          ctx.fillStyle = "#241a08";
+          ctx.beginPath();
+          ctx.arc(0, 0, 13, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case "flame": {
+          // a nozzle with a live flame licking off the tip
+          const fl = Math.sin(now / 110) * 3;
+          ctx.rotate(a);
+          ctx.fillStyle = "#4a2410";
+          ctx.fillRect(-12, -8, 28, 16);
+          ctx.fillStyle = "#ff7a3d";
+          ctx.beginPath();
+          ctx.moveTo(16, -6);
+          ctx.quadraticCurveTo(32, -8 - fl, 36, 0);
+          ctx.quadraticCurveTo(32, 8 + fl, 16, 6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#ffd23f";
+          ctx.beginPath();
+          ctx.moveTo(18, -3);
+          ctx.quadraticCurveTo(30, -4 - fl, 32, 0);
+          ctx.quadraticCurveTo(30, 4 + fl, 18, 3);
+          ctx.closePath();
+          ctx.fill();
+          break;
+        }
+        case "gate": {
+          // a standing portal with a burning core
+          const th = 0.6 + 0.4 * Math.sin(now / 320);
+          ctx.fillStyle = "#2a1212";
+          ctx.strokeStyle = "#ff4d1f";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.roundRect(-16, -18, 32, 38, 12);
+          ctx.fill();
+          ctx.stroke();
+          const gr = ctx.createRadialGradient(0, 2, 2, 0, 2, 14);
+          gr.addColorStop(0, `rgba(255,120,60,${th})`);
+          gr.addColorStop(1, "rgba(255,60,20,0)");
+          ctx.fillStyle = gr;
+          ctx.beginPath();
+          ctx.arc(0, 2, 14, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case "ion": {
+          // a coil with an orbiting spark
+          const oa = now / 420;
+          ctx.strokeStyle = "#c9a7ff";
+          ctx.lineWidth = 3;
+          for (let i = 0; i < 3; i++) {
+            ctx.beginPath();
+            ctx.arc(0, 0, 8 + i * 5, 0.3 + i, 2.6 + i);
+            ctx.stroke();
+          }
+          ctx.fillStyle = "#e6d9ff";
+          ctx.beginPath();
+          ctx.arc(Math.cos(oa) * 17, Math.sin(oa) * 17, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#c9a7ff";
+          ctx.beginPath();
+          ctx.arc(0, 0, 7, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case "aether": {
+          // a floating prism with three satellite shards
+          ctx.fillStyle = "#123a4a";
+          ctx.strokeStyle = "#8fe9ff";
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(0, -16);
+          ctx.lineTo(13, 10);
+          ctx.lineTo(-13, 10);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          for (let i = 0; i < 3; i++) {
+            const oa = now / 700 + (i / 3) * Math.PI * 2;
+            ctx.fillStyle = "#8fe9ff";
+            ctx.fillRect(Math.cos(oa) * 21 - 3, Math.sin(oa) * 14 - 3, 6, 6);
+          }
+          break;
+        }
+        case "scythe": {
+          // a crescent blade sweeping
+          const sw = Math.sin(now / 500) * 0.25;
+          ctx.rotate(a + sw);
+          ctx.fillStyle = "#2a1a4a";
+          ctx.fillRect(-4, -4, 26, 8);
+          ctx.fillStyle = "#b18cff";
+          ctx.beginPath();
+          ctx.arc(12, 0, 18, -1.15, 1.15);
+          ctx.arc(12, 0, 9, 1.15, -1.15, true);
+          ctx.closePath();
+          ctx.fill();
+          break;
+        }
+        case "sling": {
+          // a winding sling flinging sand
+          const sp = now / 260;
+          ctx.strokeStyle = "#c9b57e";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(-8, 10);
+          ctx.quadraticCurveTo(-2, -6, Math.cos(sp) * 12, Math.sin(sp) * 10 - 8);
+          ctx.stroke();
+          ctx.fillStyle = "#e8d9a0";
+          ctx.beginPath();
+          ctx.arc(Math.cos(sp) * 12, Math.sin(sp) * 10 - 8, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#8a7746";
+          ctx.fillRect(-14, 6, 28, 8);
+          break;
+        }
+        case "spire": {
+          // a jagged bloodstone spire with a floating gem
+          const fl = Math.sin(now / 380) * 2;
+          ctx.fillStyle = "#3a1420";
+          ctx.strokeStyle = "#ff5566";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(0, -22);
+          ctx.lineTo(11, -2);
+          ctx.lineTo(7, 16);
+          ctx.lineTo(-7, 16);
+          ctx.lineTo(-11, -2);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = "#ff5566";
+          ctx.beginPath();
+          ctx.moveTo(0, -14 + fl);
+          ctx.lineTo(5, -6 + fl);
+          ctx.lineTo(0, 2 + fl);
+          ctx.lineTo(-5, -6 + fl);
+          ctx.closePath();
+          ctx.fill();
+          break;
+        }
+        case "venom": {
+          // a bulb with venom dripping off it
+          const bl = Math.sin(now / 300) * 2;
+          ctx.fillStyle = "#123a24";
+          ctx.strokeStyle = "#8effc4";
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.ellipse(0, -4, 12, 14 + bl, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = "#8effc4";
+          for (let i = 0; i < 3; i++) {
+            const dd = ((now / 240 + i * 1.3) % 3) / 3;
+            ctx.beginPath();
+            ctx.arc(-8 + i * 8, 8 + dd * 12, 3 * (1 - dd * 0.4), 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        }
         case "arrow":
           ctx.rotate(a);
           ctx.fillStyle = "#9fb4c7";
@@ -4210,6 +4763,38 @@ export default function Battle({
           for (let i = 0; i < 3; i++) ctx.fillRect(-18 + i * 7, 12, 4, 4);
           break;
         }
+        case "clone": {
+          // two offset diamonds — the tower and the copy it keeps promising
+          const wob = Math.sin(now / 400) * 2;
+          const dia = (dx: number, fill: string, alpha: number) => {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = fill;
+            ctx.beginPath();
+            ctx.moveTo(dx, -16 + wob);
+            ctx.lineTo(dx + 13, wob);
+            ctx.lineTo(dx, 16 + wob);
+            ctx.lineTo(dx - 13, wob);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          };
+          dia(-7, "#2f6f52", 1);
+          dia(7, "#8effc4", 0.92);
+          ctx.strokeStyle = "#d9ffe9";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(-22, -22);
+          ctx.lineTo(-13, -22);
+          ctx.moveTo(-22, -22);
+          ctx.lineTo(-22, -13);
+          ctx.moveTo(22, 22);
+          ctx.lineTo(13, 22);
+          ctx.moveTo(22, 22);
+          ctx.lineTo(22, 13);
+          ctx.stroke();
+          break;
+        }
         default:
           ctx.fillStyle = rc.color;
           ctx.beginPath();
@@ -4264,7 +4849,9 @@ export default function Battle({
      * plates, robes and staff, warlord axe, overlord rift crown).
      */
     const drawEnemy = (e: Enemy, now: number) => {
-      const p = enemyPos(e);
+      // glide between sim steps when frame interpolation is on
+      const dDraw = e.pd === undefined ? e.d : e.pd + (e.d - e.pd) * renderAlpha;
+      const p = enemyPos({ d: dDraw, ox: e.ox, oy: e.oy });
       const et = ENEMY_TYPES[e.type];
       // facing: sample a point slightly ahead on the path
       const ahead = pathPos(e.d + 6);
@@ -4920,9 +5507,11 @@ export default function Battle({
     };
 
     const drawProj = (pr: Proj) => {
-      const ang = Math.atan2(pr.ly - pr.y, pr.lx - pr.x);
+      const px = pr.px === undefined ? pr.x : pr.px + (pr.x - pr.px) * renderAlpha;
+      const py = pr.py === undefined ? pr.y : pr.py + (pr.y - pr.py) * renderAlpha;
+      const ang = Math.atan2(pr.ly - py, pr.lx - px);
       ctx.save();
-      ctx.translate(pr.x, pr.y);
+      ctx.translate(px, py);
       ctx.rotate(ang);
       switch (pr.kind) {
         case "arrow":
@@ -5627,15 +6216,20 @@ export default function Battle({
           ctx.stroke();
         } else if (p.kind === "glow") {
           const r = p.size * (0.7 + t * 0.7);
-          const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-          gr.addColorStop(0, p.color);
-          gr.addColorStop(0.35, p.color + "88");
-          gr.addColorStop(1, "transparent");
+          const spr = glowSprite(p.color);
           ctx.globalAlpha = al * 0.85;
-          ctx.fillStyle = gr;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-          ctx.fill();
+          if (spr) {
+            ctx.drawImage(spr, p.x - r, p.y - r, r * 2, r * 2);
+          } else {
+            const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+            gr.addColorStop(0, p.color);
+            gr.addColorStop(0.35, p.color + "88");
+            gr.addColorStop(1, "transparent");
+            ctx.fillStyle = gr;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
         } else if (p.kind === "shard") {
           ctx.globalAlpha = al;
           ctx.save();
@@ -5873,12 +6467,29 @@ export default function Battle({
     };
 
     // ---------- loop ----------
+    // Fixed 1/60 simulation steps with a render budget: the game speed is the
+    // same on every display, MAX FRAME RATE caps how often we draw, and
+    // ADVANCED FRAME INTERPOLATION glides between sim steps so a capped or
+    // uneven frame rate still looks smooth.
+    const STEP = 1 / 60;
+    let acc = 0;
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
+      const cap = saveRef.current.maxFps || 0;
+      if (cap > 0 && now - lastDraw < 1000 / cap - 0.6) return;
+      lastDraw = now;
       // rAF timestamps can start behind performance.now(), which would make dt negative
-      const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+      const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
       last = now;
-      update(dt);
+      acc += dt;
+      let steps = 0;
+      while (acc >= STEP && steps < 3) {
+        update(STEP);
+        acc -= STEP;
+        steps++;
+      }
+      if (steps >= 3) acc = 0; // fell too far behind: drop the backlog
+      renderAlpha = saveRef.current.frameInterp ? Math.max(0, Math.min(1, acc / STEP)) : 1;
       draw();
       if (now - lastHud > 110) {
         lastHud = now;
@@ -5926,7 +6537,10 @@ export default function Battle({
       if (cell.c === src.cell?.c && cell.r === src.cell?.r) return;
       const occ = g.towers.find((x) => x.cell && x.cell.c === cell.c && x.cell.r === cell.r && x.uid !== src.uid);
       if (occ) {
-        if (occ.points >= MAX_POINTS) {
+        if (occ.def.id === "clone") {
+          // dropping onto a Clone always attempts a copy — never a merge
+          cloneTower(src, occ);
+        } else if (occ.points >= MAX_POINTS) {
           sfx.error();
           toastRef.current(`${occ.def.name} is already at ${MAX_POINTS} points`, "#ff4d5e");
         } else if (occ.points === src.points) mergeTowers(src, occ);

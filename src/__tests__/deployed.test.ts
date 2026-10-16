@@ -153,6 +153,19 @@ describe("published build (index.html)", () => {
       "New Year Arsenal",
       "Winter Festival",
       "ELITE",
+      // the Clone tower and the frame-rate settings
+      "Super Clone",
+      "Perfect Replica",
+      "Max Frame Rate",
+      "Advanced Frame Interpolation",
+      // the ten casters and their skills
+      "Gale Blade",
+      "Thousand-Pounder",
+      "Hades Gate",
+      "Death Mark",
+      "Blade Cyclone",
+      "Meteor Rain",
+      "Rolling Bombardment",
     ];
     const missing = markers.filter((m) => !html.includes(m));
     expect(missing, `published bundle is missing: ${missing.join(", ")}`).toHaveLength(0);

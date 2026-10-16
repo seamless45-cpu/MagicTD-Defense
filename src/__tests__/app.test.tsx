@@ -440,13 +440,13 @@ describe("Shop", () => {
   });
 
   it("exchanges gems for magic tokens", async () => {
-    persistSave({ ...defaultSave(), gems: 8 });
+    persistSave({ ...defaultSave(), gems: 128 });
     await mountApp();
     click(byText("button", "Shop")!);
     await waitFor(() => byText("div", "MAGIC TOKEN EXCHANGE"), "token exchange");
 
-    // the 5-token pack now costs 8 gems (exchange gem prices up 90%)
-    const pack = all("button").find((b) => (b.textContent || "").replace(/\s/g, "") === "8")!;
+    // the 5-token pack now costs 128 gems (exchange gem prices scaled x16)
+    const pack = all("button").find((b) => (b.textContent || "").replace(/\s/g, "") === "128")!;
     expect(pack, "5-token pack").toBeTruthy();
     click(pack);
     await waitFor(() => saved().tokens === 5, "tokens banked");
@@ -472,6 +472,72 @@ describe("Heroes", () => {
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
     noErrors();
+  });
+});
+
+describe("Clone tower", () => {
+  it("copies a dragged tower and never consumes the original", async () => {
+    // two Clones only: every drag then lands ON a clone, which is the copy path
+    persistSave({
+      ...defaultSave(),
+      lineup: ["clone"],
+      levels: { ...defaultSave().levels, clone: 1 },
+    });
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+    const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
+    click(summon);
+    await waitFor(() => (document.body.textContent || "").includes("deployed!"), "first clone");
+    click(summon);
+    await waitFor(() => (document.body.textContent || "").includes("deployed!"), "second clone");
+    const towersOnBoard = () =>
+      Number((document.querySelector('[data-testid="towers-on-board"]')?.textContent || "").replace(/[^\d]/g, ""));
+    await waitFor(() => towersOnBoard() === 2, "two clones on the grid");
+
+    // drag one onto the other: the copy path fires and BOTH towers remain.
+    // Summons land on random cells, so brute-force every ordered cell pair
+    // until the copy lands (both towers are clones, so any occupied target is
+    // a clone destination and points always match).
+    const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+    const cx = (c: number) => 185 + (c + 0.5) * 90;
+    const cy = (r: number) => 110 + (r + 0.5) * 90;
+    const cells: [number, number][] = [];
+    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([cx(c), cy(r)]);
+    for (const [x1, y1] of cells) {
+      for (const [x2, y2] of cells) {
+        if (x1 === x2 && y1 === y2) continue;
+        pointer("pointerdown", canvas, x1, y1);
+        pointer("pointermove", canvas, x2, y2);
+        pointer("pointerup", canvas, x2, y2);
+      }
+    }
+    // the copy lands on the first real pair — the toast renders on React's next
+    // flush, so wait for it instead of reading the DOM in the same tick
+    await waitFor(() => /cloned|SUPER CLONE/i.test(document.body.textContent || ""), "clone toast", 6000);
+    await waitFor(() => towersOnBoard() === 2, "the original was never consumed");
+    noErrors();
+    unmountApp();
+  }, 25000);
+});
+
+describe("Frame settings", () => {
+  it("caps the frame rate and toggles frame interpolation", async () => {
+    await mountApp();
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => byText("div", "Settings"), "settings modal");
+    const row = await waitFor(() => document.querySelector('[data-testid="max-fps-row"]'), "max fps row");
+    click(row.querySelector('[data-testid="fps-60"]') as HTMLElement);
+    await waitFor(() => saved().maxFps === 60, "fps cap saved");
+    click(row.querySelector('[data-testid="fps-0"]') as HTMLElement);
+    await waitFor(() => saved().maxFps === 0, "fps cap cleared");
+    const knob = document.querySelector('[data-testid="toggle-frameInterp"]') as HTMLElement;
+    expect(knob, "frame interpolation toggle").toBeTruthy();
+    const was = saved().frameInterp;
+    click(knob);
+    await waitFor(() => saved().frameInterp === !was, "interpolation flipped");
+    noErrors();
+    unmountApp();
   });
 });
 
