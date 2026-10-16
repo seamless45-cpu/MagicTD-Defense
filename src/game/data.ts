@@ -804,8 +804,11 @@ export const POINT_STEP = 0.25; // +25% attack speed per point
 export const POINT_DMG_STEP = 0.3; // +30% damage per point
 export const ASC_DMG_MUL = 1.55; // every battle level multiplies damage
 export const MAX_POINTS = 8;
-export const SP_BASE_COST = 120;
-export const SP_COST_STEP = 75;
+export const SP_BASE_COST = 100;
+export const SP_COST_STEP = 10;
+/** ascension keeps its own, steeper ladder so cheap summons don't cheapen it */
+export const ASC_BASE_COST = 120;
+export const ASC_COST_STEP = 75;
 
 /**
  * Towers never earn points on their own — the only sources are the Point Surge
@@ -818,6 +821,19 @@ export const SPAWN_BUDGET_TOWERS = 4;
 /** SP price of one summon, given how many summons were already bought this run. */
 export function spCost(spend: number) {
   return SP_BASE_COST + SP_COST_STEP * spend;
+}
+
+/** SP price of one ascension, on its own ladder (never affected by summons). */
+export function ascSpCost(spend: number) {
+  return ASC_BASE_COST + ASC_COST_STEP * spend;
+}
+
+/** base SP every kill pays: 10, elites x5, bosses x10 */
+export const KILL_SP = 10;
+export const KILL_SP_ELITE = 5;
+export const KILL_SP_BOSS = 10;
+export function killSp(elite: boolean, boss: boolean) {
+  return KILL_SP * (boss ? KILL_SP_BOSS : elite ? KILL_SP_ELITE : 1);
 }
 
 /** Starting SP: exactly enough for `n` summons, so 4 towers deploy before wave 1. */
@@ -892,8 +908,9 @@ export function towerDamage(
   return flat * Math.pow(ASC_DMG_MUL, Math.max(0, bLv - 1)) * (1 + POINT_DMG_STEP * points) * atkMul;
 }
 
+/** gold price of one menu level — scaled by 0.95 (balance patch: tower upgrades -5%) */
 export function upgradeGoldCost(level: number) {
-  return Math.round(50 * Math.pow(1.5, level - 1));
+  return Math.round(50 * 0.95 * Math.pow(1.5, level - 1));
 }
 export function upgradeFragCost(level: number) {
   return 1 + Math.floor(level / 3);
@@ -1555,14 +1572,15 @@ export interface DailyTask {
  * shared task-point track with three milestone chests.
  */
 export const DAILY_TASKS: DailyTask[] = [
-  { id: "play", name: "Answer the Call", desc: "Finish any run", need: 3, points: 10, gold: 2500, gems: 40, color: "#8fb0ff" },
-  { id: "win", name: "Hold the Line", desc: "Win a Battle run", need: 2, points: 20, gold: 6000, gems: 120, color: "#3dff8e" },
-  { id: "waves", name: "Wave Breaker", desc: "Clear waves", need: 20, points: 15, gold: 4000, gems: 70, color: "#35e0ff" },
-  { id: "kills", name: "Cull the Rift", desc: "Destroy enemies", need: 150, points: 15, gold: 4500, gems: 80, color: "#ff4d5e" },
-  { id: "skill", name: "Hero's Moment", desc: "Unleash hero skills", need: 5, points: 10, gold: 2000, gems: 50, color: "#ff4fd8" },
-  { id: "upgrade", name: "Arsenal Work", desc: "Upgrade towers or heroes", need: 4, points: 10, gold: 3000, gems: 60, color: "#ffcf4d" },
-  { id: "chests", name: "Lockbreaker", desc: "Open chests", need: 3, points: 10, gold: 2500, gems: 55, color: "#c44dff" },
-  { id: "spend", name: "Big Spender", desc: "Spend gold", need: 20000, points: 10, gold: 1500, gems: 90, color: "#ffb324" },
+  // task gold/gems are scaled by 0.9 (balance patch: task rewards -10%)
+  { id: "play", name: "Answer the Call", desc: "Finish any run", need: 3, points: 10, gold: 2250, gems: 36, color: "#8fb0ff" },
+  { id: "win", name: "Hold the Line", desc: "Win a Battle run", need: 2, points: 20, gold: 5400, gems: 108, color: "#3dff8e" },
+  { id: "waves", name: "Wave Breaker", desc: "Clear waves", need: 20, points: 15, gold: 3600, gems: 63, color: "#35e0ff" },
+  { id: "kills", name: "Cull the Rift", desc: "Destroy enemies", need: 150, points: 15, gold: 4050, gems: 72, color: "#ff4d5e" },
+  { id: "skill", name: "Hero's Moment", desc: "Unleash hero skills", need: 5, points: 10, gold: 1800, gems: 45, color: "#ff4fd8" },
+  { id: "upgrade", name: "Arsenal Work", desc: "Upgrade towers or heroes", need: 4, points: 10, gold: 2700, gems: 54, color: "#ffcf4d" },
+  { id: "chests", name: "Lockbreaker", desc: "Open chests", need: 3, points: 10, gold: 2250, gems: 50, color: "#c44dff" },
+  { id: "spend", name: "Big Spender", desc: "Spend gold", need: 20000, points: 10, gold: 1350, gems: 81, color: "#ffb324" },
 ];
 
 export const TASK_BY_ID: Record<TaskId, DailyTask> = Object.fromEntries(DAILY_TASKS.map((t) => [t.id, t])) as Record<
@@ -1721,6 +1739,207 @@ export function eventBonus(id: EventId): EventBonus {
       return { ...BASE_EVENT_BONUS, goldMul: 1.6 };
     case "lightning":
       return { ...BASE_EVENT_BONUS, gemMul: 2, hpMul: 1.15 };
+  }
+}
+
+// ---------- monthly events ----------
+export type MonthId =
+  | "arsenal"
+  | "heartfire"
+  | "riftwinds"
+  | "awakening"
+  | "golden"
+  | "gemrain"
+  | "siege"
+  | "festival"
+  | "bounty"
+  | "nightfall"
+  | "harvest"
+  | "winter";
+
+export interface MonthlyEvent {
+  id: MonthId;
+  name: string;
+  /** 0 = January … 11 = December, matching Date#getMonth */
+  month: number;
+  tagline: string;
+  desc: string;
+  perk: string;
+  color: string;
+}
+
+/**
+ * One event per calendar month, stacking on top of the weekday rotation.
+ * Each one applies real numbers through `monthlyEventBonus()`.
+ */
+export const MONTHLY_EVENTS: MonthlyEvent[] = [
+  {
+    id: "arsenal",
+    name: "New Year Arsenal",
+    month: 0,
+    tagline: "January",
+    desc: "The forges reopen for the new year. Every tower upgrade is cheaper all month.",
+    perk: "Tower upgrades -15% gold",
+    color: "#8fb0ff",
+  },
+  {
+    id: "heartfire",
+    name: "Heartfire",
+    month: 1,
+    tagline: "February",
+    desc: "The rift runs warm. Enemies pour more spell power into the grid when they fall.",
+    perk: "+35% SP per kill",
+    color: "#ff6b8a",
+  },
+  {
+    id: "riftwinds",
+    name: "Rift Winds",
+    month: 2,
+    tagline: "March",
+    desc: "Tailwinds at your back: the horde marches weaker and the salvage crews pay more.",
+    perk: "Enemy HP -8% · gold +25%",
+    color: "#7fe9ff",
+  },
+  {
+    id: "awakening",
+    name: "Awakening Season",
+    month: 3,
+    tagline: "April",
+    desc: "The towers stir. Fragment finds lean rare and every chest rolls an extra fragment.",
+    perk: "+1 chest fragment · fragment rarity bias +0.3",
+    color: "#c44dff",
+  },
+  {
+    id: "golden",
+    name: "Golden Bloom",
+    month: 4,
+    tagline: "May",
+    desc: "Gold blooms across the arena floor. Everything you bank is worth half again as much.",
+    perk: "+55% gold from every run",
+    color: "#ffcf4d",
+  },
+  {
+    id: "gemrain",
+    name: "Gem Rain",
+    month: 5,
+    tagline: "June",
+    desc: "The sky crystallises. Gem payouts from runs nearly double.",
+    perk: "+90% gems from every run",
+    color: "#35e0ff",
+  },
+  {
+    id: "siege",
+    name: "Midyear Siege",
+    month: 6,
+    tagline: "July",
+    desc: "The horde tests the walls early — they hit harder, but spill far more spell power.",
+    perk: "+45% SP per kill · enemy HP +8%",
+    color: "#ff4d5e",
+  },
+  {
+    id: "festival",
+    name: "Tower Festival",
+    month: 7,
+    tagline: "August",
+    desc: "Artisans flood the arena. Tower upgrades are at their cheapest all year.",
+    perk: "Tower upgrades -20% gold",
+    color: "#8effc4",
+  },
+  {
+    id: "bounty",
+    name: "Bounty Hunt",
+    month: 8,
+    tagline: "September",
+    desc: "The marshals post bounties on the whole horde. Kills pay in gold and spell power.",
+    perk: "+40% gold · +25% SP per kill",
+    color: "#ffb324",
+  },
+  {
+    id: "nightfall",
+    name: "Nightfall",
+    month: 9,
+    tagline: "October",
+    desc: "Long dark nights. The horde is tougher, but the rift gems glow brighter than ever.",
+    perk: "2x gems from runs · enemy HP +12%",
+    color: "#b14dff",
+  },
+  {
+    id: "harvest",
+    name: "Harvest",
+    month: 10,
+    tagline: "November",
+    desc: "Gather everything. Gold pours in and salvage crews pull extra fragments from chests.",
+    perk: "+65% gold · +1 chest fragment",
+    color: "#ff8c3d",
+  },
+  {
+    id: "winter",
+    name: "Winter Festival",
+    month: 11,
+    tagline: "December",
+    desc: "The season of gifts: gems, spell power and cheaper upgrades all month long.",
+    perk: "+55% gems · +20% SP · tower upgrades -10%",
+    color: "#9fe8ff",
+  },
+];
+
+export const MONTH_BY_ID: Record<MonthId, MonthlyEvent> = Object.fromEntries(
+  MONTHLY_EVENTS.map((m) => [m.id, m])
+) as Record<MonthId, MonthlyEvent>;
+
+/** the event live for the calendar month (defaults to now) */
+export function monthlyEventForDate(d: Date = new Date()): MonthlyEvent {
+  const month = d.getMonth();
+  return MONTHLY_EVENTS.find((m) => m.month === month) || MONTHLY_EVENTS[0];
+}
+
+export interface MonthlyBonus {
+  goldMul: number;
+  gemMul: number;
+  spMul: number;
+  hpMul: number;
+  upgradeCostMul: number;
+  fragBias: number;
+  chestFragBonus: number;
+}
+
+export const BASE_MONTHLY_BONUS: MonthlyBonus = {
+  goldMul: 1,
+  gemMul: 1,
+  spMul: 1,
+  hpMul: 1,
+  upgradeCostMul: 1,
+  fragBias: 0,
+  chestFragBonus: 0,
+};
+
+/** numeric modifiers for the monthly event — the single source of truth for its perk */
+export function monthlyEventBonus(id: MonthId): MonthlyBonus {
+  switch (id) {
+    case "arsenal":
+      return { ...BASE_MONTHLY_BONUS, upgradeCostMul: 0.85 };
+    case "heartfire":
+      return { ...BASE_MONTHLY_BONUS, spMul: 1.35 };
+    case "riftwinds":
+      return { ...BASE_MONTHLY_BONUS, hpMul: 0.92, goldMul: 1.25 };
+    case "awakening":
+      return { ...BASE_MONTHLY_BONUS, fragBias: 0.3, chestFragBonus: 1 };
+    case "golden":
+      return { ...BASE_MONTHLY_BONUS, goldMul: 1.55 };
+    case "gemrain":
+      return { ...BASE_MONTHLY_BONUS, gemMul: 1.9 };
+    case "siege":
+      return { ...BASE_MONTHLY_BONUS, spMul: 1.45, hpMul: 1.08 };
+    case "festival":
+      return { ...BASE_MONTHLY_BONUS, upgradeCostMul: 0.8 };
+    case "bounty":
+      return { ...BASE_MONTHLY_BONUS, goldMul: 1.4, spMul: 1.25 };
+    case "nightfall":
+      return { ...BASE_MONTHLY_BONUS, gemMul: 2, hpMul: 1.12 };
+    case "harvest":
+      return { ...BASE_MONTHLY_BONUS, goldMul: 1.65, chestFragBonus: 1 };
+    case "winter":
+      return { ...BASE_MONTHLY_BONUS, gemMul: 1.55, spMul: 1.2, upgradeCostMul: 0.9 };
   }
 }
 

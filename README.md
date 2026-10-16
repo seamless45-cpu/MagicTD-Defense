@@ -185,6 +185,27 @@ banner.
 | Friday & Saturday | **Mineshaft** | +60% gold from every run |
 | Sunday | **Survive Lightning** | ×2 gems from runs, +15% enemy health |
 
+### Monthly events
+
+The calendar has its own modifier layer on top of the weekday rotation — one event per month,
+stacking with whatever weekday event is live. Open **Specials** to see the live card and the whole
+year at a glance:
+
+| Month | Event | Perk |
+| --- | --- | --- |
+| January | New Year Arsenal | Tower upgrades -15% gold |
+| February | Heartfire | +35% SP per kill |
+| March | Rift Winds | Enemy HP -8% · gold +25% |
+| April | Awakening Season | +1 chest fragment · fragment rarity bias +0.3 |
+| May | Golden Bloom | +55% gold from every run |
+| June | Gem Rain | +90% gems from every run |
+| July | Midyear Siege | +45% SP per kill · enemy HP +8% |
+| August | Tower Festival | Tower upgrades -20% gold |
+| September | Bounty Hunt | +40% gold · +25% SP per kill |
+| October | Nightfall | 2x gems from runs · enemy HP +12% |
+| November | Harvest | +65% gold · +1 chest fragment |
+| December | Winter Festival | +55% gems · +20% SP · tower upgrades -10% |
+
 ### Trophies & competition
 
 Battle runs stake ladder trophies: **a victory pays +70 and a defeat costs −20** (never below 0).
@@ -527,3 +548,27 @@ enemies, with Overpenetration and Rail Burn awakenings).
   on narrow screens.
 - **Summoning is rotation-only** (see above): a summon draws exclusively from the summon rotation,
   and an empty rotation refuses the summon with a prompt to set one.
+
+## Balance pass: summon pricing, elite kills, monthly events and a smoother arena
+
+- **Summon pricing reworked.** A summon now costs **100 SP and +10 for every summon already made**
+  this run (it used to start at 120 and climb by 75). Starting SP is retuned to buy exactly the
+  opening four summons. Ascent keeps its own steeper ladder (120 + 75 per ascent) so the cheap
+  summons never cheapen upgrades.
+- **Kills pay spell power by rank.** Every kill now banks **10 SP**; **elite** enemies pay **5x**
+  (50 SP) and **bosses 10x** (100 SP). Elites are a new spawn variant — tougher, double gold, a
+  golden rift sigil under their feet and a floating diamond — appearing more often as rounds climb.
+- **Task rewards are down 10%.** Every daily task's gold and gems payout is scaled by 0.9.
+- **Tower upgrades cost 5% less gold.** The gold curve is scaled by 0.95 at every level.
+- **Magic token exchange costs more.** Gem prices on the token packs are up 90% (1→2, 4→8, 9→17).
+- **Monthly events** (above): a real modifier layer keyed to the calendar month, stacking on the
+  weekday rotation — kill SP, gold, gems, enemy HP, chest fragments and upgrade discounts.
+- **Crit effects no longer spike.** The crit starburst is throttled (one full burst per 55ms while
+  small crits pop a cheap ring), spark counts are down ~40%, ordinary hits only sample their impact
+  pop, and the particle field drops additive FX instead of shuffling the array once it saturates.
+- **Awakening effects are visible.** Procs announce themselves — the awakening's name flares at the
+  tower on Heavy Shells/Hollow Point/Volley rolls, kill-side procs glow with their colour, and
+  **leech** awakenings now actually heal lives on kills (they were inert).
+- **Tower section rebuilt (again).** One flat grid in rarity order with **sticky rarity headers**
+  (legendary first), filters ALL / IN ROTATION / LOCKED / READY — the nested-group layout is gone,
+  so cells, columns and scroll behaviour are back to the simple, stable arrangement.

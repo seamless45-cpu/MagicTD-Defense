@@ -85,6 +85,9 @@ import {
   competitionTier,
   eventBonus,
   eventForDate,
+  monthlyEventBonus,
+  monthlyEventForDate,
+  MONTHLY_EVENTS,
   guildLevel,
   heroCooldown,
   heroPower,
@@ -1047,6 +1050,8 @@ function EventsPanel({
 }) {
   const [claim, setClaim] = useState<ClaimData | null>(null);
   const live = eventForDate();
+  const month = monthlyEventForDate();
+  const monthBonus = monthlyEventBonus(month.id);
   const today = new Date().getDay();
 
   const doClaim = () => {
@@ -1095,6 +1100,44 @@ function EventsPanel({
           <button className="cta-banner shrink-0 px-5 py-3 text-[14px]" disabled={!eventClaimable(save)} onClick={doClaim}>
             {eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED TODAY"}
           </button>
+        </div>
+      </div>
+
+      {/* MONTHLY EVENT — the calendar's own modifier, stacking on the weekday rotation */}
+      <div className="text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">MONTHLY EVENT</div>
+      <div className="panel month-card relative p-5" style={{ borderColor: month.color + "88" }} data-testid="month-live">
+        <div className="absolute inset-0 opacity-25" style={{ background: `radial-gradient(620px 180px at 25% 0%, ${month.color}66, transparent 70%)` }} />
+        <div className="relative flex flex-wrap items-center gap-4">
+          <div className="min-w-[220px] flex-1">
+            <div className="flex items-center gap-2">
+              <span className="live-dot" style={{ background: month.color }} />
+              <span className="text-[10px] font-bold tracking-[0.32em] text-[var(--dim)]">
+                ALL {month.tagline.toUpperCase()} · {monthBonus.upgradeCostMul < 1 ? "UPGRADES DISCOUNTED" : monthBonus.spMul > 1 ? "SPELL POWER SURGE" : "RIFT MODIFIER LIVE"}
+              </span>
+            </div>
+            <div className="font-disp text-2xl leading-none" style={{ color: month.color }}>
+              {month.name}
+            </div>
+            <p className="mt-1.5 max-w-lg text-[13px] font-semibold text-[var(--dim)]">{month.desc}</p>
+            <div className="mt-2 inline-block rounded-lg border px-2.5 py-1 text-[12px] font-bold" style={{ borderColor: month.color + "66", color: month.color }}>
+              {month.perk}
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="panel p-3" data-testid="month-strip">
+        <div className="month-strip">
+          {MONTHLY_EVENTS.map((m) => (
+            <div
+              key={m.id}
+              className={"month-tile" + (m.id === month.id ? " on" : "")}
+              style={{ color: m.color, borderColor: m.id === month.id ? m.color : undefined, opacity: m.id === month.id ? 1 : 0.85 }}
+              title={m.name + " — " + m.perk}
+            >
+              <span className="month-tile-m">{m.tagline.slice(0, 3).toUpperCase()}</span>
+              <span className="month-tile-n">{m.name}</span>
+            </div>
+          ))}
         </div>
       </div>
 

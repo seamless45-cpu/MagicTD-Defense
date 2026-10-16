@@ -3454,20 +3454,23 @@ body,
 }
 
 /* ---------- tower section: rarity groups + filters ---------- */
-.tw-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+/* the rarity label is a sticky row inside the one flat grid, so it keeps
+   announcing the group while the cells scroll under it */
 .tw-group-head {
+  position: sticky;
+  top: -1px;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 2px;
+  padding: 4px 2px 3px;
+  margin-bottom: -2px;
   font-family: var(--font-disp, inherit);
   font-size: 11px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
+  background: linear-gradient(180deg, rgba(12, 8, 32, 0.97) 70%, rgba(12, 8, 32, 0));
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
 }
 .tw-group-head i {
   width: 8px;
@@ -3487,4 +3490,56 @@ body,
   border-color: #35e0ff;
   color: #35e0ff;
   box-shadow: 0 0 12px -2px rgba(53, 224, 255, 0.7);
+}
+
+/* ---------- monthly events ---------- */
+.month-card {
+  position: relative;
+  overflow: hidden;
+}
+.month-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+@media (min-width: 720px) {
+  .month-strip {
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+  }
+}
+.month-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 3px 7px;
+  border-radius: 11px;
+  border: 1.5px solid var(--line);
+  background: rgba(0, 0, 0, 0.35);
+  transition: transform 0.14s ease, border-color 0.16s ease, filter 0.16s ease;
+}
+.month-tile:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.12);
+}
+.month-tile.on {
+  border-width: 2px;
+  box-shadow: 0 0 18px -6px currentColor;
+}
+.month-tile-m {
+  font-family: var(--font-disp, inherit);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  line-height: 1;
+}
+.month-tile-n {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--dim);
 }

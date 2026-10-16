@@ -2,16 +2,17 @@ import { useState } from "react";
 import type { SaveData } from "../game/save";
 import { bumpQuest, bumpTask, grantLoot, lootLines, rollChest, type ChestLoot } from "../game/save";
 import { sfx } from "../game/audio";
-import { CHESTS, CHIPS, HERO_BY_ID, TOWERS, TOWER_BY_ID, RARITY, eventBonus, eventForDate, type Rarity } from "../game/data";
+import { CHESTS, CHIPS, HERO_BY_ID, TOWERS, TOWER_BY_ID, RARITY, eventBonus, eventForDate, monthlyEventBonus, monthlyEventForDate, type Rarity } from "../game/data";
 import { ChipIcon, CoinIcon, ClaimChest, GemIcon, Modal, RewardClaim, ShardIcon, TokenIcon, TowerIcon, type ClaimData } from "../components/ui";
 
 /** gold price of one fragment of each rarity */
 const FRAG_PRICE: Record<Rarity, number> = { normal: 120, decent: 320, epic: 750, legendary: 1400 };
 
+// gem prices scaled by 1.9 (balance patch: magic token exchange +90%)
 const TOKEN_PACKS = [
-  { tokens: 1, gems: 1 },
-  { tokens: 5, gems: 4 },
-  { tokens: 12, gems: 9 },
+  { tokens: 1, gems: 2 },
+  { tokens: 5, gems: 8 },
+  { tokens: 12, gems: 17 },
 ];
 
 export default function Shop({
@@ -30,9 +31,11 @@ export default function Shop({
   const [fragPick, setFragPick] = useState<string>(TOWERS[0].id);
   const [fragQty, setFragQty] = useState<1 | 5>(1);
 
-  // the live weekday event discounts chests and sweetens the fragment rolls
+  // the live weekday event discounts chests and sweetens the fragment rolls;
+  // the monthly event stacks its own fragment perks on top
   const ev = eventForDate();
   const bonus = eventBonus(ev.id);
+  const monthBonus = monthlyEventBonus(monthlyEventForDate().id);
   const priceOf = (c: (typeof CHESTS)[number]) => Math.max(1, Math.round(c.cost * bonus.chestPriceMul));
 
   const chest = CHESTS.find((c) => c.id === opening);
@@ -94,7 +97,7 @@ export default function Shop({
   /** roll + bank the chest, then hand the exact loot to the claim animation */
   const smash = () => {
     if (!chest) return;
-    const rolled = rollChest(chest.id, bonus.chestFragBonus, bonus.fragBias);
+    const rolled = rollChest(chest.id, bonus.chestFragBonus + monthBonus.chestFragBonus, bonus.fragBias + monthBonus.fragBias);
     setLoot(rolled);
     setStage("reward");
     sfx.gem();

@@ -5,6 +5,7 @@ import App from "../App";
 import Battle from "../screens/Battle";
 import { canvasStats, consoleErrors } from "./setup";
 import { defaultSave, persistSave, type SaveData } from "../game/save";
+import { upgradeGoldCost, monthlyEventBonus, monthlyEventForDate } from "../game/data";
 
 // ---------- tiny helpers (no testing-library dependency) ----------
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -439,12 +440,13 @@ describe("Shop", () => {
   });
 
   it("exchanges gems for magic tokens", async () => {
-    persistSave({ ...defaultSave(), gems: 4 });
+    persistSave({ ...defaultSave(), gems: 8 });
     await mountApp();
     click(byText("button", "Shop")!);
     await waitFor(() => byText("div", "MAGIC TOKEN EXCHANGE"), "token exchange");
 
-    const pack = all("button").find((b) => (b.textContent || "").replace(/\s/g, "") === "4")!;
+    // the 5-token pack now costs 8 gems (exchange gem prices up 90%)
+    const pack = all("button").find((b) => (b.textContent || "").replace(/\s/g, "") === "8")!;
     expect(pack, "5-token pack").toBeTruthy();
     click(pack);
     await waitFor(() => saved().tokens === 5, "tokens banked");
@@ -470,6 +472,23 @@ describe("Heroes", () => {
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
     noErrors();
+  });
+});
+
+describe("Monthly events", () => {
+  it("shows the live monthly event and the whole calendar on Specials", async () => {
+    await mountApp();
+    click(byText("button", "Specials")!);
+    click(await waitFor(() => document.querySelector('[data-testid="tab-events"]') as HTMLElement, "events tab"));
+    const live = await waitFor(() => document.querySelector('[data-testid="month-live"]'), "monthly event card");
+    expect(live.textContent).toContain("ALL ");
+    const strip = await waitFor(() => document.querySelector('[data-testid="month-strip"]'), "month strip");
+    expect(strip.querySelectorAll(".month-tile").length).toBe(12);
+    expect(document.querySelectorAll(".month-tile.on").length).toBe(1);
+    // the weekday rotation still sits right beside it
+    expect(document.querySelector('[data-testid="event-live"]')).toBeTruthy();
+    noErrors();
+    unmountApp();
   });
 });
 
@@ -509,7 +528,10 @@ describe("Towers", () => {
     const upgrade = Array.from(pv.querySelectorAll("button")).find((b) => /Upgrade/.test(b.textContent || ""))!;
     click(upgrade);
     await waitFor(() => saved().levels.arrow === 2, "arrow upgraded to level 2");
-    expect(saved().gold).toBe(before.gold - 50);
+    const upgPrice = Math.round(
+      upgradeGoldCost(1) * monthlyEventBonus(monthlyEventForDate().id).upgradeCostMul
+    );
+    expect(saved().gold).toBe(before.gold - upgPrice);
     expect(saved().frags.arrow).toBe(before.frags.arrow - 1);
     // the preview re-renders with the new level
     await waitFor(

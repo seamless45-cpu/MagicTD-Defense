@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
 import { bumpTask, critBonus, towerUpgrades } from "../game/save";
 import { sfx } from "../game/audio";
@@ -18,6 +18,8 @@ import {
   fmtCritPct,
   towerStatRows,
   type TowerDef,
+  monthlyEventBonus,
+  monthlyEventForDate,
 } from "../game/data";
 import { Ceremony, CoinIcon, GemIcon, TokenIcon, TowerIcon, UpgradeCeremony, type CeremonyData, type UpgradeData } from "../components/ui";
 
@@ -155,10 +157,12 @@ export default function Towers({
     setTimeout(() => setShakeCard(null), 350);
   };
 
+  const monthUpgMul = monthlyEventBonus(monthlyEventForDate().id).upgradeCostMul;
+
   const doUpgrade = (def: TowerDef) => {
     const lv = save.levels[def.id] || 0;
     if (lv >= MAX_MENU_LEVEL) return deny("Max level reached");
-    const gold = upgradeGoldCost(lv);
+    const gold = Math.round(upgradeGoldCost(lv) * monthUpgMul);
     const fr = upgradeFragCost(lv);
     const have = save.frags[def.id] || 0;
     if (save.gold < gold || have < fr) {
@@ -365,11 +369,12 @@ export default function Towers({
         </div>
       </div>
 
-      {/* TOWER GRID — icons in rarity-grouped rows: icon, level underneath and
-          an outline in the tower's rarity colour. A filter row keeps 47 towers
-          scannable: everything, just the summon rotation, the locked bank or
-          what's ready to spend fragments on. No buttons, no descriptions; tap a
-          cell for the full sheet, drag it onto the rotation bar to reorder. */}
+      {/* TOWER GRID — one flat grid of icons in rarity order (legendary
+          first), each rarity introduced by a sticky header row. Cells carry the
+          icon, the level underneath and an outline in the tower's rarity
+          colour; a filter row keeps all 47 towers scannable. No buttons, no
+          descriptions: tap a cell for the full sheet, drag it onto the rotation
+          bar to reorder. */}
       <div className="flex min-h-0 flex-1 flex-col gap-1.5" data-testid="tower-grid">
         <div className="flex shrink-0 flex-wrap items-center gap-1.5" data-testid="tw-filters">
           {(
@@ -397,60 +402,58 @@ export default function Towers({
           </span>
         </div>
 
-        <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-4 content-start gap-x-1.5 gap-y-1 overflow-y-auto scroll-thin pr-1 sm:grid-cols-6 xl:grid-cols-8">
+        <div className="tower-scroll grid grid-cols-4 content-start gap-x-1.5 gap-y-1 overflow-y-auto scroll-thin pr-1 sm:grid-cols-6 xl:grid-cols-8">
           {(["legendary", "epic", "decent", "normal"] as const).map((rarity) => {
             const group = twVisible.filter((def) => def.rarity === rarity);
             if (!group.length) return null;
             const rc = RARITY[rarity];
             return (
-              <div key={rarity} className="tw-group col-span-full">
-                <div className="tw-group-head" style={{ color: rc.color }}>
+              <Fragment key={rarity}>
+                <div className="tw-group-head col-span-full" style={{ color: rc.color }}>
                   <i style={{ background: rc.color }} />
                   {rarity.toUpperCase()}
                   <span className="num">· {group.length}</span>
                 </div>
-                <div className="grid grid-cols-4 gap-x-1.5 gap-y-1 sm:grid-cols-6 xl:grid-cols-8">
-                  {group.map((def, i) => {
-                    const lv = save.levels[def.id] || 0;
-                    const locked = lv === 0;
-                    const fr = lv > 0 ? upgradeFragCost(lv) : def.unlockFrags;
-                    const have = save.frags[def.id] || 0;
-                    const inLine = save.lineup.includes(def.id);
-                    const awoken = (save.awn[def.id]?.[0] || 0) + (save.awn[def.id]?.[1] || 0);
-                    const maxed = lv >= MAX_MENU_LEVEL;
-                    const ready = have >= fr;
-                    return (
-                      <button
-                        key={def.id}
-                        data-tower={def.id}
-                        data-locked={locked ? "1" : "0"}
-                        title={def.name + " — " + (locked ? "locked, needs " + def.unlockFrags + " fragments" : "Lv " + lv + (maxed ? " (max)" : ""))}
-                        className={"tw-cell " + (shakeCard === def.id ? "anim-shake " : "") + (inLine ? "in-line " : "") + "anim-pop"}
-                        style={{
-                          animationDelay: i * 12 + "ms",
-                          borderColor: locked ? "#4a3a9688" : rc.color,
-                          boxShadow: locked ? "none" : "0 0 0 1px " + rc.color + "22, 0 6px 16px -10px " + rc.color + "aa",
-                        }}
-                        onPointerDown={(e) => startDrag(def.id, e)}
-                      >
-                        <span className="tw-cell-art">
-                          <TowerIcon def={def} size={46} locked={locked} />
-                        </span>
-                        <span className="tw-cell-lv" style={{ color: locked ? "var(--dim)" : rc.color }}>
-                          {locked ? "LOCKED" : maxed ? "MAX" : "LV " + lv}
-                        </span>
-                        <span className="tw-cell-frag" style={{ color: locked ? "var(--dim)" : ready ? "#8effc4" : "var(--dim)" }}>
-                          <GemIcon size={11} />
-                          <b className="num">{have}</b>
-                          {!maxed && <i>/{fr}</i>}
-                        </span>
-                        {awoken > 0 && <span className="tw-cell-awk">✦{awoken}</span>}
-                        {inLine && <span className="tw-cell-line">✓</span>}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
+                {group.map((def, i) => {
+                  const lv = save.levels[def.id] || 0;
+                  const locked = lv === 0;
+                  const fr = lv > 0 ? upgradeFragCost(lv) : def.unlockFrags;
+                  const have = save.frags[def.id] || 0;
+                  const inLine = save.lineup.includes(def.id);
+                  const awoken = (save.awn[def.id]?.[0] || 0) + (save.awn[def.id]?.[1] || 0);
+                  const maxed = lv >= MAX_MENU_LEVEL;
+                  const ready = have >= fr;
+                  return (
+                    <button
+                      key={def.id}
+                      data-tower={def.id}
+                      data-locked={locked ? "1" : "0"}
+                      title={def.name + " — " + (locked ? "locked, needs " + def.unlockFrags + " fragments" : "Lv " + lv + (maxed ? " (max)" : ""))}
+                      className={"tw-cell " + (shakeCard === def.id ? "anim-shake " : "") + (inLine ? "in-line " : "") + "anim-pop"}
+                      style={{
+                        animationDelay: i * 12 + "ms",
+                        borderColor: locked ? "#4a3a9688" : rc.color,
+                        boxShadow: locked ? "none" : "0 0 0 1px " + rc.color + "22, 0 6px 16px -10px " + rc.color + "aa",
+                      }}
+                      onPointerDown={(e) => startDrag(def.id, e)}
+                    >
+                      <span className="tw-cell-art">
+                        <TowerIcon def={def} size={46} locked={locked} />
+                      </span>
+                      <span className="tw-cell-lv" style={{ color: locked ? "var(--dim)" : rc.color }}>
+                        {locked ? "LOCKED" : maxed ? "MAX" : "LV " + lv}
+                      </span>
+                      <span className="tw-cell-frag" style={{ color: locked ? "var(--dim)" : ready ? "#8effc4" : "var(--dim)" }}>
+                        <GemIcon size={11} />
+                        <b className="num">{have}</b>
+                        {!maxed && <i>/{fr}</i>}
+                      </span>
+                      {awoken > 0 && <span className="tw-cell-awk">✦{awoken}</span>}
+                      {inLine && <span className="tw-cell-line">✓</span>}
+                    </button>
+                  );
+                })}
+              </Fragment>
             );
           })}
           {twVisible.length === 0 && (
@@ -529,7 +532,7 @@ function TowerPreview({
   const lv = save.levels[def.id] || 0;
   const locked = lv === 0;
   const rc = RARITY[def.rarity];
-  const gold = upgradeGoldCost(Math.max(1, lv));
+  const gold = Math.round(upgradeGoldCost(Math.max(1, lv)) * monthlyEventBonus(monthlyEventForDate().id).upgradeCostMul);
   const fr = upgradeFragCost(Math.max(1, lv));
   const have = save.frags[def.id] || 0;
   const inLine = save.lineup.includes(def.id);

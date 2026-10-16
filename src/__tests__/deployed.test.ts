@@ -148,6 +148,11 @@ describe("published build (index.html)", () => {
       "Grave Bloom",
       "Rift Colossus",
       "SALVAGED FROM THE RUN",
+      // monthly events and the balance pass
+      "MONTHLY EVENT",
+      "New Year Arsenal",
+      "Winter Festival",
+      "ELITE",
     ];
     const missing = markers.filter((m) => !html.includes(m));
     expect(missing, `published bundle is missing: ${missing.join(", ")}`).toHaveLength(0);

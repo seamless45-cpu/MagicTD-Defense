@@ -19,6 +19,12 @@ import {
   ASC_DMG_MUL,
   towerDamage,
   SP_BASE_COST,
+  ASC_BASE_COST,
+  ascSpCost,
+  killSp,
+  monthlyEventForDate,
+  monthlyEventBonus,
+  type MonthlyBonus,
   spCost,
   spawnBudget,
   REWARD_MUL,
@@ -81,6 +87,8 @@ import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon,
  */
 const LIVE_EVENT = eventForDate();
 const EV_BONUS = eventBonus(LIVE_EVENT.id);
+const LIVE_MONTH = monthlyEventForDate();
+const MONTH_BONUS: MonthlyBonus = monthlyEventBonus(LIVE_MONTH.id);
 
 // ---------- board geometry ----------
 const W = 1000;
@@ -169,6 +177,8 @@ interface Enemy {
   lives: number;
   gold: number;
   spv: number;
+  /** elite variant: tougher, pays 5x sp and drops double gold */
+  elite?: boolean;
   dead: boolean;
   wob: number;
   /** slow strength (0..0.9) while slowT > 0 */
@@ -688,7 +698,12 @@ export default function Battle({
     // ---------- the upgraded FX kit ----------
     const PART_CAP = 620;
     const pushPart = (p: Part) => {
-      if (g.parts.length > PART_CAP) g.parts.shift();
+      if (g.parts.length > PART_CAP) {
+        // skip rather than pile on: the additive pass is the expensive one,
+        // so once the field is saturated new glow/shock FX are simply dropped
+        if (p.add) return;
+        g.parts.shift();
+      }
       g.parts.push(p);
     };
 
@@ -820,14 +835,25 @@ export default function Battle({
      * a gold spark storm, star sparkles, spinning debris, an impact flash, a
      * freeze-frame, camera punch and a colour split.
      */
+    /** crit FX are throttled: a wall of small crits may only fire one full
+        starburst every 55ms (big tiers always fire), which is what kept dense
+        late-game fights from turning into a lag spike. */
+    let lastCritFxAt = 0;
     const critFx = (_e: Enemy, p: { x: number; y: number }, tier: number, mul: number, _dmg: number, tw?: BT) => {
       void mul;
       const heavy = tier >= 3;
+      const nowFx = performance.now();
+      if (!heavy && nowFx - lastCritFxAt < 55) {
+        // the cheap spark for the crits we skip: keeps the beat without the cost
+        ring(p.x, p.y, "#ffd23f", 30);
+        return;
+      }
+      lastCritFxAt = nowFx;
       const gold = tier >= 4 ? "#fff6c4" : tier >= 3 ? "#fff2b0" : "#ffd23f";
-      // --- the starburst itself
-      burst(p.x, p.y, gold, tier >= 4 ? 34 : tier >= 3 ? 24 : tier >= 2 ? 16 : 10, tier >= 3 ? 380 : 250);
-      burst(p.x, p.y, "#ff8c3d", tier >= 2 ? 12 : 5, 180);
-      // --- layered shockwaves: three rings at staggered radii
+      // --- the starburst itself (counts trimmed ~40% vs the old wall of sparks)
+      burst(p.x, p.y, gold, tier >= 4 ? 22 : tier >= 3 ? 16 : tier >= 2 ? 11 : 7, tier >= 3 ? 380 : 250);
+      burst(p.x, p.y, "#ff8c3d", tier >= 2 ? 8 : 4, 180);
+      // --- layered shockwaves: rings at staggered radii
       shock(p.x, p.y, gold, tier >= 4 ? 74 : tier >= 3 ? 58 : 42, 0.5);
       ring(p.x, p.y, gold, tier >= 3 ? 62 : 44);
       if (tier >= 2) ring(p.x, p.y, "#ff8c3d", tier >= 3 ? 88 : 64);
@@ -836,8 +862,8 @@ export default function Battle({
         glow(p.x, p.y, "#ffd23f", tier >= 4 ? 150 : 110, 0.5);
       }
       // --- debris + sparkles
-      if (tier >= 2) shards(p.x, p.y, gold, tier >= 4 ? 20 : tier >= 3 ? 14 : 8, tier >= 3 ? 320 : 220);
-      stars(p.x, p.y, gold, tier >= 4 ? 22 : tier >= 3 ? 14 : 7, tier >= 3 ? 90 : 54);
+      if (tier >= 2) shards(p.x, p.y, gold, tier >= 4 ? 14 : 10, tier >= 3 ? 320 : 220);
+      stars(p.x, p.y, gold, tier >= 4 ? 14 : tier >= 3 ? 10 : 5, tier >= 3 ? 90 : 54);
       // --- a lance of light back to the tower that threw it
       if (tw?.cell && g.bolts.length < 44) {
         const tp = cellCenter(tw.cell.c, tw.cell.r);
@@ -859,7 +885,7 @@ export default function Battle({
 
     const summonCost = () => spCost(g.spSpend);
     /** ascent has its own price ladder so summoning never price-gouges upgrades */
-    const ascCost = () => spCost(g.ascSpend);
+    const ascCost = () => ascSpCost(g.ascSpend);
 
     const startWave = () => {
       g.phase = "wave";
@@ -903,8 +929,8 @@ export default function Battle({
 
       g.final = {
         won,
-        gold: Math.round(baseGold * EV_BONUS.goldMul),
-        gems: Math.round(baseGems * EV_BONUS.gemMul),
+        gold: Math.round(baseGold * EV_BONUS.goldMul * MONTH_BONUS.goldMul),
+        gems: Math.round(baseGems * EV_BONUS.gemMul * MONTH_BONUS.gemMul),
         tokens: mode === "endless" ? endlessTokens : 0,
         frags,
         rounds,
@@ -918,10 +944,15 @@ export default function Battle({
     const killReward = (e: Enemy) => {
       e.dead = true;
       g.kills++;
+      // sp payout: 10 base, elites x5, bosses x10, then the monthly sp modifier
       g.sp += e.spv;
-      g.gold += e.gold;
+      g.gold += Math.round(e.gold * MONTH_BONUS.goldMul);
       const p = enemyPos(e);
       const et = ENEMY_TYPES[e.type];
+      if (e.elite) {
+        addText(p.x, p.y - 30, "ELITE KILL", "#ffd23f", 13, true);
+        ring(p.x, p.y, "#ffd23f", 40);
+      }
       // death now pops: a shock ring, hot core glow and spinning debris
       burst(p.x, p.y, et.color, 14, 200);
       shock(p.x, p.y, et.color, isBossType(e.type) ? 44 : 20, isBossType(e.type) ? 0.8 : 0.45);
@@ -996,8 +1027,8 @@ export default function Battle({
       const p = enemyPos(e);
       if (crit) {
         critFx(e, p, critTier, runCritMul, dmg, opt.tw);
-      } else if (fxOn()) {
-        // ordinary hits keep a modest pop so crits still stand out
+      } else if (fxOn() && Math.random() < 0.35) {
+        // ordinary hits keep a modest pop (on a sample of hits) so crits still stand out
         pushPart({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.22, max: 0.22, size: 26, color: opt.color || "#ffffff", kind: "shock", add: true });
       }
       if (saveRef.current.dmgNums) {
@@ -1039,6 +1070,21 @@ export default function Battle({
             const extra = Math.round(e.gold * goldMul);
             g.gold += extra;
             addText(p.x, p.y - 34, `+${extra}`, "#ffcf4d", 12, false);
+          }
+          // leech awakenings: kills claw lives back
+          let heal = 0;
+          for (const slot of [0, 1] as const) {
+            const spec = awkSpec(opt.tw, slot);
+            if (!spec || spec.fx !== "leech") continue;
+            const tier = awkTier(opt.tw, slot);
+            if (tier > 0 && Math.random() < spec.chance[tier - 1]) heal += spec.mult[tier - 1];
+          }
+          if (heal > 0) {
+            const n = Math.max(1, Math.round(heal));
+            g.lives += n;
+            glow(p.x, p.y, "#8effc4", 56, 0.4);
+            addText(p.x, p.y - 22, `+${n} LIVES`, "#8effc4", 12, false);
+            sfx.point();
           }
         }
         killReward(e);
@@ -1275,6 +1321,17 @@ export default function Battle({
       if (heavy > 0) {
         addText(ep.x, ep.y - 40, "LOADED", "#fff2b0", 12, true);
         glow(p.x, p.y, "#fff2b0", 46, 0.3);
+      }
+      // awakening procs leave a mark: the proc's own colour and its name
+      if (forceCrit) {
+        const spec0 = awkSpec(t, 0)?.fx === "critup" ? awkSpec(t, 0) : awkSpec(t, 1);
+        addText(p.x, p.y - 34, (spec0?.name || "HOLLOW POINT").toUpperCase(), "#ffd23f", 11, false);
+        glow(p.x, p.y, "#ffd23f", 34, 0.25);
+      }
+      if (extraShots > 0) {
+        const spec1 = awkSpec(t, 1)?.fx === "volley" ? awkSpec(t, 1) : awkSpec(t, 0);
+        addText(p.x, p.y - 48, (spec1?.name || "VOLLEY").toUpperCase(), "#c9a7ff", 11, false);
+        glow(p.x, p.y, "#c9a7ff", 38, 0.25);
       }
       const push = (proj: Partial<Proj>, at: { x: number; y: number } = ep, onto: Enemy = target) => {
         g.projs.push({
@@ -2536,12 +2593,15 @@ export default function Battle({
         while (g.spawnQ.length && g.spawnQ[0].at <= g.t) {
           const s = g.spawnQ.shift()!;
           const et = ENEMY_TYPES[s.type];
-          const hp = roundHp(g.round) * et.hpMul * EV_BONUS.hpMul;
           const boss = isBossType(s.type);
+          // elites: tougher variants with a golden sigil, 5x sp and double gold
+          const elite = !boss && Math.random() < Math.min(0.35, 0.06 + g.round * 0.015);
+          const hp = roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? 2.2 : 1);
           g.enemies.push({
-            id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012), type: s.type,
-            frozen: 0, stun: 0, armor: et.armor, lives: et.lives, gold: et.gold + Math.floor(g.round / 2),
-            spv: 6 + g.round * 2 + (boss ? 40 : 0), dead: false, wob: Math.random() * 7,
+            id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012) * (elite ? 1.08 : 1), type: s.type,
+            elite,
+            frozen: 0, stun: 0, armor: et.armor, lives: et.lives, gold: (et.gold + Math.floor(g.round / 2)) * (elite ? 2 : 1),
+            spv: Math.round(killSp(elite, boss) * MONTH_BONUS.spMul), dead: false, wob: Math.random() * 7,
             slow: 0, slowT: 0, burnT: 0, burnDps: 0,
             summonCd: BOSS_SUMMON_CD, blinkCd: BOSS_BLINK_CD, wardCd: BOSS_WARD_CD, ward: 0,
             nullCd: BOSS_NULL_CD, devourCd: BOSS_DEVOUR_CD, meteorCd: BOSS_METEOR_CD,
@@ -2619,12 +2679,12 @@ export default function Battle({
               const et0 = ENEMY_TYPES[0];
               const nSum = 2 + (g.round >= 16 ? 1 : 0);
               for (let i = 0; i < nSum; i++) {
-                const hp = roundHp(g.round) * et0.hpMul * 0.6;
+                const hp = roundHp(g.round) * et0.hpMul * MONTH_BONUS.hpMul * 0.6;
                 const back = Math.max(0, e.d - 30 - i * 26);
                 g.enemies.push({
                   id: eidC++, d: back, hp, max: hp, speed: et0.speed * (1 + g.round * 0.012) * 1.25, type: 0,
                   frozen: 0, stun: 0, armor: 0, lives: 1, gold: et0.gold + Math.floor(g.round / 4),
-                  spv: 4 + g.round, dead: false, wob: Math.random() * 7,
+                  spv: killSp(false, false), dead: false, wob: Math.random() * 7,
                   slow: 0, slowT: 0, burnT: 0, burnDps: 0,
                   summonCd: 0, blinkCd: 0, wardCd: 0, ward: 0,
                   nullCd: 0, devourCd: 0, meteorCd: 0, chainsCd: 0, warpCd: 0, link: 0,
@@ -4213,6 +4273,31 @@ export default function Battle({
       const cycle = now / 1000 * et.bobRate * 6 + e.wob;
       const bob = Math.sin(cycle) * (et.shape === "slime" ? 0 : 2);
       const R = et.r;
+
+      // elites walk inside a golden rift sigil so they read at a glance
+      if (e.elite) {
+        ctx.save();
+        ctx.globalAlpha = 0.5 + 0.22 * Math.sin(cycle * 1.6);
+        ctx.strokeStyle = "#ffd23f";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.ellipse(p.x, p.y + R * 0.72, R * 1.5, R * 0.55, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 0.28;
+        ctx.lineWidth = 7;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        const hy = p.y - R - 15 + Math.sin(cycle * 1.4) * 2.5;
+        ctx.fillStyle = "#ffd23f";
+        ctx.beginPath();
+        ctx.moveTo(p.x, hy - 7);
+        ctx.lineTo(p.x + 5.5, hy);
+        ctx.lineTo(p.x, hy + 7);
+        ctx.lineTo(p.x - 5.5, hy);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
 
       // ground shadow, squashed with the bob so the step reads as weight
       ctx.save();
@@ -5871,7 +5956,7 @@ export default function Battle({
 
   const g = gRef.current;
   const cost = g ? spCost(g.spSpend) : SP_BASE_COST;
-  const ascentCost = g ? spCost(g.ascSpend) : SP_BASE_COST;
+  const ascentCost = g ? ascSpCost(g.ascSpend) : ASC_BASE_COST;
 
   /**
    * ASCENT is a button on the tower itself now — no dragging.

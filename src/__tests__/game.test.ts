@@ -34,6 +34,14 @@ import {
   HERO_BY_ID,
   MAX_POINTS,
   SPAWN_BUDGET_TOWERS,
+  SP_BASE_COST,
+  SP_COST_STEP,
+  ascSpCost,
+  killSp,
+  MONTHLY_EVENTS,
+  monthlyEventForDate,
+  monthlyEventBonus,
+  BASE_MONTHLY_BONUS,
   REWARD_MUL,
   spCost,
   spawnBudget,
@@ -481,6 +489,60 @@ describe("balance patch", () => {
     expect(opening).toBe(spCost(0) + spCost(1) + spCost(2) + spCost(3));
     // a fifth summon is out of reach until round rewards land
     expect(opening).toBeLessThan(spCost(0) + spCost(1) + spCost(2) + spCost(3) + spCost(4));
+  });
+
+  it("prices summons at 100 SP and +10 per summon", () => {
+    expect(SP_BASE_COST).toBe(100);
+    expect(SP_COST_STEP).toBe(10);
+    expect([0, 1, 2, 3, 4].map(spCost)).toEqual([100, 110, 120, 130, 140]);
+    expect(spawnBudget()).toBe(460);
+    // ascent keeps its own steeper ladder so cheap summons don't cheapen it
+    expect([0, 1, 2].map(ascSpCost)).toEqual([120, 195, 270]);
+    // the ascent ladder climbs 75 per press against the summon ladder's 10
+    expect(ascSpCost(1) - ascSpCost(0)).toBeGreaterThan(spCost(1) - spCost(0));
+    expect(ascSpCost(2)).toBeGreaterThan(spCost(8));
+  });
+
+  it("pays 10 SP per kill, 5x for elites and 10x for bosses", () => {
+    expect(killSp(false, false)).toBe(10);
+    expect(killSp(true, false)).toBe(50);
+    expect(killSp(false, true)).toBe(100);
+  });
+
+  it("cuts task rewards by 10% and tower upgrade gold by 5%", () => {
+    // gold/gems per task are exactly the old values x 0.9
+    const before: Record<string, [number, number]> = {
+      play: [2500, 40],
+      win: [6000, 120],
+      waves: [4000, 70],
+      kills: [4500, 80],
+      skill: [2000, 50],
+      upgrade: [3000, 60],
+      chests: [2500, 55],
+      spend: [1500, 90],
+    };
+    for (const t of DAILY_TASKS) {
+      const [g0, m0] = before[t.id];
+      expect(t.gold, t.id + " gold").toBe(Math.round(g0 * 0.9));
+      expect(t.gems, t.id + " gems").toBe(Math.round(m0 * 0.9));
+    }
+    for (const lv of [1, 2, 3, 10, 15]) {
+      expect(upgradeGoldCost(lv)).toBe(Math.round(50 * Math.pow(1.5, lv - 1) * 0.95));
+    }
+  });
+
+  it("runs one monthly event per calendar month with real perks", () => {
+    expect(MONTHLY_EVENTS).toHaveLength(12);
+    for (let m = 0; m < 12; m++) {
+      const ev = monthlyEventForDate(new Date(2026, m, 15));
+      expect(ev.month, "month " + m).toBe(m);
+      const b = monthlyEventBonus(ev.id);
+      const live =
+        b.upgradeCostMul !== 1 || b.spMul !== 1 || b.hpMul !== 1 || b.goldMul !== 1 || b.gemMul !== 1 || b.fragBias > 0 || b.chestFragBonus > 0;
+      expect(live, ev.id + " perk is a real number").toBe(true);
+    }
+    // stacking with the weekday event never changes the baseline
+    expect(BASE_MONTHLY_BONUS).toEqual({ goldMul: 1, gemMul: 1, spMul: 1, hpMul: 1, upgradeCostMul: 1, fragBias: 0, chestFragBonus: 0 });
   });
 
   it("gives each wave two more enemies than before", () => {
