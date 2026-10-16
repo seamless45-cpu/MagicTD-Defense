@@ -131,6 +131,8 @@ export interface SaveData {
   maxFps: number;
   /** draw between sim steps for smoother motion */
   frameInterp: boolean;
+  /** effects budget: 0 = everything, 1 = reduced, 2 = minimal */
+  fxq: number;
   /** camera shake on explosions */
   shakeFx: boolean;
   /** grid + range guides on the battlefield */
@@ -210,6 +212,7 @@ export function defaultSave(): SaveData {
     dmgNums: true,
     maxFps: 0,
     frameInterp: true,
+    fxq: 0,
     shakeFx: true,
     guides: true,
     fastWaves: false,

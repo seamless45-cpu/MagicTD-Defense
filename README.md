@@ -123,10 +123,13 @@ Heroes level up to 10 with gold — each level adds 30% ability power and shaves
 ### Summoning and ascent
 
 The battlefield starts **empty**. You get enough SP at the start of a run to summon exactly
-**four towers** (120 / 195 / 270 / 345 SP), and each summon is paid for out of that pool before the
-first wave arrives. Towers are never placed for free, and **towers no longer earn points on their
-own** — points only come from merging two equally levelled towers or buying Point Surge in the run
-shop.
+**four towers** (100 / 110 / 120 / 130 SP — the opening pool is 460), and each summon is paid for out
+of that pool before the first wave arrives. Towers are never placed for free, and **towers no longer
+earn points on their own** — points only come from merging two equally levelled towers or buying
+Point Surge in the run shop.
+
+**Ascent** runs on its own, steeper ladder: the first press of a run costs **100 SP** and every press
+after that costs **100 more** (100 / 200 / 300 / …), so cheap summons never cheapen an upgrade.
 
 Towers spawn **only** through the random-grid summon — there is no combined spawn-and-upgrade path,
 and no top-of-screen board duplicating the loadout: the HUD is a single compact row of currency
@@ -145,8 +148,9 @@ ladders, so spamming summons never price-gouges your upgrades.
 - **Shop:** chests give gold + tower fragments; rarer chests can also drop gems and tokens.
 - **Towers:** fragments unlock locked towers (Arrow/Cannon/Ice Cube start unlocked), upgrade menu
   levels 1→15, and `Ascent All` raises every unlocked tower by one level for gold.
-- **Awakenings:** exotic legendary towers (Lightning Princess, Hellstorm) have two awakening tracks
-  that cost Magic Tokens, unlock at menu level 10 / 15 and go up to tier V.
+- **Awakenings:** **every tower in the roster** has two awakening tracks (34 of them are exotic and
+  read as such), costing Magic Tokens, unlocking at menu level 10 / 15 and climbing to tier V. Each
+  panel spells its own tiers out: "+12% crit rate", "40% of boss max HP every 2.5s", and so on.
 - Progress saves to `localStorage` under `magictd_save_v1`; Settings → Reset Progress wipes it.
 
 ### Daily Rewards (resets at 07:00)
@@ -272,6 +276,9 @@ counters, a roster pulled from the ladder, and a chat you can post in.
 | Grave Bloom | Legendary | Heavy percent-of-max-HP strikes on the wounded, and a purse for every kill (Grave Tithe, Bloom Offering) |
 | Rift Colossus | Legendary | Slow siege shells that **shatter armour** on impact and flatten a whole cell (Siege Core, Colossus Rage) |
 | Clone | Legendary | Drag any equal-point tower onto it to **copy** that tower — the original stays. Awakened: Super Clone (any points + +200% attack speed), Perfect Replica (bonus point) |
+| Demon Execution | Legendary | Every 5s a red bolt executes normal enemies outright and tears 50% of a boss's **maximum** health (Rapid Strike, Demon Ritual) |
+| Heavenly God | Legendary | A lightning laser that punches down the lane, burning five enemies behind the target for 50% (Positive Lightning, Super Charged Ray) |
+| Honor Emperor | Legendary | Drop it on a tower sitting on matching points and that tower grows a point — the Emperor is consumed, never merged away (Honor Blessing, Super Bless) |
 
 ## Mailbox
 
@@ -623,3 +630,36 @@ enemies, with Overpenetration and Rail Burn awakenings).
 - **Unique sound per tower and per skill** — ten new `sfx.shoot` voices (blade slice, siege thump,
   fire bloom, gate grind, ball lightning, glass ping, scythe swing, sand grit, heart-throb, venom
   glop) plus the `blast1/2/3` skill family and an `onKill` payout chime.
+
+## Awakenings for the whole roster, the demon court and energy targeting
+
+- **Every tower is awakenable.** The preview panel used to render its two awakening tracks only for
+  exotic towers, which left 27 towers showing a dead "no awakening paths yet" panel even though they
+  had full five-tier specs. The gate is gone: all **61** towers show both tracks, their tier lines and
+  their Magic Token prices, and the effects behind them were already wired into the engine (generic
+  on-hit tags like burn/volley/freeze/chain plus the bespoke kits).
+- **Three new legendaries** — **Demon Execution**, **Heavenly God** and **Honor Emperor** — with
+  their own canvas art, projectile art, menu icons, sounds and two five-tier awakenings each
+  (see the tower table above for the kits).
+- **Energy targeting: no more range limit.** Towers used to be limited to a 236px bubble around
+  their cell. The grid feeds every tower now, so a shot simply picks the enemy **furthest down the
+  lane** and the distance never matters. The guide overlay was rebuilt for it: instead of a ring per
+  tower there is one arena-wide dashed energy field plus a dashed tether from each tower to the front
+  enemy, so you can see who is shooting whom at a glance.
+- **Ascent repriced.** 100 SP for the first press of a run, +100 for every press after — a deliberate
+  sink that keeps summons (100 + 10 each) cheap to spam.
+- **Mana Conduit** joins the run shop: +10% SP from every kill and wave clear for the rest of the run,
+  up to +100% (ten purchases, each one pricier than the last). It applies to kill payouts, bounty
+  awakenings and the wave-clear bonus, and the toast shows the multiplied number.
+- **Merging is a roulette again.** A same-point pair fuses into a **random unlocked tower** that is
+  not one of the two you merged (points still go up by one), so fusing is a way to reroll your board
+  into something new. Honor Emperor is the exception: it hands its point to the tower it is dropped
+  on and leaves that tower standing.
+- **Crit FX no longer melt the frame.** On top of the earlier throttle, the engine now measures how
+  long each `draw()` actually took and slides a quality factor between 1.0 and 0.4: when frames run
+  long the crit throttle stretches (90ms → 300ms), particle bursts scale down, the lance back to the
+  tower is dropped, the starburst behind damage numbers goes, and the expensive full-screen drama —
+  colour-split post pass, screen flash, camera punch, freeze-frame — is rationed to at most one every
+  260ms (nothing at all while throttled, unless it is a top-tier crit). It recovers the moment the
+  frame is cheap again. Settings also exposes the manual version: **Effect Quality → ALL / REDUCED /
+  MINIMAL**.

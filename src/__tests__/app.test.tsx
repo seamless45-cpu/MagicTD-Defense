@@ -536,6 +536,14 @@ describe("Frame settings", () => {
     const was = saved().frameInterp;
     click(knob);
     await waitFor(() => saved().frameInterp === !was, "interpolation flipped");
+
+    // effect quality is the manual version of what the frame governor does on
+    // its own: ALL -> REDUCED -> MINIMAL, saved with the rest of the options
+    const fxq = await waitFor(() => document.querySelector('[data-testid="fxq-row"]'), "effect quality row");
+    click(fxq.querySelector('[data-testid="fxq-1"]') as HTMLElement);
+    await waitFor(() => saved().fxq === 1, "effect quality saved");
+    click(fxq.querySelector('[data-testid="fxq-0"]') as HTMLElement);
+    await waitFor(() => saved().fxq === 0, "effect quality back to all");
     noErrors();
     unmountApp();
   });
@@ -1089,6 +1097,72 @@ describe("Battle", () => {
     await waitFor(() => byText("div", "Command Center"), "back home");
     noErrors();
   });
+
+  it("sells SP gain in the battle shop and banks the multiplier", async () => {
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+
+    click(document.querySelector('[data-testid="battle-shop"]') as HTMLElement);
+    const shop = await waitFor(
+      () => document.querySelector('[data-testid="run-shop"]') as HTMLElement,
+      "run shop modal"
+    );
+    expect(shop.textContent).toContain("Mana Conduit");
+    expect(shop.textContent).toContain("0/10 bought");
+
+    // 120 run gold buys the first level of the multiplier
+    const row = Array.from(shop.querySelectorAll(".row-card")).find((r) =>
+      (r.textContent || "").includes("Mana Conduit")
+    ) as HTMLElement;
+    click(row.querySelector("button") as HTMLElement);
+    await waitFor(() => /1\/10 bought/.test(shop.textContent || ""), "first SP gain level bought");
+    noErrors();
+    click(byText("button", "Back to battle")!);
+    await waitFor(() => !document.querySelector('[data-testid="run-shop"]'), "shop closed");
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+    unmountApp();
+  });
+
+  it("runs the three new legendaries on the board without errors", async () => {
+    // all three unlocked and leading the rotation, so every summon that lands
+    // has a chance of being one of the new kits
+    const seed = defaultSave();
+    seed.levels = { ...(seed.levels || {}), demon: 1, heavenly: 1, honor: 1 };
+    seed.lineup = ["demon", "heavenly", "honor"];
+    persistSave(seed);
+
+    await mountApp();
+    startMode("Battle");
+    const summon = await waitFor(
+      () => document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement,
+      "battle HUD"
+    );
+    const boardCount = () =>
+      Number((document.querySelector('[data-testid="towers-on-board"]')!.textContent || "0").replace(/[^\d]/g, ""));
+
+    for (let i = 0; i < 3; i++) {
+      click(summon);
+      await sleep(150);
+    }
+    await waitFor(() => boardCount() === 3, "three towers deployed");
+
+    // let them shoot: the demon bolt is on a timer and the heavenly laser
+    // pierces whatever it lands on, so a few seconds covers both
+    const before = canvasStats.calls;
+    const sp = () =>
+      Number((document.querySelector('[data-testid="sp-chip"]')?.textContent || "0").replace(/[^\d]/g, ""));
+    const afterSummons = sp(); // 460 opening budget minus three summons
+    // SP only ever comes from kills and wave clears, and these towers are on the
+    // far side of the board half the time: income proves distance never blocks a
+    // shot any more
+    await waitFor(() => sp() > afterSummons, "kills paying SP with no range limit", 16000);
+    expect(canvasStats.calls, "engine kept rendering").toBeGreaterThan(before);
+    noErrors();
+    unmountApp();
+  }, 30000);
 
   it("boots endless mode with no wave cap", async () => {
     await mountApp();

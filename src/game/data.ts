@@ -58,6 +58,9 @@ export type TowerKind =
   | "dragon"
   | "sun"
   | "clone"
+  | "demon"
+  | "heavenly"
+  | "honor"
   | "gale"
   | "bombardment"
   | "wildfire"
@@ -103,6 +106,8 @@ export interface AwkSpec {
   mult2?: number[]; // secondary magnitude per tier
   /** engine hook — absent means the tower has bespoke handling in Battle.tsx */
   fx?: AwkFx;
+  /** bespoke kits describe their own tier line (share, seconds, points…) */
+  fmt?: (mult: number, mult2: number | undefined) => string;
 }
 
 /**
@@ -209,6 +214,21 @@ export interface TowerDef {
   lava?: boolean;
   /** active skill key (see skills.ts); the tower auto-casts it on a cooldown */
   skill?: string;
+  /** Demon Execution: seconds between executioner strikes (base, un-awakened) */
+  execCd?: number;
+  /** Demon Execution: share of a boss's maximum health the strike tears off */
+  execBossHp?: number;
+  /** Heavenly God: how many enemies behind the target the laser also burns */
+  laserBehind?: number;
+  /** Heavenly God: damage share the enemies behind the target take */
+  laserBehindMul?: number;
+  /** Heavenly God: bolts + points + attack surge handed out by a merge */
+  mergeBolts?: number;
+  mergePoints?: number;
+  mergeBuff?: number;
+  mergeBuffT?: number;
+  /** Honor Emperor: dragging it onto a matching tower grows a point instead of merging */
+  honor?: boolean;
   /** support towers: how far a pulse drags enemies back along the path */
   pull?: number;
   upPull?: number;
@@ -901,6 +921,76 @@ export const TOWERS: TowerDef[] = [
     awk1: awking("Corrosive", "burn", "Chance to spit a far more corrosive venom.", [0.3, 1], [0.5, 2.2]),
     awk2: awking("Toxic Bloom", "splash", "Chance the venom pools far wider.", [0.25, 1], [0.3, 1.1]),
   },
+  // ---------- mythic arsenal IV: the demon court, the heavens and the throne ----------
+  {
+    id: "demon", name: "Demon Execution", rarity: "legendary", kind: "demon", art: "demon", accent: "#ff2b3d",
+    target: "all", exotic: true, unlockFrags: 1,
+    desc: "Every 5 seconds it calls a red executioner's bolt down on the lane: normal enemies die where they stand, and a boss loses half of its maximum health.",
+    dmg: 0, upDmg: 0, ascDmg: 0, rate: 5, upRate: 0, ascRate: 0,
+    aspd: 0.02, upAspd: 0.005, ascAspd: 0.008,
+    execCd: 5, execBossHp: 0.5,
+    awk1: {
+      name: "Rapid Strike",
+      desc: "The execution falls every 2.5 seconds and bites deeper — up to 75% of a boss's maximum health. Every merge whips the altar into a frenzy: 35% off the timer for 5 seconds.",
+      chance: [1, 1, 1, 1, 1],
+      mult: [0.55, 0.6, 0.65, 0.7, 0.75],
+      mult2: [2.5, 2.4, 2.3, 2.2, 2.1],
+      fmt: (m, m2) => `${Math.round(m * 100)}% of boss max HP · every ${m2}s`,
+    },
+    awk2: {
+      name: "Demon Ritual",
+      desc: "A bolt that lands on a boss imprisons it for 8 seconds — its skills are sealed — and leaves it bleeding for 4% of its maximum health every half second, for 4.5 seconds.",
+      chance: [1, 1, 1, 1, 1],
+      mult: [8, 9, 10, 11, 12],
+      mult2: [0.04, 0.04, 0.04, 0.04, 0.04],
+      fmt: (m, m2) => `imprisoned ${m}s · bleed ${Math.round((m2 || 0) * 1000) / 10}% a tick`,
+    },
+  },
+  {
+    id: "heavenly", name: "Heavenly God", rarity: "legendary", kind: "heavenly", art: "heavenly", accent: "#ffe86b",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Fires a lightning laser that punches down the lane — five enemies behind the target take 50% damage. Merging blesses two random towers with points and a surge.",
+    dmg: 470, upDmg: 13, ascDmg: 17, rate: 0.95, upRate: 0.02, ascRate: 0.025,
+    aspd: 0.06, upAspd: 0.012, ascAspd: 0.018,
+    laserBehind: 5, laserBehindMul: 0.5,
+    mergeBolts: 2, mergePoints: 2, mergeBuff: 3, mergeBuffT: 13,
+    awk1: {
+      name: "Positive Lightning",
+      desc: "40% chance a merge forks 1-3 extra bolts onto random towers: an extra point each and a 500% attack and attack-speed surge.",
+      chance: [0.4, 0.4, 0.4, 0.4, 0.4],
+      mult: [1, 1, 2, 2, 3],
+      mult2: [5, 5, 5, 5, 5],
+      fmt: (m, m2) => `+${m} bolt${m === 1 ? "" : "s"} · +${Math.round((m2 || 0) * 100)}% attack & speed`,
+    },
+    awk2: {
+      name: "Super Charged Ray",
+      desc: "10% chance a laser hit superheats the air around the target to 40,000°C — everything nearby detonates in a supersonic shockwave.",
+      chance: [0.1, 0.1, 0.1, 0.1, 0.1],
+      mult: [110, 125, 145, 165, 190],
+      fmt: (m) => `${Math.round(m)} range · anything inside is vaporised`,
+    },
+  },
+  {
+    id: "honor", name: "Honor Emperor", rarity: "legendary", kind: "honor", art: "honor", accent: "#ffd76a",
+    target: "front", exotic: true, unlockFrags: 1, honor: true,
+    desc: "Drag it onto a tower sitting on matching points and that tower grows a point instead of merging away — the Emperor himself is consumed.",
+    dmg: 280, upDmg: 8, ascDmg: 11, rate: 0.8, upRate: 0.015, ascRate: 0.02,
+    aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
+    awk1: {
+      name: "Honor Blessing",
+      desc: "16% chance the honored tower grows a second point from the same ceremony.",
+      chance: [0.16, 0.16, 0.16, 0.16, 0.16],
+      mult: [1, 1, 1, 1, 1],
+      fmt: (m) => `16% chance of +${m} extra point`,
+    },
+    awk2: {
+      name: "Super Bless",
+      desc: "Every honored tower keeps +15% attack and attack speed permanently for the rest of the run.",
+      chance: [1, 1, 1, 1, 1],
+      mult: [0.15, 0.15, 0.15, 0.15, 0.15],
+      fmt: (m) => `+${Math.round(m * 100)}% attack & attack speed, permanent`,
+    },
+  },
 ];
 
 /** tower id -> art family used by the canvas + the menu icon */
@@ -922,9 +1012,10 @@ export const ASC_DMG_MUL = 1.55; // every battle level multiplies damage
 export const MAX_POINTS = 8;
 export const SP_BASE_COST = 100;
 export const SP_COST_STEP = 10;
-/** ascension keeps its own, steeper ladder so cheap summons don't cheapen it */
-export const ASC_BASE_COST = 120;
-export const ASC_COST_STEP = 75;
+/** ascension starts at 100 SP and climbs 100 a press — a deliberate sink that
+ *  keeps summoning cheap and makes every in-battle upgrade a real decision */
+export const ASC_BASE_COST = 100;
+export const ASC_COST_STEP = 100;
 
 /**
  * Towers never earn points on their own — the only sources are the Point Surge
@@ -1165,6 +1256,7 @@ export const RUN_SHOP: RunShopItem[] = [
   { id: "critrate", name: "Keen Sight", desc: "+5% crit rate for the rest of the run", cost: 110, step: 1.3, max: 10 },
   { id: "critdmg", name: "Killing Edge", desc: "+15% crit damage for the rest of the run", cost: 110, step: 1.3, max: 10 },
   { id: "sp", name: "Mana Battery", desc: "Instantly gain 150 SP", cost: 60, step: 1.15, max: 20 },
+  { id: "spgain", name: "Mana Conduit", desc: "+10% SP from every kill and wave clear for the rest of the run", cost: 120, step: 1.32, max: 10 },
   { id: "life", name: "Ward Stone", desc: "+3 lives for the rest of the run", cost: 140, step: 1.3, max: 20 },
   { id: "points", name: "Point Surge", desc: "+2 points on a random tower", cost: 130, step: 1.3, max: 20 },
   { id: "hero", name: "Hero Sigil", desc: "Reset your hero's cooldown right now", cost: 80, step: 1.2, max: 20 },

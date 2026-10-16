@@ -2276,6 +2276,30 @@ export function SettingsModal({
             ))}
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="fxq-row">
+          <SetIcon name="bolt" color="#ffd23f" />
+          <div className="min-w-[130px] flex-1">
+            <div className="font-bold">Effect Quality</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">How heavy crits and explosions get — the game also eases off on its own when frames run long</div>
+          </div>
+          <div className="flex w-full flex-wrap gap-1.5 sm:w-auto">
+            {([0, 1, 2] as const).map((lvl) => (
+              <button
+                key={lvl}
+                data-testid={"fxq-" + lvl}
+                className={"chip chip-btn" + (save.fxq === lvl ? " on" : "")}
+                onClick={() => {
+                  sfx.uiTab();
+                  mutate((s) => {
+                    s.fxq = lvl;
+                  });
+                }}
+              >
+                {lvl === 0 ? "ALL" : lvl === 1 ? "REDUCED" : "MINIMAL"}
+              </button>
+            ))}
+          </div>
+        </div>
         {TOGGLES.map(([label, key, d, icon, color]) => (
           <div key={key} className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
             <SetIcon name={icon} color={color} />

@@ -109,8 +109,9 @@ const WPTS: [number, number][] = [
   [6, -0.7],
 ];
 
-/** how far a tower can reach */
-const RANGE = 236;
+/** Towers used to be limited to a 236px bubble around their cell. They are not
+ *  any more: every tower reaches the whole lane through the grid (see ENERGY
+ *  TARGETING), so the guide draws an arena-wide field instead of a range ring. */
 
 const cellCenter = (c: number, r: number) => ({ x: OX + (c + 0.5) * C, y: OY + (r + 0.5) * C });
 const isPathCell = (c: number, r: number) => c === 0 || c === 6 || r === 3;
@@ -217,6 +218,12 @@ interface Enemy {
   /** lateral offset from the path, used by the singularity pull */
   ox: number;
   oy: number;
+  /** Demon Ritual: seconds left imprisoned (boss skills are sealed) */
+  imprisonT: number;
+  /** Demon Ritual: seconds left bleeding and the share of max HP per tick */
+  bleedT: number;
+  bleedTick: number;
+  bleedPct: number;
 }
 interface BT {
   uid: number;
@@ -244,6 +251,12 @@ interface BT {
   hasteT: number;
   /** Super Clone surge: extra attack-speed multiplier (2 = +200%) */
   hasteMul: number;
+  /** Heavenly God blessing: seconds left of the merge surge */
+  surgeT: number;
+  /** Heavenly God blessing: attack + attack-speed multiplier (3 = +300%) */
+  surgeMul: number;
+  /** Honor Emperor: permanent attack/attack-speed share handed over by honors */
+  honorMul: number;
 }
 /** one vertical lightning pillar: a column from the top of the screen to the ground */
 interface Strike { x: number; y: number; life: number; max: number; width: number; color: string; seed: number }
@@ -301,6 +314,10 @@ interface Proj {
   shred?: number;
   /** a shot boosted by a Heavy-type awakening: drawn bigger */
   heavy?: boolean;
+  /** Heavenly God laser: how many enemies behind the target it also burns */
+  behind?: number;
+  /** Heavenly God laser: damage share the enemies behind the target take */
+  behindMul?: number;
   /** splash damage as a share of the shot's own damage (1 = full damage) */
   blastDmg?: number;
   /** this shot always crits (overcharged lances, fireballs) */
@@ -400,6 +417,8 @@ interface G {
   heroLv: number;
   /** shop-bought damage bonus for this run (+% as a fraction) */
   dmgBonus: number;
+  /** Mana Conduit purchases: share of extra SP from kills and wave clears */
+  spGainMul: number;
   /** Keen Sight purchases: flat crit chance added for this run */
   critRate: number;
   /** Killing Edge purchases: flat crit damage added for this run */
@@ -500,6 +519,7 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     heroId: HERO_BY_ID[save.hero] ? save.hero : "nova",
     heroLv: heroLevel(save, HERO_BY_ID[save.hero] ? save.hero : "nova"),
     dmgBonus: 0,
+    spGainMul: 0,
     critRate: 0,
     critDmg: 0,
     t: 0,
@@ -620,6 +640,21 @@ const shopRef: { current: (item: RunShopItem) => void } = { current: () => {} };
  */
 /** where in the current sim step to draw (1 = now, 0 = start of step) */
 let renderAlpha = 1;
+
+/**
+ * Frame-cost governor. Every frame we measure how long `draw()` actually took
+ * and slide a quality factor between 1 and 0.4. Dense crit storms are the one
+ * thing that can push a phone over budget, so when the frame starts costing
+ * real time the FX layer thins itself out automatically: fewer particles, a
+ * longer crit throttle, no chromatic pass and no per-hit screen flash. It
+ * recovers the moment the frame is cheap again, so a strong device never sees
+ * the difference.
+ */
+const fxGov = { avg: 5, q: 1 };
+/** player-chosen ceiling on the same scale (0 = everything, 1 = reduced, 2 = minimal) */
+let fxUserLevel = 0;
+/** how many FX we are allowed to throw this frame (1 = everything) */
+const fxQ = () => (fxUserLevel >= 2 ? 0.25 : fxUserLevel === 1 ? Math.min(fxGov.q, 0.7) : fxGov.q);
 const glowSprites = new Map<string, HTMLCanvasElement>();
 function glowSprite(color: string): HTMLCanvasElement | null {
   let c = glowSprites.get(color);
@@ -718,11 +753,15 @@ export default function Battle({
     let lastDraw = performance.now();
     let lastHud = 0;
     let boltCache: { x: number; y: number }[] = [];
+    /** last font string handed to the context, so text draw never re-parses one */
+    let lastFont = "";
 
     const fxOn = () => saveRef.current.fx;
     /** the merged crit multiplier: base + 8% for every upgrade on the account.
      *  Tower levels can't change mid-run, so this is resolved once. */
     const runCritMul = critMultiplierFrom(saveRef.current.levels);
+    /** Mana Conduit turns every SP payout up by the share bought this run */
+    const spGain = (n: number) => Math.round(n * (1 + g.spGainMul));
     /** screen shake that honours the Screen Shake setting */
     const fxShake = (n: number) => (saveRef.current.shakeFx ? Math.min(14, g.shake + n) : g.shake);
 
@@ -835,7 +874,7 @@ export default function Battle({
 
     /** full-screen colour wash */
     const flash = (color: string, life = 0.3) => {
-      if (!fxOn()) return;
+      if (!fxOn() || fxUserLevel >= 2) return;
       g.flash = { color, life, max: life };
     };
 
@@ -847,7 +886,7 @@ export default function Battle({
 
     /** camera zoom punch + chromatic split, both decay on their own */
     const punch = (n: number, chroma = 0) => {
-      if (!saveRef.current.shakeFx) return;
+      if (!saveRef.current.shakeFx || fxUserLevel >= 2) return;
       g.punch = Math.min(1, g.punch + n);
       g.chroma = Math.min(1, g.chroma + chroma);
     };
@@ -889,21 +928,29 @@ export default function Battle({
         starburst every 55ms (big tiers always fire), which is what kept dense
         late-game fights from turning into a lag spike. */
     let lastCritFxAt = 0;
+    let lastCritScreenAt = 0;
     const critFx = (_e: Enemy, p: { x: number; y: number }, tier: number, mul: number, _dmg: number, tw?: BT) => {
       void mul;
       const heavy = tier >= 3;
+      const q = fxQ();
       const nowFx = performance.now();
-      if (nowFx - lastCritFxAt < 90) {
+      // the throttle stretches as the frame gets more expensive: 90ms when the
+      // device is comfortable, up to 300ms when crits are landing on every tower
+      const window = q < 0.5 ? 300 : q < 1 ? 170 : 90;
+      if (nowFx - lastCritFxAt < window || (q < 1 && !heavy && g.parts.length > 240)) {
         // the cheap spark for the crits we skip: keeps the beat without the cost
         ring(p.x, p.y, heavy ? "#fff2b0" : "#ffd23f", heavy ? 42 : 30);
-        if (heavy) glow(p.x, p.y, "#ffd23f", 40, 0.25);
+        if (heavy && q >= 1) glow(p.x, p.y, "#ffd23f", 40, 0.25);
         return;
       }
       lastCritFxAt = nowFx;
       const gold = tier >= 4 ? "#fff6c4" : tier >= 3 ? "#fff2b0" : "#ffd23f";
-      // --- the starburst itself (counts trimmed ~40% vs the old wall of sparks)
-      burst(p.x, p.y, gold, tier >= 4 ? 22 : tier >= 3 ? 16 : tier >= 2 ? 11 : 7, tier >= 3 ? 380 : 250);
-      burst(p.x, p.y, "#ff8c3d", tier >= 2 ? 8 : 4, 180);
+      const q2 = fxQ();
+      // --- the starburst itself (counts trimmed ~40% vs the old wall of sparks,
+      //     then trimmed again whenever the governor is throttling)
+      const scale = (n: number) => Math.max(3, Math.round(n * q2));
+      burst(p.x, p.y, gold, scale(tier >= 4 ? 22 : tier >= 3 ? 16 : tier >= 2 ? 11 : 7), tier >= 3 ? 380 : 250);
+      burst(p.x, p.y, "#ff8c3d", scale(tier >= 2 ? 8 : 4), 180);
       // --- layered shockwaves: rings at staggered radii
       shock(p.x, p.y, gold, tier >= 4 ? 74 : tier >= 3 ? 58 : 42, 0.5);
       ring(p.x, p.y, gold, tier >= 3 ? 62 : 44);
@@ -913,16 +960,23 @@ export default function Battle({
         glow(p.x, p.y, "#ffd23f", tier >= 4 ? 150 : 110, 0.5);
       }
       // --- debris + sparkles
-      if (tier >= 2) shards(p.x, p.y, gold, tier >= 4 ? 14 : 10, tier >= 3 ? 320 : 220);
-      stars(p.x, p.y, gold, tier >= 4 ? 14 : tier >= 3 ? 10 : 5, tier >= 3 ? 90 : 54);
-      // --- a lance of light back to the tower that threw it
-      if (tw?.cell && g.bolts.length < 44) {
+      if (tier >= 2) shards(p.x, p.y, gold, scale(tier >= 4 ? 14 : 10), tier >= 3 ? 320 : 220);
+      stars(p.x, p.y, gold, scale(tier >= 4 ? 14 : tier >= 3 ? 10 : 5), tier >= 3 ? 90 : 54);
+      // --- a lance of light back to the tower that threw it (the single most
+      //     expensive FX in the package, so it is the first thing to go)
+      if (tw?.cell && q2 >= 0.7 && g.bolts.length < 26) {
         const tp = cellCenter(tw.cell.c, tw.cell.r);
         g.bolts.push(randBolt(tp.x, tp.y, p.x, p.y, gold, tier >= 4 ? 7 : tier >= 3 ? 5 : 3, 0.22, performance.now()));
       }
-      // --- screen-level drama
-      if (tier >= 2) flash(tier >= 4 ? "#fff2b0" : "#ffd23f", tier >= 4 ? 0.24 : 0.14);
-      if (tier >= 3) {
+      // --- screen-level drama. A full-screen flash, camera punch, freeze-frame
+      //     and colour split are the expensive part of a crit, and they stack
+      //     badly: at most one of each every 260ms, and nothing at all while
+      //     the governor is throttling unless it is a top-tier hit.
+      if (tier >= 2 && (q2 >= 1 || tier >= 4) && nowFx - lastCritScreenAt > 260) {
+        lastCritScreenAt = nowFx;
+        flash(tier >= 4 ? "#fff2b0" : "#ffd23f", tier >= 4 ? 0.24 : 0.14);
+      }
+      if (tier >= 3 && q2 >= 1) {
         punch(tier >= 4 ? 0.9 : 0.55, tier >= 4 ? 0.8 : 0.4);
         hitStop(tier >= 4 ? 0.11 : 0.06);
       }
@@ -995,8 +1049,9 @@ export default function Battle({
     const killReward = (e: Enemy) => {
       e.dead = true;
       g.kills++;
-      // sp payout: 10 base, elites x5, bosses x10, then the monthly sp modifier
-      g.sp += e.spv;
+      // sp payout: 10 base, elites x5, bosses x10, then the monthly modifier and
+      // whatever Mana Conduit share the run has bought
+      g.sp += spGain(e.spv);
       g.gold += Math.round(e.gold * MONTH_BONUS.goldMul);
       const p = enemyPos(e);
       const et = ENEMY_TYPES[e.type];
@@ -1035,10 +1090,11 @@ export default function Battle({
       }
     };
 
-    const dealDamage = (e: Enemy, raw: number, opt: { alwaysCrit?: boolean; tw?: BT; color?: string }) => {
+    const dealDamage = (e: Enemy, raw: number, opt: { alwaysCrit?: boolean; tw?: BT; color?: string; noCrit?: boolean }) => {
       if (e.dead) return;
       let crit = opt.alwaysCrit ?? false;
-      if (!crit) crit = Math.random() < CRIT_CHANCE + g.critRate;
+      // executions and instant kills skip the crit roll: the number is the point
+      if (!crit && !opt.noCrit) crit = Math.random() < CRIT_CHANCE + g.critRate;
       // note: tower/aura multipliers are already folded into `raw` by the caller
       let dmg = raw * (1 - e.armor);
       if (e.ward > 0) dmg *= 0.45; // boss Bulwark
@@ -1082,10 +1138,13 @@ export default function Battle({
         // ordinary hits keep a modest pop (on a sample of hits) so crits still stand out
         pushPart({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.22, max: 0.22, size: 26, color: opt.color || "#ffffff", kind: "shock", add: true });
       }
-      if (saveRef.current.dmgNums && (crit || g.texts.length < 14)) {
+      // big Bungee numbers are rasterised text: while the governor is throttling
+      // only the top-tier crits get a label and a multiplier line
+      const textBudget = fxQ() < 0.7 ? 8 : 14;
+      if (saveRef.current.dmgNums && (crit || g.texts.length < textBudget)) {
         const size = crit ? 24 + critTier * 6 : 15;
         addText(p.x + (Math.random() - 0.5) * 18, p.y - 26, String(Math.round(dmg)), crit ? (critTier >= 3 ? "#fff6c4" : "#ffd23f") : "#ffffff", size, crit);
-        if (crit) addText(p.x, p.y - 54 - critTier * 5, CRIT_LABEL[critTier] || "CRIT!", "#ff8c3d", 12 + critTier * 2, true);
+        if (crit && (fxQ() >= 1 || critTier >= 3)) addText(p.x, p.y - 54 - critTier * 5, CRIT_LABEL[critTier] || "CRIT!", "#ff8c3d", 12 + critTier * 2, true);
         if (crit && critTier >= 3) addText(p.x, p.y - 74 - critTier * 5, `×${runCritMul.toFixed(2)} CRIT DMG`, "#ffb324", 12, true);
       }
       if (crit) {
@@ -1105,7 +1164,7 @@ export default function Battle({
             if (tier > 0 && Math.random() < spec.chance[tier - 1]) sp += spec.mult[tier - 1];
           }
           if (sp > 0) {
-            g.sp += sp;
+            g.sp += spGain(sp);
             glow(p.x, p.y, "#c44dff", 44, 0.35);
             addText(p.x, p.y - 20, `+${Math.round(sp)} SP`, "#c44dff", 12, false);
           }
@@ -1254,6 +1313,67 @@ export default function Battle({
       sfx.zap();
     };
 
+    /**
+     * Demon Execution. Every few seconds the sky opens: one red column falls per
+     * enemy on the field. Anything that is not a boss dies where it stands; a
+     * boss loses a straight share of its maximum health instead of dying.
+     * Awakened it falls twice as fast, bites deeper, and a bolt that lands on a
+     * boss imprisons it (skills sealed) and leaves it bleeding.
+     */
+    const demonStrike = (t: BT) => {
+      const now = performance.now();
+      const tier1 = saveRef.current.awn["demon"]?.[0] || 0;
+      const tier2 = saveRef.current.awn["demon"]?.[1] || 0;
+      const bossShare = tier1 > 0 ? t.def.awk1!.mult[tier1 - 1] : t.def.execBossHp || 0.5;
+      const list = g.enemies.filter((e) => !e.dead);
+      const shown = list.slice(0, 12);
+      shown.forEach((e, i) => {
+        const ep = enemyPos(e);
+        g.strikes.push({ x: ep.x, y: ep.y, life: 0.4 + i * 0.02, max: 0.4 + i * 0.02, width: isBossType(e.type) ? 22 : 12, color: "#ff2b3d", seed: Math.random() * 100 });
+        g.strikes.push({ x: ep.x, y: ep.y, life: 0.26 + i * 0.02, max: 0.26 + i * 0.02, width: isBossType(e.type) ? 9 : 4, color: "#ffffff", seed: Math.random() * 100 });
+      });
+      addZone({ kind: "rift", x: shown[0] ? enemyPos(shown[0]).x : W / 2, y: H * 0.55, r: 150, life: 0.4, max: 0.4, dps: 0, slow: 0, color: "#ff2b3d" });
+      flash("#ff2b3d", 0.2);
+      punch(0.6, 0.4);
+      hitStop(0.05);
+      g.shake = fxShake(9);
+      sfx.superbolt();
+
+      let executed = 0;
+      for (const e of list) {
+        if (e.dead) continue;
+        const ep = enemyPos(e);
+        if (isBossType(e.type)) {
+          // exact share of maximum health, straight through armour and wards
+          dealDamage(e, e.max * bossShare, { tw: t, color: "#ff2b3d", noCrit: true });
+          addText(ep.x, ep.y - 58, `-${Math.round(bossShare * 100)}% MAX HP`, "#ff2b3d", 15, true);
+          if (tier2 > 0 && !e.dead) {
+            // Demon Ritual: seal its skills and set it bleeding
+            const imp = t.def.awk2!.mult[tier2 - 1];
+            const bleed = t.def.awk2!.mult2![tier2 - 1];
+            e.imprisonT = Math.max(e.imprisonT, imp);
+            e.bleedT = Math.max(e.bleedT, 4.5);
+            e.bleedPct = Math.max(e.bleedPct, bleed);
+            e.bleedTick = Math.min(e.bleedTick || 0.5, 0.5);
+            addText(ep.x, ep.y - 78, `IMPRISONED ${imp}s`, "#ff4fd8", 15, true);
+            for (let i = 0; i < 5; i++) {
+              if (g.bolts.length < 30) g.bolts.push(randBolt(ep.x + (Math.random() - 0.5) * 90, ep.y - 120, ep.x + (Math.random() - 0.5) * 40, ep.y + 40, "#ff4fd8", 2, 0.4, now));
+            }
+          }
+        } else {
+          executed++;
+          dealDamage(e, e.hp + 1, { tw: t, color: "#ff2b3d", noCrit: true });
+        }
+      }
+      if (executed > 0) addText(W / 2, H * 0.3, `${executed} EXECUTED`, "#ff2b3d", 20, true);
+      toastRef.current(
+        executed > 0
+          ? `DEMON EXECUTION — ${executed} enemies executed`
+          : `DEMON EXECUTION — boss lost ${Math.round(bossShare * 100)}% max HP`,
+        "#ff2b3d"
+      );
+    };
+
     /** small helper: a tight fan of sparks at a point (used by the sky bolts) */
     const sparkAt = (x: number, y: number, n: number, spd: number) => {
       if (!fxOn()) n = Math.min(n, 5);
@@ -1323,11 +1443,13 @@ export default function Battle({
       return mul;
     };
 
-    /** damage growth from battle levels, points, auras and the global buffs */
+    /** damage growth from battle levels, points, auras, honors and the global buffs */
     const towerPower = (t: BT) =>
       Math.pow(ASC_DMG_MUL, Math.max(0, t.bLv - 1)) *
       (1 + POINT_DMG_STEP * t.points) *
       t.atkMul *
+      (1 + t.honorMul) * // Honor Emperor: permanent blessing per honor taken
+      (t.surgeT > 0 ? 1 + t.surgeMul : 1) * // Heavenly God: merge surge
       globalMul() *
       killStackMul(t);
 
@@ -1399,6 +1521,25 @@ export default function Battle({
         } as Proj);
       };
       switch (t.def.id) {
+        case "demon":
+          // no projectile: the strike itself is the attack
+          demonStrike(t);
+          break;
+        case "heavenly": {
+          // a lightning laser: fast, bright, and it burns whatever stands behind
+          push({
+            speed: 1400,
+            kind: "heavenly",
+            behind: t.def.laserBehind || 5,
+            behindMul: t.def.laserBehindMul ?? 0.5,
+          });
+          if (g.bolts.length < 30) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#ffe86b", 2.4, 0.14, performance.now()));
+          glow(p.x, p.y, "#fff6c4", 60, 0.3);
+          break;
+        }
+        case "honor":
+          push({ speed: 720, kind: "honor" });
+          break;
         case "arrow": push({ speed: 540 }); break;
         case "cannon": push({ speed: 380, splash: (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc, kind: "cannon" }); break;
         case "ice": push({ speed: 320, freezePct: Math.min(1, (t.def.freeze || 0) + (t.def.upFreeze || 0) * upg + (t.def.ascFreeze || 0) * asc), kind: "ice" }); break;
@@ -1931,6 +2072,50 @@ export default function Battle({
         ring(pos.x, pos.y, "#8a4dff", 46);
       }
       dealDamage(target, pr.dmg, { alwaysCrit: pr.alwaysCrit, tw: pr.tw });
+
+      // ---------- Heavenly God: the laser punches straight through ----------
+      if (pr.behind) {
+        const now3 = performance.now();
+        const queue = g.enemies
+          .filter((e) => !e.dead && e.id !== target.id && e.d > target.d)
+          .sort((a, b) => a.d - b.d)
+          .slice(0, pr.behind);
+        queue.forEach((e) => {
+          const ep = enemyPos(e);
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.24, max: 0.24, width: 7, color: "#ffe86b", seed: Math.random() * 100 });
+          if (g.bolts.length < 32) g.bolts.push(randBolt(pos.x, pos.y, ep.x, ep.y, "#fff6c4", 1.6, 0.14, now3));
+          glow(ep.x, ep.y, "#fff6c4", 44, 0.24);
+          dealDamage(e, pr.dmg * (pr.behindMul ?? 0.5), { alwaysCrit: pr.alwaysCrit, tw: pr.tw, color: "#ffe86b" });
+        });
+        if (queue.length) addText(pos.x, pos.y - 46, `PIERCE ×${queue.length}`, "#ffe86b", 12, false);
+
+        // Super Charged Ray: the air around the target flashes to 40,000°C and
+        // everything standing in it detonates in a supersonic shockwave
+        const t2 = pr.tw ? saveRef.current.awn["heavenly"]?.[1] || 0 : 0;
+        if (pr.tw && t2 > 0 && Math.random() < pr.tw.def.awk2!.chance[t2 - 1]) {
+          const radius = pr.tw.def.awk2!.mult[t2 - 1];
+          const done = g.enemies.filter((e) => !e.dead && Math.hypot(enemyPos(e).x - pos.x, enemyPos(e).y - pos.y) <= radius);
+          shock(pos.x, pos.y, "#ffffff", radius * 1.4, 0.6);
+          shock(pos.x, pos.y, "#ff8c3d", radius, 0.5);
+          ring(pos.x, pos.y, "#fff6c4", radius * 0.8);
+          burst(pos.x, pos.y, "#ffd23f", 30, 320);
+          embers(pos.x, pos.y, "#ff8c3d", 18);
+          stars(pos.x, pos.y, "#fff6c4", 14, 90);
+          flash("#fff6c4", 0.22);
+          punch(0.7, 0.5);
+          hitStop(0.05);
+          g.shake = fxShake(11);
+          addText(pos.x, pos.y - 62, "SUPER CHARGED RAY", "#fff6c4", 18, true);
+          addText(pos.x, pos.y - 40, "40,000°C", "#ff8c3d", 13, true);
+          sfx.superbolt();
+          for (const e of done) {
+            const ep = enemyPos(e);
+            burst(ep.x, ep.y, "#ffd23f", 6, 160);
+            dealDamage(e, e.hp + 1, { tw: pr.tw, color: "#fff6c4", noCrit: true });
+          }
+        }
+      }
+
       // ---------- awakening effects that ride along with the hit ----------
       if (pr.tw && !target.dead) {
         const t2 = pr.tw;
@@ -2161,34 +2346,153 @@ export default function Battle({
       );
     };
 
+    /** a vertical blessing bolt: points now, an attack surge for a while */
+    const blessTower = (t: BT, points: number, buff: number, dur: number, color: string, label: string) => {
+      t.points = Math.min(MAX_POINTS, t.points + points);
+      if (buff > 0) {
+        t.surgeMul = Math.max(t.surgeMul, buff);
+        t.surgeT = Math.max(t.surgeT, dur);
+      }
+      t.cd = Math.min(t.cd, 0.2);
+      if (!t.cell) return;
+      const bp = cellCenter(t.cell.c, t.cell.r);
+      // the bolt is a tall vertical pillar, exactly like every other lightning
+      g.strikes.push({ x: bp.x, y: bp.y, life: 0.42, max: 0.42, width: 13, color, seed: Math.random() * 100 });
+      g.strikes.push({ x: bp.x, y: bp.y, life: 0.3, max: 0.3, width: 5, color: "#ffffff", seed: Math.random() * 100 });
+      shock(bp.x, bp.y, color, 86, 0.45);
+      glow(bp.x, bp.y, color, 130, 0.45);
+      stars(bp.x, bp.y, color, 12, 60);
+      shards(bp.x, bp.y, color, 8, 220);
+      addText(bp.x, bp.y - 52, `${label} +${points}`, color, 15, true);
+      levelFlourish(bp.x, bp.y, color, label, 1);
+    };
+
+    /**
+     * Merging. Two towers on the same points fuse into a single stronger one —
+     * but the survivor is rolled at random from everything the account has
+     * unlocked (never simply the same tower again), so the board keeps
+     * evolving. Honor Emperors are the exception: dragged onto a matching tower
+     * they hand their point over instead of rerolling it, and a Heavenly God
+     * caught in a merge blesses random towers with bolts.
+     */
     const mergeTowers = (a: BT, b: BT) => {
-      const cell = b.cell!;
-      const p = cellCenter(cell.c, cell.r);
-      // merging is a pure upgrade: the tower you dropped onto keeps its type and
-      // gains a point. New tower types only ever arrive through a summon.
-      const nd = b.def;
+      const p = b.cell ? cellCenter(b.cell.c, b.cell.r) : cellCenter(a.cell!.c, a.cell!.r);
       const wanted = Math.min(MAX_POINTS, a.points + 1);
       if (wanted <= b.points) {
         // nothing to gain: never eat a tower for nothing
         sfx.error();
-        toastRef.current(`${nd.name} is already at ${MAX_POINTS} points`, "#ff4d5e");
+        toastRef.current(`${b.def.name} is already at ${MAX_POINTS} points`, "#ff4d5e");
         return;
       }
-      const gained = true;
+
+      const wasHeavenly = a.def.id === "heavenly" || b.def.id === "heavenly";
+      const wasDemon = a.def.id === "demon" || b.def.id === "demon";
+
+      // ---------- Honor Emperor: hands the point over, keeps the tower ----------
+      if (a.def.honor || b.def.honor) {
+        const emperor = a.def.honor ? a : b;
+        const heir = a.def.honor ? b : a;
+        const t1 = saveRef.current.awn["honor"]?.[0] || 0;
+        const t2 = saveRef.current.awn["honor"]?.[1] || 0;
+        let gain = 1;
+        if (t1 > 0 && Math.random() < emperor.def.awk1!.chance[t1 - 1]) {
+          gain += emperor.def.awk1!.mult[t1 - 1];
+          addText(p.x, p.y - 74, "HONOR BLESSING", "#fff6c4", 14, true);
+        }
+        heir.points = Math.min(MAX_POINTS, heir.points + gain);
+        heir.cd = 0.2;
+        if (t2 > 0) heir.honorMul += emperor.def.awk2!.mult[t2 - 1];
+        g.towers = g.towers.filter((t) => t.uid !== emperor.uid);
+        if (heir.cell) {
+          const hp = cellCenter(heir.cell.c, heir.cell.r);
+          g.strikes.push({ x: hp.x, y: hp.y, life: 0.5, max: 0.5, width: 14, color: "#ffd76a", seed: Math.random() * 100 });
+          shock(hp.x, hp.y, "#ffd76a", 96, 0.5);
+          glow(hp.x, hp.y, "#ffd76a", 140, 0.5);
+          stars(hp.x, hp.y, "#ffd76a", 16, 80);
+          levelFlourish(hp.x, hp.y, "#ffd76a", "HONORED", 2);
+          addText(hp.x, hp.y - 46, `HONOR +${gain}`, "#ffd76a", 17, true);
+        }
+        sfx.merge();
+        sfx.point();
+        toastRef.current(
+          t2 > 0
+            ? `HONOR — ${heir.def.name} grew to ${heir.points} pts · +${Math.round(heir.honorMul * 100)}% forever`
+            : `HONOR — ${heir.def.name} grew to ${heir.points} pts`,
+          "#ffd76a"
+        );
+        return;
+      }
+
+      // ---------- the merge roulette ----------
+      const unlocked = TOWERS.filter((d) => (saveRef.current.levels[d.id] || 0) > 0);
+      const fresh = unlocked.filter((d) => d.id !== a.def.id && d.id !== b.def.id);
+      const pool = fresh.length ? fresh : unlocked;
+      const nd = pool.length ? pool[Math.floor(Math.random() * pool.length)] : b.def;
+      b.def = nd;
       b.points = wanted;
       b.streak = 0;
       b.shots = 0;
       b.cd = 0.3;
       b.atkMul = 1;
+      b.skillCd = undefined;
       g.towers = g.towers.filter((t) => t.uid !== a.uid);
+      const rc = RARITY[nd.rarity].color;
       sfx.merge();
-      ring(p.x, p.y, "#ffffff", 60);
-      burst(p.x, p.y, RARITY[nd.rarity].color, 24, 260);
-      addText(p.x, p.y - 44, gained ? "MERGE!" : "MAX POINTS", "#ffffff", 18, true);
-      toastRef.current(
-        gained ? `${nd.name} merged to ${b.points} pts` : `${nd.name} is already at ${MAX_POINTS} points`,
-        RARITY[nd.rarity].color
-      );
+      ring(p.x, p.y, rc, 70);
+      shock(p.x, p.y, "#ffffff", 96, 0.5);
+      burst(p.x, p.y, rc, 26, 280);
+      levelFlourish(p.x, p.y, rc, nd.name.toUpperCase(), 2);
+      addText(p.x, p.y - 48, `EVOLVED · ${nd.name.toUpperCase()}`, rc, 15, true);
+      toastRef.current(`Evolved into ${nd.name} · merged to ${b.points} pts`, rc);
+
+      // ---------- Heavenly God: the merge calls blessing bolts down ----------
+      if (wasHeavenly) {
+        const def = TOWER_BY_ID.heavenly;
+        const t1 = saveRef.current.awn["heavenly"]?.[0] || 0;
+        let bolts = def.mergeBolts || 2;
+        let pts = def.mergePoints || 2;
+        let buff = def.mergeBuff || 3;
+        if (t1 > 0 && Math.random() < def.awk1!.chance[t1 - 1]) {
+          bolts += def.awk1!.mult[t1 - 1];
+          pts += 1;
+          buff = def.awk1!.mult2![t1 - 1];
+          addText(p.x, p.y - 70, "POSITIVE LIGHTNING", "#fff6c4", 15, true);
+        }
+        const dur = def.mergeBuffT || 13;
+        const board = [...g.towers];
+        for (let i = 0; i < bolts && board.length; i++) {
+          const pick = board[Math.floor(Math.random() * board.length)];
+          schedule(i * 0.09, () => blessTower(pick, pts, buff, dur, "#ffe86b", "BLESSED"));
+        }
+        sfx.superbolt();
+        flash("#fff6c4", 0.16);
+        toastRef.current(`HEAVENLY JUDGEMENT — ${bolts} towers blessed · +${Math.round(buff * 100)}%`, "#ffe86b");
+      }
+
+      // ---------- Demon Execution: a merge whips the altars into a frenzy ----------
+      if (wasDemon || b.def.execCd) {
+        const d1 = saveRef.current.awn["demon"]?.[0] || 0;
+        if (d1 > 0) {
+          // 35% off the timer for 5 seconds, riding the same surge the Super
+          // Clone uses so it stacks sanely with everything else
+          let whipped = 0;
+          for (const dt of g.towers) {
+            if (!dt.def.execCd) continue;
+            dt.hasteT = Math.max(dt.hasteT, 5);
+            dt.hasteMul = Math.max(dt.hasteMul, 1 / 0.65 - 1);
+            whipped++;
+          }
+          if (whipped > 0) {
+            addText(p.x, p.y - 72, "RAPID STRIKE", "#ff2b3d", 15, true);
+            toastRef.current(
+              `RAPID STRIKE — ${whipped} altar${whipped === 1 ? "" : "s"} strike 35% faster for 5s`,
+              "#ff2b3d"
+            );
+          }
+        }
+      }
+
+      // ---------- Hellstorm still answers a merge with a blaze ----------
       const tier2 = nd.id === "hellstorm" ? saveRef.current.awn["hellstorm"]?.[1] || 0 : 0;
       if (nd.id === "hellstorm" && tier2 > 0) {
         const beams = nd.awk2!.mult[tier2 - 1];
@@ -2237,6 +2541,12 @@ export default function Battle({
           break;
         case "sp":
           g.sp += 150;
+          break;
+        case "spgain":
+          // +10% SP a level, capped at +100% (ten levels), which is what the
+          // shop item's max is set to
+          g.spGainMul = Math.min(1, g.spGainMul + 0.1);
+          toastRef.current(`SP gain +${Math.round(g.spGainMul * 100)}%`, "#c44dff");
           break;
         case "life":
           g.lives += 3;
@@ -2620,6 +2930,7 @@ export default function Battle({
         uid: uidC++, def, menuLv: saveRef.current.levels[id], bLv: 1, points: 0, cell,
         cd: 0.6, shots: 0, angle: 0, rapidT: 0, rapidCool: 5, streak: 0, flash: 0,
         owner: "you", atkMul: 1, hexT: 0, downT: 0, hasteT: 0, hasteMul: 0,
+        surgeT: 0, surgeMul: 0, honorMul: 0,
       });
       const p = cellCenter(cell.c, cell.r);
       levelFlourish(p.x, p.y, RARITY[def.rarity].color, "DEPLOYED", def.rarity === "legendary" ? 3 : 1);
@@ -2799,6 +3110,7 @@ export default function Battle({
             chainsCd: BOSS_CHAINS_CD, warpCd: BOSS_WARP_CD, link: 0,
             enraged: false, cast: 0,
             encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
+            imprisonT: 0, bleedT: 0, bleedTick: 0, bleedPct: 0,
           });
           // a boss walks in with a cutscene — the sim holds until it finishes
           if (boss && g.bossIntro !== g.round) {
@@ -2810,7 +3122,7 @@ export default function Battle({
         }
         if (!g.spawnQ.length && g.enemies.length === 0) {
           const bonus = 40 + 10 * g.round;
-          g.sp += bonus;
+          g.sp += spGain(bonus);
           g.wavesCleared++;
           // gold + gem payouts were buffed 40% (REWARD_MUL) in the balance patch
           g.gold += reward(bonus / 2);
@@ -2821,7 +3133,7 @@ export default function Battle({
             g.phaseT = saveRef.current.fastWaves ? 1.2 : mode === "endless" ? 3 : 3.5;
             sfx.coin();
             toastRef.current(
-              `${mode === "endless" ? "Wave" : "Round"} ${g.round} cleared · +${bonus} SP`,
+              `${mode === "endless" ? "Wave" : "Round"} ${g.round} cleared · +${spGain(bonus)} SP`,
               "#3dff8e"
             );
             if (mode === "endless" && g.round % 5 === 0) {
@@ -2850,9 +3162,19 @@ export default function Battle({
           };
           e.cast = Math.max(0, e.cast - dt);
           e.ward = Math.max(0, e.ward - dt);
+          // Demon Ritual: while imprisoned the boss cannot cast a single skill —
+          // it still walks, it just cannot answer back
+          const sealed = e.imprisonT > 0;
+          if (sealed) {
+            e.imprisonT -= dt;
+            if (e.imprisonT <= 0) addText(ep0.x, ep0.y - 62, "FREE", "#ff4fd8", 13, true);
+            else if (Math.random() < dt * 4 && g.parts.length < 340) {
+              g.parts.push({ x: ep0.x + (Math.random() - 0.5) * 70, y: ep0.y + (Math.random() - 0.5) * 70, vx: 0, vy: -22, life: 0.5, max: 0.5, size: 3, color: "#ff4fd8", kind: "spark", add: true });
+            }
+          }
 
           // --- Blood Frenzy: one-shot, below 45% health
-          if (kit.includes("enrage") && !e.enraged && e.hp / e.max <= BOSS_ENRAGE_AT) {
+          if (!sealed && kit.includes("enrage") && !e.enraged && e.hp / e.max <= BOSS_ENRAGE_AT) {
             e.enraged = true;
             e.speed *= 1.45;
             e.ward = Math.max(e.ward, 1.2);
@@ -2863,7 +3185,7 @@ export default function Battle({
           }
 
           // --- Rift Call
-          if (kit.includes("summon")) {
+          if (!sealed && kit.includes("summon")) {
             e.summonCd -= dt;
             if (e.summonCd <= 0) {
               e.summonCd = BOSS_SUMMON_CD;
@@ -2881,6 +3203,7 @@ export default function Battle({
                   nullCd: 0, devourCd: 0, meteorCd: 0, chainsCd: 0, warpCd: 0, link: 0,
                   enraged: false, cast: 0,
                   encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
+                  imprisonT: 0, bleedT: 0, bleedTick: 0, bleedPct: 0,
                 });
                 ring(ep0.x, ep0.y, "#c44dff", 30 + i * 8);
               }
@@ -2890,7 +3213,7 @@ export default function Battle({
           }
 
           // --- Void Step
-          if (kit.includes("blink")) {
+          if (!sealed && kit.includes("blink")) {
             e.blinkCd -= dt;
             if (e.blinkCd <= 0) {
               e.blinkCd = BOSS_BLINK_CD;
@@ -2905,7 +3228,7 @@ export default function Battle({
           }
 
           // --- Bulwark
-          if (kit.includes("ward")) {
+          if (!sealed && kit.includes("ward")) {
             e.wardCd -= dt;
             if (e.wardCd <= 0 && e.hp / e.max < 0.85) {
               e.wardCd = BOSS_WARD_CD;
@@ -2916,7 +3239,7 @@ export default function Battle({
           }
 
           // --- Null Field: hex the towers guarding the lane
-          if (kit.includes("nullfield")) {
+          if (!sealed && kit.includes("nullfield")) {
             e.nullCd -= dt;
             if (e.nullCd <= 0) {
               const near = g.towers
@@ -2939,7 +3262,7 @@ export default function Battle({
           }
 
           // --- Soul Devour: eat its own minions to heal
-          if (kit.includes("devour")) {
+          if (!sealed && kit.includes("devour")) {
             e.devourCd -= dt;
             if (e.devourCd <= 0 && e.hp / e.max < 0.92) {
               const snacks = g.enemies.filter((o) => o !== e && !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= 300).slice(0, 3);
@@ -2960,7 +3283,7 @@ export default function Battle({
           }
 
           // --- Meteor Fall: burning rocks knock towers offline
-          if (kit.includes("meteor")) {
+          if (!sealed && kit.includes("meteor")) {
             e.meteorCd -= dt;
             if (e.meteorCd <= 0) {
               const targets = g.towers.filter((t) => t.cell && t.downT <= 0);
@@ -2978,7 +3301,7 @@ export default function Battle({
           }
 
           // --- Rift Chains: shield every minion around it
-          if (kit.includes("chains")) {
+          if (!sealed && kit.includes("chains")) {
             e.chainsCd -= dt;
             if (e.chainsCd <= 0) {
               const herd = g.enemies.filter((o) => !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= BOSS_CHAINS_RADIUS);
@@ -2996,7 +3319,7 @@ export default function Battle({
           }
 
           // --- Warp Surge: wrench the whole horde down the lane
-          if (kit.includes("warp")) {
+          if (!sealed && kit.includes("warp")) {
             e.warpCd -= dt;
             if (e.warpCd <= 0) {
               e.warpCd = BOSS_WARP_CD;
@@ -3085,6 +3408,24 @@ export default function Battle({
               g.parts.push({ x: bp.x, y: bp.y, vx: (Math.random() - 0.5) * 30, vy: -30 - Math.random() * 30, life: 0.4, max: 0.4, size: 3, color: "#ff7a3d", kind: "spark" });
           }
           if (e.hp <= 0 && !e.dead) killReward(e);
+        }
+        // Demon Ritual bleed: a share of maximum health every half second
+        if (e.bleedT > 0 && !e.dead) {
+          e.bleedT -= dt;
+          e.bleedTick -= dt;
+          if (e.bleedTick <= 0) {
+            e.bleedTick = 0.5;
+            const cut = e.max * e.bleedPct;
+            const bp = enemyPos(e);
+            e.hp -= cut;
+            addText(bp.x + (Math.random() - 0.5) * 20, bp.y - 34, `${Math.round(cut)}`, "#ff4d5e", 13, false);
+            for (let i = 0; i < 4; i++) {
+              if (g.parts.length < 340)
+                g.parts.push({ x: bp.x + (Math.random() - 0.5) * 18, y: bp.y, vx: (Math.random() - 0.5) * 40, vy: 40 + Math.random() * 60, life: 0.5, max: 0.5, size: 2 + Math.random() * 3, color: "#c4243a", kind: "spark", grav: 1 });
+            }
+            if (e.hp <= 0 && !e.dead) killReward(e);
+          }
+          if (e.bleedT <= 0) e.bleedPct = 0;
         }
         if (e.dead) continue;
         const slowMul = e.slowT > 0 ? 1 - e.slow : 1;
@@ -3406,6 +3747,12 @@ export default function Battle({
           t.rapidT = Math.max(0, t.rapidT - dt);
         }
         let rate = Math.max(0.06, t.def.rate - t.def.upRate * (t.menuLv - 1) - t.def.ascRate * (t.bLv - 1));
+        // Demon Execution: the strike cadence is its own ladder — 5s bare, 2.5s
+        // once Rapid Strike is awakened (attack-speed bonuses still apply below)
+        if (t.def.execCd) {
+          const d1 = saveRef.current.awn["demon"]?.[0] || 0;
+          rate = d1 > 0 ? t.def.awk1!.mult2![d1 - 1] : t.def.execCd;
+        }
         let aspdSelf = (t.def.aspd || 0) + (t.def.upAspd || 0) * (t.menuLv - 1) + (t.def.ascAspd || 0) * (t.bLv - 1);
         if (t.def.id === "lightning") aspdSelf = 0;
         rate /= 1 + aspdSelf + (aspdA.get(t.uid) || 0);
@@ -3415,6 +3762,11 @@ export default function Battle({
         if (t.def.rapid && t.rapidT > 0) rate *= 0.32;
         if (t.hasteT > 0) rate /= 1 + t.hasteMul; // Super Clone surge
         t.hasteT = Math.max(0, t.hasteT - dt);
+        // Heavenly God blessing: +300% attack speed while it lasts
+        if (t.surgeT > 0) rate /= 1 + t.surgeMul;
+        t.surgeT = Math.max(0, t.surgeT - dt);
+        // Honor Emperor: every honor taken is a permanent +15% attack speed
+        rate /= 1 + t.honorMul;
         // ---------- boss hexes ----------
         t.hexT = Math.max(0, t.hexT - dt);
         t.downT = Math.max(0, t.downT - dt);
@@ -3431,11 +3783,12 @@ export default function Battle({
           if (t.def.target === "all") {
             target = g.enemies.find((e) => !e.dead);
           } else {
+            // ENERGY TARGETING: the grid feeds every tower, so distance never
+            // matters — a tower simply shoots the enemy furthest down the lane.
             let best = -1;
             for (const e of g.enemies) {
               if (e.dead) continue;
-              const ep = enemyPos(e);
-              if (Math.hypot(ep.x - p.x, ep.y - p.y) <= RANGE && e.d > best) {
+              if (e.d > best) {
                 best = e.d;
                 target = e;
               }
@@ -4763,6 +5116,120 @@ export default function Battle({
           for (let i = 0; i < 3; i++) ctx.fillRect(-18 + i * 7, 12, 4, 4);
           break;
         }
+        case "demon": {
+          // a horned executioner's seal: a black altar with a red blade hanging
+          // over it, breathing
+          const breathe = 1 + Math.sin(now / 320) * 0.06;
+          ctx.save();
+          ctx.scale(breathe, breathe);
+          ctx.fillStyle = "#1a0509";
+          ctx.strokeStyle = "#ff2b3d";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.roundRect(-22, -6, 44, 22, 7);
+          ctx.fill();
+          ctx.stroke();
+          // horns
+          ctx.beginPath();
+          ctx.moveTo(-20, -6);
+          ctx.quadraticCurveTo(-30, -22, -14, -24);
+          ctx.moveTo(20, -6);
+          ctx.quadraticCurveTo(30, -22, 14, -24);
+          ctx.stroke();
+          // the blade
+          ctx.fillStyle = "#ff2b3d";
+          ctx.beginPath();
+          ctx.moveTo(0, -34);
+          ctx.lineTo(7, -14);
+          ctx.lineTo(0, -2);
+          ctx.lineTo(-7, -14);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(-1.2, -32, 2.4, 26);
+          // three red runes along the altar face
+          ctx.fillStyle = "#ff6b78";
+          for (let i = 0; i < 3; i++) ctx.fillRect(-14 + i * 10, 6, 5, 5);
+          ctx.restore();
+          break;
+        }
+        case "heavenly": {
+          // a hovering halo above a lightning barrel; the ring spins and the
+          // muzzle crackles with the next laser
+          const spin = now / 700;
+          ctx.strokeStyle = "#ffe86b";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.ellipse(0, -24, 20, 6, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.save();
+          ctx.rotate(spin);
+          ctx.globalAlpha = 0.85;
+          for (let i = 0; i < 4; i++) {
+            ctx.rotate(Math.PI / 2);
+            ctx.beginPath();
+            ctx.moveTo(0, -30);
+            ctx.lineTo(0, -40);
+            ctx.stroke();
+          }
+          ctx.restore();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = "#2b2410";
+          ctx.strokeStyle = "#ffe86b";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.roundRect(-20, -10, 40, 26, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.save();
+          ctx.rotate(a);
+          ctx.fillStyle = "#ffe86b";
+          ctx.fillRect(8, -4, 20, 8);
+          const charge = 4 + Math.abs(Math.sin(now / 160)) * 6;
+          ctx.globalAlpha = 0.9;
+          ctx.fillStyle = "#fff6c4";
+          ctx.beginPath();
+          ctx.arc(30, 0, charge * 0.5 + 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case "honor": {
+          // a gilded throne crown: a heavy gold block with a crown that bobs
+          const bob = Math.sin(now / 380) * 2;
+          ctx.fillStyle = "#3a2a12";
+          ctx.strokeStyle = "#ffd76a";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.roundRect(-20, -2, 40, 20, 7);
+          ctx.fill();
+          ctx.stroke();
+          ctx.save();
+          ctx.translate(0, -10 + bob);
+          ctx.fillStyle = "#ffd76a";
+          ctx.beginPath();
+          ctx.moveTo(-17, 4);
+          ctx.lineTo(-17, -10);
+          ctx.lineTo(-8, -2);
+          ctx.lineTo(0, -14);
+          ctx.lineTo(8, -2);
+          ctx.lineTo(17, -10);
+          ctx.lineTo(17, 4);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = "#8a5a00";
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
+          ctx.fillStyle = "#ff4fd8";
+          ctx.beginPath();
+          ctx.arc(0, -2, 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          ctx.fillStyle = "#fff6c4";
+          ctx.fillRect(-13, 7, 5, 5);
+          ctx.fillRect(8, 7, 5, 5);
+          break;
+        }
         case "clone": {
           // two offset diamonds — the tower and the copy it keeps promising
           const wob = Math.sin(now / 400) * 2;
@@ -5465,6 +5932,41 @@ export default function Battle({
         ctx.fill();
         ctx.globalAlpha = 1;
       }
+      if (e.bleedT > 0) {
+        // Demon Ritual: dark blood sheeting off the wound
+        ctx.globalAlpha = 0.5 + Math.sin(now / 70 + e.wob) * 0.15;
+        ctx.strokeStyle = "#c4243a";
+        ctx.lineWidth = 2.5;
+        for (let i = 0; i < 3; i++) {
+          const dx = (i - 1) * (et.r * 0.5);
+          ctx.beginPath();
+          ctx.moveTo(dx, et.r * 0.4);
+          ctx.lineTo(dx + Math.sin(now / 240 + i) * 3, et.r * 0.4 + 9 + ((now / 90 + i * 30) % 12));
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+      }
+      if (e.imprisonT > 0) {
+        // Demon Ritual: a rune cage holding the boss's skills shut
+        ctx.save();
+        ctx.globalAlpha = 0.75;
+        ctx.strokeStyle = "#ff4fd8";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.beginPath();
+        ctx.arc(0, 0, et.r + 12, now / 400, now / 400 + Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.rotate(-now / 900);
+        for (let i = 0; i < 4; i++) {
+          ctx.rotate(Math.PI / 2);
+          ctx.beginPath();
+          ctx.moveTo(et.r + 2, 0);
+          ctx.lineTo(et.r + 12, 0);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
       if (e.slowT > 0 && e.frozen <= 0) {
         ctx.strokeStyle = "#7fe9ff";
         ctx.lineWidth = 2;
@@ -5514,6 +6016,45 @@ export default function Battle({
       ctx.translate(px, py);
       ctx.rotate(ang);
       switch (pr.kind) {
+        case "heavenly": {
+          // the laser: a long white-hot core with a gold sheath behind it
+          const tail = 46;
+          const grd = ctx.createLinearGradient(-tail, 0, 14, 0);
+          grd.addColorStop(0, "transparent");
+          grd.addColorStop(0.55, "#ffe86b88");
+          grd.addColorStop(1, "#fff6c4");
+          ctx.globalCompositeOperation = "lighter";
+          ctx.strokeStyle = grd;
+          ctx.lineWidth = 9;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(-tail, 0);
+          ctx.lineTo(14, 0);
+          ctx.stroke();
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(-tail * 0.45, 0);
+          ctx.lineTo(16, 0);
+          ctx.stroke();
+          ctx.globalCompositeOperation = "source-over";
+          break;
+        }
+        case "honor": {
+          ctx.fillStyle = "#ffd76a";
+          ctx.strokeStyle = "#8a5a00";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(-8, -6);
+          ctx.lineTo(-8, 4);
+          ctx.lineTo(0, -10);
+          ctx.lineTo(8, 4);
+          ctx.lineTo(8, -6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          break;
+        }
         case "arrow":
           ctx.strokeStyle = "#e8e2c8";
           ctx.lineWidth = 3;
@@ -5912,19 +6453,31 @@ export default function Battle({
       drawPortal(WPX[0].x, WPX[0].y, "#c44dff", "SPAWN");
       drawPortal(WPX[WPX.length - 1].x, WPX[WPX.length - 1].y, "#ff4d5e", "EXIT");
 
-      // range guides
+      // energy guides: one arena-wide field boundary plus a faint tether from
+      // every tower to the front of the horde, which is what "range" means now
       if (saveRef.current.guides) {
         ctx.save();
         ctx.setLineDash([7, 9]);
         ctx.lineWidth = 1.5;
-        for (const t of g.towers) {
-          if (!t.cell) continue;
-          const p = cellCenter(t.cell.c, t.cell.r);
-          const rr = t.def.target === "all" ? RANGE * 1.25 : t.def.aura ? 96 : RANGE;
-          ctx.strokeStyle = t.owner === "you" ? "rgba(53,224,255,0.22)" : t.owner + "55";
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
-          ctx.stroke();
+        ctx.strokeStyle = "rgba(53,224,255,0.16)";
+        ctx.beginPath();
+        ctx.arc(W / 2, H / 2, Math.max(W, H) * 0.66, 0, Math.PI * 2);
+        ctx.stroke();
+        let front: Enemy | null = null;
+        for (const e of g.enemies) if (!e.dead && (!front || e.d > front.d)) front = e;
+        if (front) {
+          const fp = enemyPos(front);
+          ctx.setLineDash([3, 11]);
+          ctx.lineWidth = 1;
+          for (const t of g.towers) {
+            if (!t.cell) continue;
+            const p = cellCenter(t.cell.c, t.cell.r);
+            ctx.strokeStyle = t.owner === "you" ? "rgba(53,224,255,0.14)" : t.owner + "33";
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(fp.x, fp.y);
+            ctx.stroke();
+          }
         }
         ctx.restore();
       }
@@ -6377,7 +6930,9 @@ export default function Battle({
           ctx.save();
           ctx.translate(t.x, t.y);
           ctx.scale(pop, pop);
-          if (age < 0.32) {
+          // the eight-ray starburst behind the number is eight more paths per
+          // crit: kept for the crits that matter, dropped when text is busy
+          if (age < 0.32 && (fxQ() >= 1 || t.size >= 40)) {
             // eight gold rays behind the number
             ctx.save();
             ctx.rotate(age * 1.6);
@@ -6395,7 +6950,12 @@ export default function Battle({
             ctx.restore();
             ctx.globalAlpha = al;
           }
-          ctx.font = `700 ${t.size}px Bungee, Rajdhani, sans-serif`;
+          // setting ctx.font re-parses the font string, so only do it on change
+          const font = `700 ${t.size}px Bungee, Rajdhani, sans-serif`;
+          if (font !== lastFont) {
+            ctx.font = font;
+            lastFont = font;
+          }
           ctx.lineJoin = "round";
           ctx.strokeStyle = "rgba(20,8,0,0.92)";
           ctx.lineWidth = Math.max(4, t.size * 0.22);
@@ -6428,7 +6988,7 @@ export default function Battle({
       // chromatic aberration: re-stamp the frame twice, offset and tinted, in
       // additive mode. Cheap, and it makes every big hit feel like it shoved
       // the camera.
-      if (g.chroma > 0.02 && fxOn()) {
+      if (g.chroma > 0.02 && fxOn() && fxQ() >= 0.7) {
         const off = g.chroma * 6;
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
@@ -6490,7 +7050,12 @@ export default function Battle({
       }
       if (steps >= 3) acc = 0; // fell too far behind: drop the backlog
       renderAlpha = saveRef.current.frameInterp ? Math.max(0, Math.min(1, acc / STEP)) : 1;
+      fxUserLevel = saveRef.current.fxq || 0;
+      const drawStart = performance.now();
       draw();
+      // slide the quality factor on the real cost of the last frame
+      fxGov.avg += (Math.min(40, performance.now() - drawStart) - fxGov.avg) * 0.08;
+      fxGov.q = fxGov.avg > 13 ? 0.4 : fxGov.avg > 8.5 ? 0.7 : 1;
       if (now - lastHud > 110) {
         lastHud = now;
         setTick((t) => t + 1);
@@ -6587,7 +7152,7 @@ export default function Battle({
       push(`${t.def.name} is already at battle level ${MAX_BATTLE_LEVEL}`, "#ff4d5e");
       return;
     }
-    const cost = spCost(gg.ascSpend);
+    const cost = ascSpCost(gg.ascSpend);
     if (gg.sp < cost) {
       sfx.error();
       push("Not enough SP", "#ff4d5e");

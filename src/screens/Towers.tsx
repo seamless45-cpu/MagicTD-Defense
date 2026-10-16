@@ -666,8 +666,9 @@ function TowerPreview({
               Battle Lv 1–{MAX_BATTLE_LEVEL} · ×1.55 damage per level
             </span>
           </div>
-          {def.exotic ? (
-            <div className="mt-2 space-y-2">
+          {/* every tower in the game has two awakening paths now — the old
+              "exotic only" gate left 27 of them showing a dead panel */}
+          <div className="mt-2 space-y-2">
               {([0, 1] as const).map((slot) => {
                 const spec = slot === 0 ? def.awk1! : def.awk2!;
                 const needLv = slot === 0 ? 10 : 15;
@@ -701,13 +702,8 @@ function TowerPreview({
                     </div>
                   </div>
                 );
-              })}
-            </div>
-          ) : (
-            <p className="mt-1.5 text-[12px] font-semibold text-[var(--dim)]">
-              This tower has no awakening paths yet — it grows through levels and in-battle ascension instead.
-            </p>
-          )}
+            })}
+          </div>
         </div>
 
         <div className="mt-4 flex gap-2">
@@ -732,6 +728,8 @@ function awkText(def: TowerDef, slot: 0 | 1, tier: number): string {
   const s = slot === 0 ? def.awk1! : def.awk2!;
   if (tier <= 0) return "Not awakened yet";
   const t = Math.max(0, tier - 1);
+  // bespoke kits (demon, heavenly, honor…) spell their own tier line out
+  if (s.fmt) return `Tier ${ROMAN[tier]} · ${s.fmt(s.mult[t], s.mult2?.[t])}`;
   if (s.chance[t] === 0) return `+${Math.round(s.mult[t] * 100)}% crit · cap ${s.mult2?.[t] ?? s.mult[t]}`;
   const base = `${Math.round(s.chance[t] * 100)}% chance · +${Math.round(s.mult[t] * 100)}% power`;
   return s.mult2 ? `${base} (${s.mult2[t]}x)` : base;

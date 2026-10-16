@@ -363,6 +363,35 @@ export function TowerIcon({
           </g>
         );
       // ---------- mythic arsenal II ----------
+      case "demon":
+        return (
+          <g>
+            <path d="M10 40c-3-8-2-20 14-20s17 12 14 20z" fill="#1a0509" stroke={c} strokeWidth="2.4" />
+            <path d="M11 24c-5-9-3-16 3-15M37 24c5-9 3-16-3-15" fill="none" stroke={c} strokeWidth="2.6" strokeLinecap="round" />
+            <path d="M24 4l5 12-5 8-5-8z" fill={c} />
+            <path d="M23 6v14" stroke="#fff" strokeWidth="1.6" />
+            <path d="M16 34h16" stroke={a} strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        );
+      case "heavenly":
+        return (
+          <g>
+            <ellipse cx="24" cy="11" rx="13" ry="4" fill="none" stroke={a} strokeWidth="2.6" />
+            <path d="M24 1v5M12 11h-4M36 11h4" stroke={a} strokeWidth="2.2" strokeLinecap="round" />
+            <rect x="10" y="20" width="28" height="18" rx="5" fill="#2b2410" stroke={a} strokeWidth="2.4" />
+            <path d="M24 24l-4 7h4l-2 6 7-9h-4l3-4z" fill="#ffe86b" />
+            <path d="M10 29h28" stroke={a} strokeWidth="1.6" opacity="0.6" />
+          </g>
+        );
+      case "honor":
+        return (
+          <g>
+            <rect x="9" y="28" width="30" height="14" rx="4" fill="#3a2a12" stroke={a} strokeWidth="2.4" />
+            <path d="M10 20l7 6 7-11 7 11 7-6v10H10z" fill={a} stroke="#8a5a00" strokeWidth="1.6" />
+            <circle cx="24" cy="24" r="2.6" fill="#ff4fd8" />
+            <path d="M14 34h6M28 34h6" stroke="#fff6c4" strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        );
       case "beam":
         return (
           <g>
@@ -865,6 +894,7 @@ export type SetIconName =
   | "perf"
   | "interp"
   | "fps"
+  | "bolt"
   | "download"
   | "expand"
   | "backup"
@@ -891,6 +921,11 @@ const SET_PATHS: Record<SetIconName, ReactNode> = {
     <>
       <path d="M11 3.2l1.7 4.3 4.3 1.7-4.3 1.7L11 15.2 9.3 10.9 5 9.2l4.3-1.7z" />
       <path d="M18 15.4l.85 2.15 2.15.85-2.15.85L18 21.4l-.85-2.15-2.15-.85 2.15-.85z" />
+    </>
+  ),
+  bolt: (
+    <>
+      <path d="M13.4 2.4 5 13.6h5.4L9.4 21.6l8.6-11.4h-5.5z" />
     </>
   ),
   dmg: (

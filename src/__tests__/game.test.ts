@@ -13,6 +13,7 @@ import {
   upgradeFragCost,
   ascentAllCost,
   awakenCost,
+  ASC_COST_STEP,
   MAX_MENU_LEVEL,
   MAX_BATTLE_LEVEL,
   BATTLE_ROUNDS,
@@ -110,8 +111,10 @@ describe("tower data", () => {
     }
   });
 
-  it("gives every exotic tower two awakenings with 5 tiers", () => {
-    for (const t of TOWERS.filter((x) => x.exotic)) {
+  it("gives every tower two awakenings with 5 tiers", () => {
+    // every tower is awakenable now, not just the exotics: the preview panel
+    // shows both paths for the whole roster
+    for (const t of TOWERS) {
       expect(t.awk1, t.id).toBeDefined();
       expect(t.awk2, t.id).toBeDefined();
       expect(t.awk1!.chance).toHaveLength(5);
@@ -120,6 +123,12 @@ describe("tower data", () => {
       expect(t.awk2!.mult).toHaveLength(5);
       if (t.awk1!.mult2) expect(t.awk1!.mult2).toHaveLength(5);
       if (t.awk2!.mult2) expect(t.awk2!.mult2).toHaveLength(5);
+      expect(t.awk1!.name.length, t.id).toBeGreaterThan(0);
+      expect(t.awk2!.name.length, t.id).toBeGreaterThan(0);
+      expect(t.awk1!.desc.length, t.id).toBeGreaterThan(0);
+      expect(t.awk2!.desc.length, t.id).toBeGreaterThan(0);
+      expect(awakenCost(1), t.id).toBeGreaterThan(0);
+      expect(awakenCost(2), t.id).toBeGreaterThan(awakenCost(1));
     }
   });
 
@@ -182,8 +191,9 @@ describe("tower data", () => {
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
-    // the roster grew 15 -> 27 -> 33 -> 37 -> 47 -> 48, then 58 with the casters
-    expect(TOWERS).toHaveLength(58);
+    // the roster grew 15 -> 27 -> 33 -> 37 -> 47 -> 48, then 58 with the casters,
+    // then 61 with Demon Execution, Heavenly God and Honor Emperor
+    expect(TOWERS).toHaveLength(61);
     // mechanics actually differ between them
     expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
     expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
@@ -312,6 +322,52 @@ describe("tower data", () => {
         expect(r.value.length).toBeGreaterThan(0);
       }
     }
+  });
+
+  it("ships the three new legendaries with their bespoke kits", () => {
+    const ids = ["demon", "heavenly", "honor"];
+    for (const id of ids) {
+      const def = TOWER_BY_ID[id];
+      expect(def, id).toBeDefined();
+      expect(def.rarity, id).toBe("legendary");
+      expect(def.exotic, id).toBe(true);
+      expect(def.art, `${id} art family`).toBeTruthy();
+      for (const slot of [def.awk1, def.awk2]) {
+        expect(slot, id).toBeDefined();
+        expect(slot!.chance, id).toHaveLength(5);
+        expect(slot!.mult, id).toHaveLength(5);
+        if (slot!.mult2) expect(slot!.mult2, id).toHaveLength(5);
+      }
+    }
+    // Demon Execution: a red bolt on a cadence that eats half a boss's max HP
+    expect(TOWER_BY_ID.demon.execCd).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.demon.execBossHp).toBe(0.5);
+    // awakening only makes the bite deeper
+    expect(TOWER_BY_ID.demon.awk1!.mult[4]).toBeGreaterThan(TOWER_BY_ID.demon.execBossHp!);
+    // Demon Ritual: tier I already imprisons for the full 8 seconds and bleeds
+    // a flat 4% of maximum health a tick, later tiers only hold it longer
+    expect(TOWER_BY_ID.demon.awk2!.mult[0]).toBe(8);
+    expect(TOWER_BY_ID.demon.awk2!.mult2![0]).toBe(0.04);
+    expect(TOWER_BY_ID.demon.awk2!.mult[4]).toBeGreaterThan(TOWER_BY_ID.demon.awk2!.mult[0]);
+    // Rapid Strike: tier I drops the cadence straight to 2.5s, later tiers shave
+    // a little more off, so the ladder climbs down and never back up
+    const cd = TOWER_BY_ID.demon.awk1!.mult2!;
+    expect(cd[0]).toBe(2.5);
+    for (let i = 1; i < cd.length; i++) expect(cd[i]).toBeLessThanOrEqual(cd[i - 1]);
+    // Heavenly God: the laser runs through the lane behind whatever it hits
+    expect(TOWER_BY_ID.heavenly.laserBehind).toBeGreaterThanOrEqual(5);
+    expect(TOWER_BY_ID.heavenly.laserBehindMul).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.heavenly.laserBehindMul).toBeLessThan(1);
+    // Honor Emperor: dropped on a tower it feeds that tower instead of merging
+    expect(TOWER_BY_ID.honor.honor).toBe(true);
+  });
+
+  it("sells SP gain in the run shop, capped so it cannot run away", () => {
+    const item = RUN_SHOP.find((i) => i.id === "spgain")!;
+    expect(item, "spgain run shop item").toBeTruthy();
+    expect(item.max).toBeGreaterThan(1);
+    expect(item.max * 0.1).toBeLessThanOrEqual(1);
+    expect(runShopCost(item, item.max - 1)).toBeGreaterThan(item.cost);
   });
 
   it("prices the run shop so repeat buys get more expensive", () => {
@@ -551,10 +607,10 @@ describe("balance patch", () => {
     expect(SP_COST_STEP).toBe(10);
     expect([0, 1, 2, 3, 4].map(spCost)).toEqual([100, 110, 120, 130, 140]);
     expect(spawnBudget()).toBe(460);
-    // ascent keeps its own steeper ladder so cheap summons don't cheapen it
-    expect([0, 1, 2].map(ascSpCost)).toEqual([120, 195, 270]);
-    // the ascent ladder climbs 75 per press against the summon ladder's 10
-    expect(ascSpCost(1) - ascSpCost(0)).toBeGreaterThan(spCost(1) - spCost(0));
+    // ascent is its own ladder: 100 SP to start and +100 for every press
+    expect([0, 1, 2].map(ascSpCost)).toEqual([100, 200, 300]);
+    expect(ascSpCost(1) - ascSpCost(0)).toBe(ASC_COST_STEP);
+    expect(ASC_COST_STEP).toBeGreaterThan(spCost(1) - spCost(0));
     expect(ascSpCost(2)).toBeGreaterThan(spCost(8));
   });
 
