@@ -136,6 +136,18 @@ describe("published build (index.html)", () => {
       "Guild Hall",
       "COIN STORE",
       "STANDINGS",
+      // mythic arsenal II, the staged results screen and the Tone.js audio
+      "Nova Cannon",
+      "Gravity Well",
+      "Thunder Crown",
+      "Void Ripper",
+      "Soul Furnace",
+      "Maelstrom",
+      "Starfall Battery",
+      "Chrono Lock",
+      "Grave Bloom",
+      "Rift Colossus",
+      "SALVAGED FROM THE RUN",
     ];
     const missing = markers.filter((m) => !html.includes(m));
     expect(missing, `published bundle is missing: ${missing.join(", ")}`).toHaveLength(0);

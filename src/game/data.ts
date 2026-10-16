@@ -40,6 +40,16 @@ export type TowerKind =
   | "prism"
   | "aegis"
   | "hellgate"
+  | "nova"
+  | "gravity"
+  | "thundercrown"
+  | "voidrip"
+  | "furnace"
+  | "maelstrom"
+  | "starfall"
+  | "chronolock"
+  | "gravebloom"
+  | "colossus"
   | "axe"
   | "frost"
   | "mortar"
@@ -184,6 +194,18 @@ export interface TowerDef {
   pulseRate?: number;
   /** shots that leave a burning pool on the ground where they land */
   lava?: boolean;
+  /** support towers: how far a pulse drags enemies back along the path */
+  pull?: number;
+  upPull?: number;
+  /** armour shredded off whatever a shot hits (0.06 = -6% per hit) */
+  shred?: number;
+  upShred?: number;
+  ascShred?: number;
+  /** rocks a volley calls down on random enemies */
+  meteors?: number;
+  upMeteors?: number;
+  /** radius a pulse or meteor hits, when it differs from the default */
+  pulseRadius?: number;
   /** extra damage per kill this tower has landed, capped (Scorching Hot style) */
   killStack?: number;
   /** canvas + icon art family (defaults to the tower kind) */
@@ -665,6 +687,103 @@ export const TOWERS: TowerDef[] = [
       "Chance for the gate to tear open far wider", [0.2, 0.65], [0.4, 1.2]),
     awk2: awking("Lake of Fire", "burn",
       "The fire it leaves burns far hotter and longer", [0.3, 0.9], [0.6, 2.6]),
+  },
+  // ---------- mythic arsenal II: ten more legendaries ----------
+  {
+    id: "nova", name: "Nova Cannon", rarity: "legendary", kind: "nova", art: "nova", accent: "#ffd7a1",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Lobs a three-shell salvo that flowers into a wide starburst on impact.",
+    dmg: 620, upDmg: 16, ascDmg: 22, rate: 1.55, upRate: 0.03, ascRate: 0.04,
+    splash: 120, upSplash: 6, ascSplash: 8, multi: 3, aspd: 0.04, upAspd: 0.01, ascAspd: 0.012,
+    awk1: awking("Nova Core", "heavy", "Chance to load a core shell that detonates for far more damage.", [0.14, 0.55], [0.6, 10]),
+    awk2: awking("Supernova Bloom", "splash", "Chance for a shell to bloom into a much wider starburst.", [0.25, 1], [0.25, 1.5]),
+  },
+  {
+    id: "gravity", name: "Gravity Well", rarity: "legendary", kind: "gravity", art: "well", accent: "#b9a7ff",
+    target: "none", exotic: true, unlockFrags: 1,
+    desc: "Fires nothing. Its well pulses on a timer, dragging the horde backwards down the lane.",
+    dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
+    aspd: 0.05, upAspd: 0.01, ascAspd: 0.02, pulse: 190, upPulse: 18, pulseRate: 3, pulseRadius: 168,
+    pull: 34, upPull: 3, slow: 0.45, slowDur: 2,
+    awk1: awking("Event Horizon", "slow", "Chance the pulse pins everything it catches in place for longer.", [0.3, 1], [0.15, 0.7]),
+    awk2: awking("Collapse", "quake", "Chance the pulse slams shut, staggering everything nearby.", [0.2, 0.8], [0.3, 1.8]),
+  },
+  {
+    id: "thundercrown", name: "Thunder Crown", rarity: "legendary", kind: "thundercrown", art: "crown", accent: "#ffe86b",
+    target: "all", exotic: true, unlockFrags: 1,
+    desc: "Calls a ring of sky pillars down on the field and forks the light between them.",
+    dmg: 300, upDmg: 9, ascDmg: 12, rate: 1.1, upRate: 0.02, ascRate: 0.03,
+    chain: 3, upChain: 1, ascChain: 1, aspd: 0.06, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Storm Judge", "critup", "Chance the whole strike lands as a guaranteed crit.", [0.16, 0.5], [0.3, 1.6]),
+    awk2: awking("Chain Crown", "chain", "Chance for the strike to fork into more enemies.", [0.25, 1], [1, 6]),
+  },
+  {
+    id: "voidrip", name: "Void Ripper", rarity: "legendary", kind: "voidrip", art: "ripper", accent: "#c9a7ff",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "A lance that rips through a whole file, eating a slice of every maximum HP it touches.",
+    dmg: 460, upDmg: 12, ascDmg: 16, rate: 0.9, upRate: 0.02, ascRate: 0.03,
+    pierce: 5, upPierce: 1, ascPierce: 1, pctHp: 0.09, upPctHp: 0.004, ascPctHp: 0.006,
+    burnPct: 0.5, burnDur: 4, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Rift Tear", "heavy", "Chance to tear a much deeper wound on the first thing it hits.", [0.16, 0.5], [0.5, 4]),
+    awk2: awking("Rift Fire", "burn", "Chance to leave a burning rift on whatever it lands on.", [0.3, 1], [0.5, 2.6]),
+  },
+  {
+    id: "furnace", name: "Soul Furnace", rarity: "legendary", kind: "furnace", art: "furnace", accent: "#ff8c3d",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Feeds on every kill: each one stokes the fire and pays a bounty in gold.",
+    dmg: 380, upDmg: 10, ascDmg: 14, rate: 0.7, upRate: 0.015, ascRate: 0.02,
+    splash: 90, upSplash: 4, ascSplash: 6, burnPct: 0.9, burnDur: 5,
+    killStack: 0.05, goldGain: 6, aspd: 0.04, upAspd: 0.01, ascAspd: 0.012,
+    awk1: awking("Ember Feed", "burn", "Chance to douse the target in a much longer, hotter blaze.", [0.3, 1], [0.6, 3]),
+    awk2: awking("Ash Tithe", "bounty", "Chance a kill pays out an extra purse of gold.", [0.35, 1], [6, 40]),
+  },
+  {
+    id: "maelstrom", name: "Maelstrom", rarity: "legendary", kind: "maelstrom", art: "whirl", accent: "#7fe9ff",
+    target: "none", exotic: true, unlockFrags: 1,
+    desc: "A whirling pool of blade-wind that chews and slows everything caught inside it.",
+    dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
+    aspd: 0.05, upAspd: 0.012, ascAspd: 0.02, pulse: 240, upPulse: 20, pulseRate: 2.2, pulseRadius: 152,
+    slow: 0.55, slowDur: 1.6, pull: 16, upPull: 2,
+    awk1: awking("Undertow", "slow", "Chance the whirlpool drags harder and holds what it catches.", [0.3, 1], [0.2, 0.8]),
+    awk2: awking("Drowning Rot", "burn", "Chance the blades leave a rotting burn on everything in the pool.", [0.25, 0.9], [0.4, 2.2]),
+  },
+  {
+    id: "starfall", name: "Starfall Battery", rarity: "legendary", kind: "starfall", art: "star", accent: "#ffd23f",
+    target: "all", exotic: true, unlockFrags: 1,
+    desc: "Marks a handful of enemies and calls burning rocks down on their heads.",
+    dmg: 300, upDmg: 9, ascDmg: 12, rate: 1.3, upRate: 0.025, ascRate: 0.035,
+    meteors: 5, upMeteors: 0, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Guided Rocks", "heavy", "Chance for one rock in the volley to hit far harder.", [0.18, 0.6], [0.7, 5]),
+    awk2: awking("Double Barrage", "volley", "Chance to call a second volley down on top of the first.", [0.2, 0.75], [2, 7]),
+  },
+  {
+    id: "chronolock", name: "Chrono Lock", rarity: "legendary", kind: "chronolock", art: "lock", accent: "#9fe8ff",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Stops time around whatever it hits: freezing shots, staggering blasts and a long chill.",
+    dmg: 240, upDmg: 7, ascDmg: 10, rate: 0.6, upRate: 0.012, ascRate: 0.018,
+    freeze: 0.45, upFreeze: 0.02, ascFreeze: 0.03, slow: 0.5, upSlow: 0.015, ascSlow: 0.02, slowDur: 3,
+    stun: 0.5, upStun: 0.02, ascStun: 0.03, splash: 70, upSplash: 3, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Deep Lock", "freeze", "Chance to lock a target out of time for much longer.", [0.3, 1], [0.6, 2.4]),
+    awk2: awking("Clockwork Chill", "slow", "Chance to leave the target crawling in slow motion.", [0.3, 1], [0.2, 0.75]),
+  },
+  {
+    id: "gravebloom", name: "Grave Bloom", rarity: "legendary", kind: "gravebloom", art: "bloom", accent: "#8effc4",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Blooms on the wounded: heavy percent-of-max-HP strikes and a purse for every kill.",
+    dmg: 420, upDmg: 11, ascDmg: 15, rate: 1.2, upRate: 0.025, ascRate: 0.035,
+    pctHp: 0.14, upPctHp: 0.006, ascPctHp: 0.009, goldGain: 8, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
+    awk1: awking("Grave Tithe", "execute", "Chance to reap anything already under a quarter of its health.", [0.2, 0.6], [0.16, 0.3]),
+    awk2: awking("Bloom Offering", "bounty", "Chance a kill blooms into an extra purse of gold.", [0.35, 1], [8, 52]),
+  },
+  {
+    id: "colossus", name: "Rift Colossus", rarity: "legendary", kind: "colossus", art: "colossus", accent: "#ff8f9a",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Slow, enormous siege shells that shatter armour on impact and flatten a whole cell.",
+    dmg: 980, upDmg: 26, ascDmg: 34, rate: 2.2, upRate: 0.04, ascRate: 0.05,
+    splash: 100, upSplash: 5, ascSplash: 7, shred: 0.06, upShred: 0.004, ascShred: 0.006,
+    aspd: 0.03, upAspd: 0.008, ascAspd: 0.01,
+    awk1: awking("Siege Core", "heavy", "Chance to load a siege shell that cracks the target wide open.", [0.2, 0.6], [0.8, 6]),
+    awk2: awking("Colossus Rage", "critup", "Chance the shell lands as a guaranteed crit.", [0.14, 0.45], [0.4, 2]),
   },
 ];
 

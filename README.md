@@ -97,13 +97,15 @@ Heroes level up to 10 with gold — each level adds 30% ability power and shaves
 
 - **Summon:** tap **SUMMON** (top-left) to drop a tower straight onto a **random free build cell** —
   no dragging, and no "summon plus upgrade" bundle: a summon is only ever a new tower. SP cost rises
-  with every summon. Only when the board is genuinely full does the summon **fuse the largest pair of
-  same-point towers** to open a cell, which is announced in a toast. The path (left column, right
-  column, bottom row) is blocked, so there are 15 build cells.
+  with every summon, and it is the **only** way a new tower type reaches the board. If every cell is
+  taken the summon refuses and says so, because freeing a cell is the merge's job. The path (left
+  column, right column, bottom row) is blocked, so there are 15 build cells.
 - **Arena zoom:** the − / % / + control sits in the bottom-left of the arena; zoom from fitted up to
   2× and the view scrolls when it overflows. The setting is remembered.
-- **Merge:** drag a placed tower onto another tower with the **same point count** to fuse them into
-  a random tower with +1 point (max 8). Higher points = faster firing and +30% damage per point.
+- **Merge:** drag a placed tower onto another tower with the **same point count**. The tower you
+  dropped onto keeps its identity and goes up a point tier (max 8) — the merge never rolls a new
+  tower type, so it is a pure upgrade that also frees the cell the dragged tower occupied. Higher
+  points = faster firing and +30% damage per point.
 - **Points:** placed lineup towers pulse points to each other as they shoot (+1 point every 3rd
   volley) — lineup order is the pulse ring.
 - **Ascend:** the bottom bar is **fixed** — six cards, one per rotation tower, in rotation order.
@@ -238,6 +240,16 @@ counters, a roster pulled from the ladder, and a chat you can post in.
 | Prism Array | Legendary | Splits one beam into four that each find their own enemy, then burns them (Refraction, Scorch) |
 | Aegis Core | Legendary | Support: fires nothing, projects a huge attack-speed/power aura and pulses area damage on a timer (Bulwark Field, Retribution) |
 | Hellgate | Legendary | Rips a burning gate open on the lane: colossal splash damage and a **lake of fire** left burning behind it (Gates Undone, Lake of Fire) |
+| Nova Cannon | Legendary | Three-shell salvo, each shell blooming into a wide starburst (Nova Core, Supernova Bloom) |
+| Gravity Well | Legendary | Support: pulses on a timer and **drags the horde backwards** down the lane (Event Horizon, Collapse) |
+| Thunder Crown | Legendary | Sky pillars on up to six targets, then forks the light between them (Storm Judge, Chain Crown) |
+| Void Ripper | Legendary | A lance through a whole file that eats a slice of every max HP and leaves a burning rift (Rift Tear, Rift Fire) |
+| Soul Furnace | Legendary | Feeds on kills: each one stokes the fire, and every kill pays a gold bounty (Ember Feed, Ash Tithe) |
+| Maelstrom | Legendary | Whirling pool of blade-wind that chews, slows and drags everything inside (Undertow, Drowning Rot) |
+| Starfall Battery | Legendary | Marks a handful of enemies and calls burning rocks down on their heads (Guided Rocks, Double Barrage) |
+| Chrono Lock | Legendary | Freezing shots, staggered blasts and a long chill — time stops around the target (Deep Lock, Clockwork Chill) |
+| Grave Bloom | Legendary | Heavy percent-of-max-HP strikes on the wounded, and a purse for every kill (Grave Tithe, Bloom Offering) |
+| Rift Colossus | Legendary | Slow siege shells that **shatter armour** on impact and flatten a whole cell (Siege Core, Colossus Rage) |
 
 ## Mailbox
 
@@ -452,9 +464,12 @@ enemies, with Overpenetration and Rail Burn awakenings).
 
 ## Fixed ascent bar, vertical sky bolts, Void Titan, icon grid and mail/season
 
-- **Merging is spawn-only.** A summon always deploys a fresh tower on a random free cell; the old
-  "spend the summon on a point instead" fallback is gone. A full board fuses the largest same-point
-  pair to open a cell and says so in a toast.
+- **Spawning is grid-only.** A summon always deploys a fresh tower on a random free cell, and the
+  old "spend the summon on a point instead" fallback is gone. The auto-merge that used to fire on a
+  full board is gone too: on a full board the summon refuses and tells you to merge by hand.
+- **Merging only upgrades.** A same-point pair now fuses into the tower you dropped onto — same
+  type, +1 point — instead of re-rolling into a random tower, so new tower types can only ever
+  arrive through the summon.
 - **The top installed-tower strip is gone.** The HUD is one compact row: SUMMON, then SP / gold /
   lives / wave / enemies-left / towers-deployed / merged-crit pills and the run shop.
 - **The bottom bar is fixed.** One card per rotation tower, always in the same slots; spawning and
@@ -472,9 +487,43 @@ enemies, with Overpenetration and Rail Burn awakenings).
   (`heavy`, `critup`, `volley`, `freeze`, `burn`, `chain`, `slow`, `splash`, `sp`, `bounty`, `aura`,
   `execute`, `quake`) is implemented in the battle engine, and the Towers screen lists the live tier
   effect for each path.
-- **Tower grid.** The Towers screen opens with the crit band and then a **compact icon grid** — one
-  cell per tower with the art, the level underneath and a rarity-tinted outline, plus a fragment
-  readout, an awakening badge and a rotation tick. Tapping a cell opens the full sheet; dragging it
-  onto a rotation chip reorders your summon preference. The rotation is a preference, not a wall:
-  every unlocked tower can be summoned whether it is listed or not.
+- **Tower grid.** The Towers screen opens with the crit band and then a **compact icon grid** grouped
+  into rarity rows (legendary first), one cell per tower with the art, the level underneath and a
+  rarity-tinted outline, plus a fragment readout, an awakening badge and a rotation tick. A filter
+  row (ALL / IN ROTATION / LOCKED / READY) keeps all 47 towers scannable. Tapping a cell opens the
+  full sheet; dragging it onto a rotation chip reorders your summon preference.
+- **The summon rotation decides what spawns.** Summoning draws **only** from the rotation you set in
+  the Towers tab (an empty rotation refuses the summon), so no tower can ever appear on the board
+  that you did not put on the list — merging cannot conjure one either.
 - **Mail and Season** screens (see above), wired into the bottom nav with their own badges.
+
+## Mythic arsenal II, Tone.js audio, staged results screen and a grouped tower section
+
+- **Ten more legendaries** — 47 towers total, ten of them mythic-exotic with two five-tier
+  awakenings each: **Nova Cannon** (three-shell starburst salvo), **Gravity Well** (a support well
+  that pulses and drags the horde back down the lane), **Thunder Crown** (sky pillars plus forked
+  light), **Void Ripper** (a file-wide lance that shaves max HP), **Soul Furnace** (kill-stacking
+  fire that pays gold), **Maelstrom** (a churning pool that chews, slows and pulls), **Starfall
+  Battery** (marks enemies and drops burning rocks on them), **Chrono Lock** (freezing, staggering,
+  chilling shots), **Grave Bloom** (percent-of-max-HP strikes and kill bounties) and **Rift
+  Colossus** (slow siege shells that **shatter armour** — every hit peels a slice of the target's
+  armour off, so long boss fights get easier). Each has its own art family on the canvas and in the
+  icon grid.
+- **Audio rebuilt on Tone.js.** The mixer is Tone's (`Gain` bus into `Compressor` + `Limiter`, a
+  `Reverb` plate on a send, `FeedbackDelay` slap, a dedicated bass lane) and every voice is a Tone
+  instrument or node: `Oscillator` + `AmplitudeEnvelope` + sweeping `Filter` tones, `Noise` bursts,
+  `FMSynth` clangs, `MembraneSynth` booms, `MetalSynth` sparkle. The whole palette — UI, currency,
+  chests, building, every tower family, bosses, the jackpot and the win/lose stingers — is
+  re-layered on top of it, and the ten new towers each got their own firing sound.
+- **Game over, reworked** — a staged results screen instead of a small panel: the verdict stamps in
+  over spinning rays, a stat strip (biggest hit, waves, towers built), then the **salvage list**
+  ticks in row by row with rarity-coloured payouts, and one button banks it all.
+- **Jackpot VFX, reworked** — a real cascade: a burst blows out of the card, coins and gems fall as
+  **comets** with hot trails and a landing bounce, embers spray off the bottom of the screen, the
+  backdrop pulses warm, and the JACKPOT tag now counts the actual payout.
+- **Top HUD fits now** — one grouped bar: SUMMON, an economy cluster (SP / gold / lives / enemies
+  left / towers deployed / overdrive) and a run cluster (round, merged crit stat, run shop). The
+  groups wrap as whole units instead of scattering loose pills, so the currency readout stays intact
+  on narrow screens.
+- **Summoning is rotation-only** (see above): a summon draws exclusively from the summon rotation,
+  and an empty rotation refuses the summon with a prompt to set one.

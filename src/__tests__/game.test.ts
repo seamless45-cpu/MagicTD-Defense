@@ -173,8 +173,8 @@ describe("tower data", () => {
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
-    // the roster grew 15 -> 27 -> 33, then to 37 with the mythic arsenal
-    expect(TOWERS).toHaveLength(37);
+    // the roster grew 15 -> 27 -> 33 -> 37, then to 47 with the second mythic wave
+    expect(TOWERS).toHaveLength(47);
     // mechanics actually differ between them
     expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
     expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
@@ -184,6 +184,42 @@ describe("tower data", () => {
     expect(TOWER_BY_ID.frost.slowAura).toBeGreaterThan(0);
     expect(TOWER_BY_ID.sun.target).toBe("all");
     expect(TOWER_BY_ID.dragon.killStack).toBeGreaterThan(0);
+  });
+
+  it("ships the ten mythic legendaries with distinct mechanics", () => {
+    const mythic = [
+      "nova", "gravity", "thundercrown", "voidrip", "furnace",
+      "maelstrom", "starfall", "chronolock", "gravebloom", "colossus",
+    ];
+    expect(mythic).toHaveLength(10);
+    for (const id of mythic) {
+      const def = TOWER_BY_ID[id];
+      expect(def, id).toBeDefined();
+      expect(def.rarity, id).toBe("legendary");
+      expect(def.exotic, id).toBe(true);
+      expect(def.art, `${id} art family`).toBeTruthy();
+      expect(def.awk1, id).toBeDefined();
+      expect(def.awk2, id).toBeDefined();
+      expect(def.awk1!.chance, id).toHaveLength(5);
+      expect(def.awk2!.mult, id).toHaveLength(5);
+    }
+    // mechanics that actually differ between them
+    expect(TOWER_BY_ID.nova.multi).toBeGreaterThan(1);
+    expect(TOWER_BY_ID.gravity.pull).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.gravity.target).toBe("none");
+    expect(TOWER_BY_ID.thundercrown.chain).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.voidrip.pierce).toBeGreaterThan(1);
+    expect(TOWER_BY_ID.voidrip.pctHp).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.furnace.killStack).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.furnace.goldGain).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.maelstrom.pulse).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.maelstrom.pull).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.starfall.meteors).toBeGreaterThan(2);
+    expect(TOWER_BY_ID.chronolock.freeze).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.chronolock.stun).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.gravebloom.pctHp).toBeGreaterThan(TOWER_BY_ID.voidrip.pctHp!);
+    expect(TOWER_BY_ID.colossus.shred).toBeGreaterThan(0);
+    expect(TOWER_BY_ID.colossus.dmg).toBeGreaterThan(TOWER_BY_ID.nova.dmg);
   });
 
   it("describes each tower's next upgrade as a +X / -Y delta", () => {

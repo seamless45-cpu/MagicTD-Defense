@@ -13,6 +13,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),
+      // Tone eagerly builds a real AudioContext at import time, which crashes
+      // jsdom; tests run against a magic no-op stand-in instead.
+      tone: path.resolve(__dirname, "src/__tests__/tone-stub.ts"),
     },
   },
   test: {

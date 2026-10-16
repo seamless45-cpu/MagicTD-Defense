@@ -43,6 +43,7 @@ export default function Towers({
   const dragRef = useRef<Drag | null>(null);
   const slotRefs = useRef<(HTMLDivElement | null)[]>([]);
   const [shakeCard, setShakeCard] = useState<string | null>(null);
+  const [twFilter, setTwFilter] = useState<"all" | "line" | "locked" | "ready">("all");
   /** tower id shown in the preview panel (clicking a card opens it) */
   const [preview, setPreview] = useState<string | null>(null);
   const [ceremony, setCeremony] = useState<CeremonyData | null>(null);
@@ -280,6 +281,18 @@ export default function Towers({
 
   const unlocked = Object.entries(save.levels).filter(([, l]) => l > 0);
   const avg = unlocked.length ? unlocked.reduce((a, [, l]) => a + l, 0) / unlocked.length : 0;
+
+  /** what the rarity-grouped grid shows under the current filter */
+  const twVisible = TOWERS.filter((def) => {
+    const lv = save.levels[def.id] || 0;
+    if (twFilter === "line") return save.lineup.includes(def.id);
+    if (twFilter === "locked") return lv === 0;
+    if (twFilter === "ready") {
+      const fr = lv > 0 ? upgradeFragCost(lv) : def.unlockFrags;
+      return lv > 0 && lv < MAX_MENU_LEVEL && (save.frags[def.id] || 0) >= fr;
+    }
+    return true;
+  });
   const ascCost = ascentAllCost(avg);
   const pv = preview ? TOWER_BY_ID[preview] : null;
 
@@ -352,53 +365,100 @@ export default function Towers({
         </div>
       </div>
 
-      {/* TOWER GRID — one compact cell per tower: icon, level underneath, and
-          an outline in the tower's rarity colour. No buttons, no descriptions;
-          tap a cell for the full sheet, drag it onto the lineup bar to reorder. */}
-      <div
-        className="grid min-h-0 flex-1 grid-cols-4 content-start gap-1.5 overflow-y-auto scroll-thin pr-1 sm:grid-cols-6 xl:grid-cols-8"
-        data-testid="tower-grid"
-      >
-        {TOWERS.map((def, i) => {
-          const lv = save.levels[def.id] || 0;
-          const locked = lv === 0;
-          const rc = RARITY[def.rarity];
-          const fr = lv > 0 ? upgradeFragCost(lv) : def.unlockFrags;
-          const have = save.frags[def.id] || 0;
-          const inLine = save.lineup.includes(def.id);
-          const awoken = (save.awn[def.id]?.[0] || 0) + (save.awn[def.id]?.[1] || 0);
-          const maxed = lv >= MAX_MENU_LEVEL;
-          const ready = have >= fr;
-          return (
+      {/* TOWER GRID — icons in rarity-grouped rows: icon, level underneath and
+          an outline in the tower's rarity colour. A filter row keeps 47 towers
+          scannable: everything, just the summon rotation, the locked bank or
+          what's ready to spend fragments on. No buttons, no descriptions; tap a
+          cell for the full sheet, drag it onto the rotation bar to reorder. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-1.5" data-testid="tower-grid">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5" data-testid="tw-filters">
+          {(
+            [
+              ["all", "ALL"],
+              ["line", "IN ROTATION"],
+              ["locked", "LOCKED"],
+              ["ready", "READY"],
+            ] as const
+          ).map(([id, label]) => (
             <button
-              key={def.id}
-              data-tower={def.id}
-              data-locked={locked ? "1" : "0"}
-              title={`${def.name} — ${locked ? `locked, needs ${def.unlockFrags} fragments` : `Lv ${lv}${maxed ? " (max)" : ""}`}`}
-              className={`tw-cell ${shakeCard === def.id ? "anim-shake" : ""} ${inLine ? "in-line" : ""} anim-pop`}
-              style={{
-                animationDelay: `${i * 12}ms`,
-                borderColor: locked ? "#4a3a9688" : rc.color,
-                boxShadow: locked ? "none" : `0 0 0 1px ${rc.color}22, 0 6px 16px -10px ${rc.color}aa`,
+              key={id}
+              data-testid={"tw-filter-" + id}
+              className={"chip chip-btn" + (twFilter === id ? " on" : "")}
+              onClick={() => {
+                sfx.click();
+                setTwFilter(id);
               }}
-              onPointerDown={(e) => startDrag(def.id, e)}
             >
-              <span className="tw-cell-art">
-                <TowerIcon def={def} size={46} locked={locked} />
-              </span>
-              <span className="tw-cell-lv" style={{ color: locked ? "var(--dim)" : rc.color }}>
-                {locked ? "LOCKED" : maxed ? "MAX" : `LV ${lv}`}
-              </span>
-              <span className="tw-cell-frag" style={{ color: locked ? "var(--dim)" : ready ? "#8effc4" : "var(--dim)" }}>
-                <GemIcon size={11} />
-                <b className="num">{have}</b>
-                {!maxed && <i>/{fr}</i>}
-              </span>
-              {awoken > 0 && <span className="tw-cell-awk">✦{awoken}</span>}
-              {inLine && <span className="tw-cell-line">✓</span>}
+              {label}
             </button>
-          );
-        })}
+          ))}
+          <span className="ml-auto text-[10px] font-bold tracking-[0.14em] text-[var(--dim)]">
+            <span className="num">{twVisible.length}</span> / <span className="num">{TOWERS.length}</span> SHOWN
+          </span>
+        </div>
+
+        <div className="grid min-h-0 flex-1 auto-rows-min grid-cols-4 content-start gap-x-1.5 gap-y-1 overflow-y-auto scroll-thin pr-1 sm:grid-cols-6 xl:grid-cols-8">
+          {(["legendary", "epic", "decent", "normal"] as const).map((rarity) => {
+            const group = twVisible.filter((def) => def.rarity === rarity);
+            if (!group.length) return null;
+            const rc = RARITY[rarity];
+            return (
+              <div key={rarity} className="tw-group col-span-full">
+                <div className="tw-group-head" style={{ color: rc.color }}>
+                  <i style={{ background: rc.color }} />
+                  {rarity.toUpperCase()}
+                  <span className="num">· {group.length}</span>
+                </div>
+                <div className="grid grid-cols-4 gap-x-1.5 gap-y-1 sm:grid-cols-6 xl:grid-cols-8">
+                  {group.map((def, i) => {
+                    const lv = save.levels[def.id] || 0;
+                    const locked = lv === 0;
+                    const fr = lv > 0 ? upgradeFragCost(lv) : def.unlockFrags;
+                    const have = save.frags[def.id] || 0;
+                    const inLine = save.lineup.includes(def.id);
+                    const awoken = (save.awn[def.id]?.[0] || 0) + (save.awn[def.id]?.[1] || 0);
+                    const maxed = lv >= MAX_MENU_LEVEL;
+                    const ready = have >= fr;
+                    return (
+                      <button
+                        key={def.id}
+                        data-tower={def.id}
+                        data-locked={locked ? "1" : "0"}
+                        title={def.name + " — " + (locked ? "locked, needs " + def.unlockFrags + " fragments" : "Lv " + lv + (maxed ? " (max)" : ""))}
+                        className={"tw-cell " + (shakeCard === def.id ? "anim-shake " : "") + (inLine ? "in-line " : "") + "anim-pop"}
+                        style={{
+                          animationDelay: i * 12 + "ms",
+                          borderColor: locked ? "#4a3a9688" : rc.color,
+                          boxShadow: locked ? "none" : "0 0 0 1px " + rc.color + "22, 0 6px 16px -10px " + rc.color + "aa",
+                        }}
+                        onPointerDown={(e) => startDrag(def.id, e)}
+                      >
+                        <span className="tw-cell-art">
+                          <TowerIcon def={def} size={46} locked={locked} />
+                        </span>
+                        <span className="tw-cell-lv" style={{ color: locked ? "var(--dim)" : rc.color }}>
+                          {locked ? "LOCKED" : maxed ? "MAX" : "LV " + lv}
+                        </span>
+                        <span className="tw-cell-frag" style={{ color: locked ? "var(--dim)" : ready ? "#8effc4" : "var(--dim)" }}>
+                          <GemIcon size={11} />
+                          <b className="num">{have}</b>
+                          {!maxed && <i>/{fr}</i>}
+                        </span>
+                        {awoken > 0 && <span className="tw-cell-awk">✦{awoken}</span>}
+                        {inLine && <span className="tw-cell-line">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+          {twVisible.length === 0 && (
+            <div className="col-span-full py-8 text-center text-[12px] font-bold tracking-[0.18em] text-[var(--dim)]">
+              NOTHING MATCHES THIS FILTER
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ASCENT ALL */}

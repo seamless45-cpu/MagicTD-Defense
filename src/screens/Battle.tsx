@@ -63,7 +63,6 @@ import {
   ROMAN,
   eventBonus,
   eventForDate,
-  leagueFor,
   trophyDelta,
   type AwkSpec,
   type ChipBag,
@@ -74,7 +73,7 @@ import {
   type HeroKind,
   type RunShopItem,
 } from "../game/data";
-import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon } from "../components/ui";
+import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon, GemIcon, TokenIcon, ShardIcon } from "../components/ui";
 
 /**
  * The weekday event is resolved once per module load: it modifies enemy health,
@@ -231,7 +230,20 @@ interface BT {
 interface Strike { x: number; y: number; life: number; max: number; width: number; color: string; seed: number }
 
 /** a falling rock telegraphed by a boss — the shadow grows, then it lands */
-interface Met { x: number; y: number; t: number; total: number; uid: number; color: string; done?: boolean }
+interface Met {
+  x: number;
+  y: number;
+  t: number;
+  total: number;
+  uid: number;
+  color: string;
+  done?: boolean;
+  /** friendly rocks (Starfall) carry damage instead of knocking towers offline */
+  dmg?: number;
+  blast?: number;
+  tw?: BT;
+  heavy?: boolean;
+}
 
 interface Proj {
   x: number;
@@ -266,6 +278,8 @@ interface Proj {
   blast?: number;
   /** ground-slam shots throw a bigger shockwave on impact */
   shockwave?: boolean;
+  /** armour shredded off the target on hit */
+  shred?: number;
   /** a shot boosted by a Heavy-type awakening: drawn bigger */
   heavy?: boolean;
   /** splash damage as a share of the shot's own damage (1 = full damage) */
@@ -1473,6 +1487,159 @@ export default function Battle({
           if (over) addText(ep.x, ep.y - 42, "OVER PENETRATION", "#7fe9ff", 14, true);
           break;
         }
+        // ---------- mythic arsenal II ----------
+        case "nova": {
+          // a three-shell salvo: each shell finds its own enemy and blooms wide
+          const blast = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          const picks = g.enemies
+            .filter((e) => !e.dead)
+            .sort((a, b) => {
+              const da = Math.abs(a.d - target.d);
+              const db = Math.abs(b.d - target.d);
+              return da - db;
+            })
+            .slice(0, t.def.multi || 3);
+          const list = picks.length ? picks : [target];
+          list.forEach((e, i) => {
+            const tp = enemyPos(e);
+            push({ speed: 420, kind: "cannon", blast, blastDmg: 0.7, splash: blast, shockwave: true }, tp, e);
+            if (i === 0) sfx.explosion();
+          });
+          glow(p.x, p.y, "#ffd7a1", 54, 0.3);
+          g.shake = fxShake(2.5);
+          break;
+        }
+        case "gravity": {
+          // support: the well fires nothing itself, the pulse tick does the work
+          break;
+        }
+        case "thundercrown": {
+          // sky pillars on up to six targets, then forked light between them
+          const picks = g.enemies
+            .filter((e) => !e.dead)
+            .sort((a, b) => b.hp - a.hp)
+            .slice(0, 6);
+          const extra = Math.round((t.def.chain || 0) + (t.def.upChain || 0) * upg + (t.def.ascChain || 0) * asc);
+          const c2 = rollAwk(t, 1);
+          const links = extra + (awkSpec(t, 1)?.fx === "chain" && c2 > 0 ? Math.round(awkSpec(t, 1)!.mult[c2 - 1]) : 0);
+          const now2 = performance.now();
+          picks.forEach((e, i) => {
+            const ep2 = enemyPos(e);
+            g.strikes.push({ x: ep2.x, y: ep2.y, life: 0.34, max: 0.34, width: 9, color: "#ffe86b", seed: (i * 23) % 91 });
+            addZone({ kind: "rift", x: ep2.x, y: ep2.y, r: 44, life: 0.3, max: 0.3, dps: 0, slow: 0, color: "#ffe86b" });
+            schedule(i * 0.03, () => {
+              if (!e.dead) dealDamage(e, dmg, { tw: t, color: "#ffe86b" });
+            });
+          });
+          for (let k = 1; k < Math.min(picks.length, links + 1); k++) {
+            const a2 = enemyPos(picks[k - 1]);
+            const b2 = enemyPos(picks[k]);
+            if (g.bolts.length < 42) g.bolts.push(randBolt(a2.x, a2.y, b2.x, b2.y, "#fff6c4", 2, 0.2, now2));
+          }
+          flash("#ffe86b", 0.09);
+          g.shake = fxShake(4);
+          sfx.superbolt();
+          break;
+        }
+        case "voidrip": {
+          const pierce = Math.round((t.def.pierce || 0) + (t.def.upPierce || 0) * upg + (t.def.ascPierce || 0) * asc);
+          const pctHp = (t.def.pctHp || 0) + (t.def.upPctHp || 0) * upg + (t.def.ascPctHp || 0) * asc;
+          push({
+            speed: 900,
+            pierce,
+            hitIds: [],
+            pctHp,
+            burnDps: dmg * ((t.def.burnPct || 0) + (t.def.upBurnPct || 0) * upg),
+            burnDur: t.def.burnDur || 4,
+            kind: "void",
+            blast: 26,
+          });
+          if (g.bolts.length < 42) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#c9a7ff", 2.6, 0.2, performance.now()));
+          glow(p.x, p.y, "#c9a7ff", 46, 0.25);
+          break;
+        }
+        case "furnace": {
+          const blast = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          push({
+            speed: 460,
+            kind: "cannon",
+            blast,
+            splash: blast,
+            blastDmg: 0.8,
+            burnDps: dmg * ((t.def.burnPct || 0) + (t.def.upBurnPct || 0) * upg),
+            burnDur: t.def.burnDur || 5,
+            shockwave: true,
+          });
+          embers(p.x, p.y, "#ff8c3d", 3);
+          break;
+        }
+        case "maelstrom": {
+          // support: the whirlpool is driven by the pulse tick
+          break;
+        }
+        case "starfall": {
+          // mark a handful of enemies and drop rocks on them a beat later
+          const rocks = Math.round((t.def.meteors || 3) + (t.def.upMeteors || 0) * upg);
+          const v2 = rollAwk(t, 1);
+          const extraRocks = awkSpec(t, 1)?.fx === "volley" && v2 > 0 ? Math.round(awkSpec(t, 1)!.mult[v2 - 1]) : 0;
+          const picks = g.enemies
+            .filter((e) => !e.dead)
+            .sort(() => Math.random() - 0.5)
+            .slice(0, rocks + extraRocks);
+          const heavyRock = Math.random() < 0.25;
+          picks.forEach((e, i) => {
+            const ep2 = enemyPos(e);
+            g.meteors.push({
+              x: ep2.x,
+              y: ep2.y,
+              t: 0.5 + i * 0.09,
+              total: 0.5 + i * 0.09,
+              uid: t.uid,
+              color: "#ffd23f",
+              dmg: dmg * (heavyRock && i === 0 ? 2.6 : 1),
+              blast: 96,
+              tw: t,
+            });
+          });
+          sfx.meteor();
+          break;
+        }
+        case "chronolock": {
+          const blast = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          push({
+            speed: 520,
+            kind: "ice",
+            blast,
+            splash: blast,
+            blastDmg: 0.5,
+            freezePct: Math.min(1, (t.def.freeze || 0) + (t.def.upFreeze || 0) * upg + (t.def.ascFreeze || 0) * asc),
+            slow: (t.def.slow || 0) + (t.def.upSlow || 0) * upg,
+            slowDur: t.def.slowDur || 3,
+            stunS: (t.def.stun || 0) + (t.def.upStun || 0) * upg,
+          });
+          break;
+        }
+        case "gravebloom": {
+          const pctHp = (t.def.pctHp || 0) + (t.def.upPctHp || 0) * upg + (t.def.ascPctHp || 0) * asc;
+          push({ speed: 620, kind: "void", pctHp, blast: 34 });
+          glow(p.x, p.y, "#8effc4", 44, 0.25);
+          break;
+        }
+        case "colossus": {
+          const blast = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          push({
+            speed: 300,
+            kind: "cannon",
+            blast,
+            splash: blast,
+            blastDmg: 0.75,
+            shockwave: true,
+            shred: (t.def.shred || 0) + (t.def.upShred || 0) * upg + (t.def.ascShred || 0) * asc,
+          });
+          g.shake = fxShake(3.5);
+          sfx.explosion();
+          break;
+        }
         // ---------- mythic arsenal ----------
         case "reaper": {
           const pctHp = (t.def.pctHp || 0) + (t.def.upPctHp || 0) * upg + (t.def.ascPctHp || 0) * asc;
@@ -1663,6 +1830,14 @@ export default function Battle({
           addZone({ kind: "lava", x: pos.x, y: pos.y, r: pr.blast ?? 90, life: dur, max: dur, dps: pr.dmg * (0.3 + lake * 0.2), slow: 0.15, color: "#ff7a3d" });
         }
       }
+      // Rift Colossus shells shatter armour: every hit peels a slice off, so a
+      // long fight against an armoured boss gets easier instead of harder
+      if (pr.shred) {
+        target.armor = Math.max(0, target.armor - pr.shred);
+        ring(pos.x, pos.y, "#ff8f9a", 40);
+        addText(pos.x, pos.y - 52, "SHATTERED", "#ff8f9a", 12, false);
+        sfx.stun();
+      }
       if (pr.slow) {
         const dur = pr.slowDur || 3;
         if (pr.slow >= target.slow || target.slowT <= 0) target.slow = Math.min(0.85, pr.slow);
@@ -1754,11 +1929,18 @@ export default function Battle({
     const mergeTowers = (a: BT, b: BT) => {
       const cell = b.cell!;
       const p = cellCenter(cell.c, cell.r);
-      const nd = TOWERS[Math.floor(Math.random() * TOWERS.length)];
-      b.def = nd;
-      b.points = Math.min(MAX_POINTS, a.points + 1);
-      b.bLv = 1;
-      b.menuLv = Math.max(1, saveRef.current.levels[nd.id] || 1);
+      // merging is a pure upgrade: the tower you dropped onto keeps its type and
+      // gains a point. New tower types only ever arrive through a summon.
+      const nd = b.def;
+      const wanted = Math.min(MAX_POINTS, a.points + 1);
+      if (wanted <= b.points) {
+        // nothing to gain: never eat a tower for nothing
+        sfx.error();
+        toastRef.current(`${nd.name} is already at ${MAX_POINTS} points`, "#ff4d5e");
+        return;
+      }
+      const gained = true;
+      b.points = wanted;
       b.streak = 0;
       b.shots = 0;
       b.cd = 0.3;
@@ -1767,9 +1949,12 @@ export default function Battle({
       sfx.merge();
       ring(p.x, p.y, "#ffffff", 60);
       burst(p.x, p.y, RARITY[nd.rarity].color, 24, 260);
-      addText(p.x, p.y - 44, "MERGE!", "#ffffff", 18, true);
-      toastRef.current(`Merged into ${nd.name} · ${b.points} pts`, RARITY[nd.rarity].color);
-      const tier2 = saveRef.current.awn["hellstorm"]?.[1] || 0;
+      addText(p.x, p.y - 44, gained ? "MERGE!" : "MAX POINTS", "#ffffff", 18, true);
+      toastRef.current(
+        gained ? `${nd.name} merged to ${b.points} pts` : `${nd.name} is already at ${MAX_POINTS} points`,
+        RARITY[nd.rarity].color
+      );
+      const tier2 = nd.id === "hellstorm" ? saveRef.current.awn["hellstorm"]?.[1] || 0 : 0;
       if (nd.id === "hellstorm" && tier2 > 0) {
         const beams = nd.awk2!.mult[tier2 - 1];
         const targets = g.enemies.filter((e) => !e.dead).sort((x, y) => y.d - x.d).slice(0, beams);
@@ -2153,10 +2338,10 @@ export default function Battle({
     heroRef.current = hero;
 
     /**
-     * SUMMON always puts a new tower on the board — a random free cell, never a
-     * stat on an existing tower. When the board is genuinely full it fuses two
-     * towers that share a point tier to open a cell, then drops the new tower in.
-     * That keeps "spawn" and "upgrade" as separate verbs.
+     * SUMMON spawns a tower and does nothing else: one new tower, on a random
+     * free cell. It never combines a spawn with an upgrade, and it never fuses
+     * towers to make room — on a full board the player has to merge by hand,
+     * which is the only thing that frees a cell.
      */
     const summon = () => {
       const cost = summonCost();
@@ -2168,38 +2353,23 @@ export default function Battle({
       const unlocked = Object.keys(saveRef.current.levels).filter((id) => saveRef.current.levels[id] > 0);
       if (unlocked.length === 0) return;
 
-      // free a cell if we need to: merging two same-tier towers opens one up
-      let cell = randFreeCell(g);
+      const cell = randFreeCell(g);
       if (!cell) {
-        const groups = new Map<number, BT[]>();
-        for (const t of g.towers) {
-          if (!t.cell) continue;
-          const list = groups.get(t.points) || [];
-          list.push(t);
-          groups.set(t.points, list);
-        }
-        const pair = [...groups.values()].filter((list) => list.length >= 2).sort((a2, b2) => b2.length - a2.length)[0];
-        if (!pair) {
-          sfx.error();
-          toastRef.current("Board full — drag two towers together to merge", "#ff4d5e");
-          return;
-        }
-        const [src2, dst2] = pair;
-        const kept = dst2.def.name;
-        mergeTowers(src2, dst2);
-        cell = randFreeCell(g);
-        if (!cell) {
-          sfx.error();
-          toastRef.current("Board full", "#ff4d5e");
-          return;
-        }
-        toastRef.current(`Merged two ${kept}s to make room`, "#ff4fd8");
+        sfx.error();
+        toastRef.current("Board full — merge two towers to free a cell", "#ff4d5e");
+        return;
       }
 
-      // prefer the tower lineup the player curated in the Towers tab, and always
-      // deploy whichever lineup tower is currently scarcest on the board
-      const lineup = saveRef.current.lineup.filter((id) => saveRef.current.levels[id] > 0);
-      const pool0 = lineup.length ? lineup : unlocked;
+      // ONLY rotation towers reach the board. The rotation is set in the Towers
+      // tab, so nothing the player did not put on the list can ever appear —
+      // merging cannot conjure a tower either, because it upgrades in place.
+      const lineup = saveRef.current.lineup.filter((id) => saveRef.current.levels[id] > 0 && TOWER_BY_ID[id]);
+      if (!lineup.length) {
+        sfx.error();
+        toastRef.current("Set your summon rotation in the Towers tab first", "#ff4d5e");
+        return;
+      }
+      const pool0 = lineup;
       const counts = pool0.map((id) => ({ id, n: g.towers.filter((t) => t.def.id === id).length }));
       const least = Math.min(...counts.map((c) => c.n));
       const pool = counts.filter((c) => c.n === least);
@@ -2730,23 +2900,53 @@ export default function Battle({
         t.rapidCool = t.def.pulseRate || 2.5;
         const pdmg = ((t.def.pulse || 0) + (t.def.upPulse || 0) * (t.menuLv - 1)) * Math.pow(ASC_DMG_MUL, Math.max(0, t.bLv - 1)) * (1 + POINT_DMG_STEP * t.points);
         const pp = cellCenter(t.cell.c, t.cell.r);
-        const qc = rollAwk(t, 1); // Retribution
+        const qc = rollAwk(t, 1); // Retribution / Collapse
+        const radius = t.def.pulseRadius || 150;
+        const upg2 = t.menuLv - 1;
+        // Gravity Well & Maelstrom drag the horde back down the lane
+        const drag = t.def.pull ? (t.def.pull + (t.def.upPull || 0) * upg2) * dt : 0;
+        const slowAmt = t.def.slow
+          ? Math.min(0.85, (t.def.slow || 0) + (t.def.upSlow || 0) * upg2 + (t.def.ascSlow || 0) * (t.bLv - 1))
+          : 0;
+        const shotFx = awkSpec(t, 0);
+        const shotTier = rollAwk(t, 0);
+        const pulseSlow = shotFx?.fx === "slow" && shotTier > 0 ? Math.min(0.9, slowAmt + shotFx.mult[shotTier - 1]) : slowAmt;
+        const pulseBurn = shotFx?.fx === "burn" && shotTier > 0 ? (pdmg * shotFx.mult[shotTier - 1]) / 4 : 0;
         let hits = 0;
         for (const e of g.enemies) {
           if (e.dead) continue;
           const ep = enemyPos(e);
-          if (Math.hypot(ep.x - pp.x, ep.y - pp.y) > 150) continue;
+          if (Math.hypot(ep.x - pp.x, ep.y - pp.y) > radius) continue;
           hits++;
-          dealDamage(e, pdmg, { tw: t, color: "#9fe8ff" });
-          if (qc > 0 && !e.dead) {
-            e.stun = Math.max(e.stun, qc);
-            ring(ep.x, ep.y, "#9fe8ff", 30);
+          if (pdmg > 0) dealDamage(e, pdmg, { tw: t, color: "#9fe8ff" });
+          if (!e.dead) {
+            if (drag) e.d = Math.max(0, e.d - drag);
+            if (pulseSlow) {
+              e.slow = Math.max(e.slow, pulseSlow);
+              e.slowT = Math.max(e.slowT, t.def.slowDur || 2);
+            }
+            if (pulseBurn) {
+              e.burnDps = Math.max(e.burnDps, pulseBurn);
+              e.burnT = Math.max(e.burnT, 3.5);
+            }
+            if (qc > 0) {
+              e.stun = Math.max(e.stun, qc);
+              ring(ep.x, ep.y, "#9fe8ff", 30);
+            }
           }
         }
         if (hits) {
-          shock(pp.x, pp.y, "#9fe8ff", 150, 0.5);
+          shock(pp.x, pp.y, "#9fe8ff", radius, 0.5);
           glow(pp.x, pp.y, "#9fe8ff", 90, 0.4);
           punch(0.2, 0.15);
+          if (drag) {
+            // visible tug: a ring drawn inwards, one per caught enemy
+            for (let i = 0; i < Math.min(4, hits); i++) {
+              const a = (i / 4) * Math.PI * 2 + g.t;
+              ring(pp.x + Math.cos(a) * radius * 0.8, pp.y + Math.sin(a) * radius * 0.5, "#b9a7ff", radius * 0.5);
+            }
+            sfx.hover();
+          }
         }
       }
 
@@ -2829,18 +3029,35 @@ export default function Battle({
           m.t -= dt;
           if (m.t <= 0 && !m.done) {
             m.done = true;
-            const tw2 = g.towers.find((t) => t.uid === m.uid);
-            if (tw2) {
-              tw2.downT = Math.max(tw2.downT, BOSS_METEOR_DOWN);
-              tw2.flash = 0.3;
+            if (m.dmg !== undefined) {
+              // Starfall: a friendly rock, so it craters the horde instead
+              const blast = m.blast || 110;
+              shock(m.x, m.y, "#ffd23f", blast, 0.55);
+              burst(m.x, m.y, "#ffb324", 20, 260);
+              shards(m.x, m.y, "#ffd23f", 10, 240);
+              embers(m.x, m.y, "#ffd23f", 10);
+              addZone({ kind: "rift", x: m.x, y: m.y, r: blast, life: 0.3, max: 0.3, dps: 0, slow: 0, color: "#ffd23f" });
+              for (const e of g.enemies) {
+                if (e.dead) continue;
+                const ep = enemyPos(e);
+                if (Math.hypot(ep.x - m.x, ep.y - m.y) <= blast) dealDamage(e, m.dmg, { tw: m.tw, color: "#ffd23f" });
+              }
+              punch(0.3, 0.2);
+              g.shake = fxShake(5);
+            } else {
+              const tw2 = g.towers.find((t) => t.uid === m.uid);
+              if (tw2) {
+                tw2.downT = Math.max(tw2.downT, BOSS_METEOR_DOWN);
+                tw2.flash = 0.3;
+              }
+              shock(m.x, m.y, "#ff7a3d", 96, 0.6);
+              burst(m.x, m.y, "#ffb324", 22, 280);
+              shards(m.x, m.y, "#ff7a3d", 12, 260);
+              embers(m.x, m.y, "#ffd23f", 10);
+              flash("#ff7a3d", 0.14);
+              punch(0.35, 0.25);
+              g.shake = fxShake(6);
             }
-            shock(m.x, m.y, "#ff7a3d", 96, 0.6);
-            burst(m.x, m.y, "#ffb324", 22, 280);
-            shards(m.x, m.y, "#ff7a3d", 12, 260);
-            embers(m.x, m.y, "#ffd23f", 10);
-            flash("#ff7a3d", 0.14);
-            punch(0.35, 0.25);
-            g.shake = fxShake(6);
             sfx.explosion();
           }
         }
@@ -3617,6 +3834,320 @@ export default function Battle({
           ctx.quadraticCurveTo(2, -18, 10, -4 - gfl);
           ctx.quadraticCurveTo(0, 2, -10, -4 - gfl);
           ctx.fill();
+          break;
+        }
+        // ---------- mythic arsenal II ----------
+        case "nova": {
+          // a three-barrel shell launcher with a starburst core
+          const spin = now / 1600;
+          ctx.fillStyle = "#4a3418";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, 20, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          for (let i = 0; i < 3; i++) {
+            const a2 = spin + (i / 3) * Math.PI * 2;
+            ctx.save();
+            ctx.rotate(a2);
+            ctx.fillStyle = "#8a6a1a";
+            ctx.fillRect(10, -5, 20, 10);
+            ctx.fillStyle = rc.color;
+            ctx.fillRect(26, -5, 4, 10);
+            ctx.restore();
+          }
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          const g1 = ctx.createRadialGradient(0, 0, 1, 0, 0, 18);
+          g1.addColorStop(0, "#fff2b0");
+          g1.addColorStop(1, "transparent");
+          ctx.fillStyle = g1;
+          ctx.beginPath();
+          ctx.arc(0, 0, 18, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case "well": {
+          // a black core with rings collapsing into it
+          ctx.fillStyle = "#160c2e";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          for (let i = 0; i < 3; i++) {
+            const k2 = ((now / 900 + i / 3) % 1);
+            ctx.globalAlpha = 0.5 * (1 - k2);
+            ctx.strokeStyle = "#b9a7ff";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(0, 0, 20 + (1 - k2) * 26, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          const g2 = ctx.createRadialGradient(0, 0, 1, 0, 0, 14);
+          g2.addColorStop(0, "#e0d5ff");
+          g2.addColorStop(1, "transparent");
+          ctx.fillStyle = g2;
+          ctx.beginPath();
+          ctx.arc(0, 0, 14, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case "crown": {
+          // a spiked crown ring with lightning arcing over it
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(0, 0, 17, 0, Math.PI * 2);
+          ctx.stroke();
+          for (let i = 0; i < 8; i++) {
+            const a2 = (i / 8) * Math.PI * 2 + now / 2200;
+            ctx.fillStyle = i % 2 ? "#fff6c4" : rc.color;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a2) * 17, Math.sin(a2) * 17);
+            ctx.lineTo(Math.cos(a2 + 0.22) * 28, Math.sin(a2 + 0.22) * 28);
+            ctx.lineTo(Math.cos(a2 - 0.22) * 28, Math.sin(a2 - 0.22) * 28);
+            ctx.closePath();
+            ctx.fill();
+          }
+          ctx.fillStyle = "#ffe86b";
+          ctx.beginPath();
+          ctx.arc(0, 0, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = "#fff";
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(-14, -10);
+          ctx.lineTo(-4, -2);
+          ctx.lineTo(-10, 6);
+          ctx.stroke();
+          break;
+        }
+        case "ripper": {
+          // a lance with a burning tear hanging under it
+          ctx.rotate(a);
+          ctx.fillStyle = "#2a1a4a";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.roundRect(-14, -6, 40, 12, 4);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = "#c9a7ff";
+          ctx.beginPath();
+          ctx.moveTo(26, 0);
+          ctx.lineTo(12, -10);
+          ctx.lineTo(12, 10);
+          ctx.closePath();
+          ctx.fill();
+          ctx.rotate(-a);
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          const g3 = ctx.createRadialGradient(0, 0, 1, 0, 0, 16);
+          g3.addColorStop(0, "#e0d5ff");
+          g3.addColorStop(1, "transparent");
+          ctx.fillStyle = g3;
+          ctx.beginPath();
+          ctx.arc(0, 0, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case "furnace": {
+          // a brazier: a stone bowl with a fire burning inside and embers rising
+          ctx.fillStyle = "#3a1d10";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.moveTo(-16, -4);
+          ctx.lineTo(16, -4);
+          ctx.lineTo(11, 18);
+          ctx.lineTo(-11, 18);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          const fl = Math.sin(now / 120) * 3;
+          ctx.fillStyle = "#ff8c3d";
+          ctx.beginPath();
+          ctx.moveTo(-9, -6);
+          ctx.quadraticCurveTo(-3, -24 - fl, 0, -34 - fl);
+          ctx.quadraticCurveTo(3, -24 - fl, 9, -6);
+          ctx.quadraticCurveTo(0, 2, -9, -6);
+          ctx.fill();
+          ctx.fillStyle = "#ffd23f";
+          ctx.beginPath();
+          ctx.moveTo(-4, -6);
+          ctx.quadraticCurveTo(-1, -16, 0, -22 - fl);
+          ctx.quadraticCurveTo(1, -16, 4, -6);
+          ctx.fill();
+          for (let i = 0; i < 3; i++) {
+            const t2 = (now / 700 + i / 3) % 1;
+            ctx.globalAlpha = 1 - t2;
+            ctx.fillStyle = "#ffd23f";
+            ctx.beginPath();
+            ctx.arc(Math.sin((now / 300) + i * 2) * 10, -20 - t2 * 26, 2.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case "whirl": {
+          // spinning blades over a dark pool
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.arc(0, 0, 20, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.save();
+          ctx.rotate(now / 260);
+          for (let i = 0; i < 4; i++) {
+            ctx.rotate(Math.PI / 2);
+            ctx.fillStyle = i % 2 ? "#7fe9ff" : "#c9f4ff";
+            ctx.beginPath();
+            ctx.moveTo(6, 0);
+            ctx.quadraticCurveTo(18, -8, 24, -2);
+            ctx.quadraticCurveTo(16, 4, 6, 3);
+            ctx.closePath();
+            ctx.fill();
+          }
+          ctx.restore();
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          const g4 = ctx.createRadialGradient(0, 0, 1, 0, 0, 20);
+          g4.addColorStop(0, "#dffaff");
+          g4.addColorStop(1, "transparent");
+          ctx.fillStyle = g4;
+          ctx.beginPath();
+          ctx.arc(0, 0, 20, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case "star": {
+          // a mortar with three falling-star flares orbiting it
+          ctx.fillStyle = "#4a3a10";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.roundRect(-14, -8, 28, 24, 6);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = "#2b2208";
+          ctx.beginPath();
+          ctx.ellipse(0, -8, 13, 7, 0, 0, Math.PI * 2);
+          ctx.fill();
+          for (let i = 0; i < 3; i++) {
+            const ao = now / 900 + (i / 3) * Math.PI * 2;
+            const sx = Math.cos(ao) * 30;
+            const sy = Math.sin(ao) * 14 - 18;
+            ctx.fillStyle = "#fff2b0";
+            ctx.beginPath();
+            ctx.moveTo(sx, sy - 6);
+            ctx.lineTo(sx + 4, sy);
+            ctx.lineTo(sx, sy + 6);
+            ctx.lineTo(sx - 4, sy);
+            ctx.closePath();
+            ctx.fill();
+            ctx.globalAlpha = 0.45;
+            ctx.strokeStyle = "#ffd23f";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(sx + 12, sy - 12);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
+          break;
+        }
+        case "lock": {
+          // a clock face with a cog ring, hand sweeping
+          ctx.fillStyle = "#10243d";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          for (let i = 0; i < 12; i++) {
+            const a2 = (i / 12) * Math.PI * 2;
+            ctx.fillStyle = i % 3 === 0 ? "#fff" : rc.color;
+            ctx.fillRect(Math.cos(a2) * 13 - 1.4, Math.sin(a2) * 13 - 1.4, 2.8, 2.8);
+          }
+          ctx.save();
+          ctx.rotate(now / 700);
+          ctx.strokeStyle = "#9fe8ff";
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(0, -11);
+          ctx.stroke();
+          ctx.restore();
+          ctx.fillStyle = "#fff";
+          ctx.beginPath();
+          ctx.arc(0, 0, 3, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case "bloom": {
+          // a flower of blades that opens and closes
+          const open = 1 + Math.sin(now / 420) * 0.18;
+          ctx.save();
+          ctx.rotate(now / 2000);
+          for (let i = 0; i < 6; i++) {
+            ctx.rotate(Math.PI / 3);
+            ctx.fillStyle = i % 2 ? "#8effc4" : "#c9ffdf";
+            ctx.beginPath();
+            ctx.ellipse(15 * open, 0, 11 * open, 5, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.restore();
+          ctx.fillStyle = "#0b3d24";
+          ctx.strokeStyle = "#8effc4";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, 0, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          const g5 = ctx.createRadialGradient(0, 0, 1, 0, 0, 16);
+          g5.addColorStop(0, "#d9ffe9");
+          g5.addColorStop(1, "transparent");
+          ctx.fillStyle = g5;
+          ctx.beginPath();
+          ctx.arc(0, 0, 16, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case "colossus": {
+          // a huge twin-barrelled siege bunker; the barrels kick back on reload
+          const kick = Math.max(0, t.cd) * 14;
+          ctx.fillStyle = "#2a1220";
+          ctx.strokeStyle = rc.color;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.roundRect(-24, -16, 48, 34, 8);
+          ctx.fill();
+          ctx.stroke();
+          ctx.save();
+          ctx.rotate(a);
+          [-8, 8].forEach((off) => {
+            ctx.fillStyle = "#4a5568";
+            ctx.fillRect(-6 - kick, off - 5, 34, 10);
+            ctx.fillStyle = rc.color;
+            ctx.fillRect(26 - kick, off - 5, 4, 10);
+          });
+          ctx.restore();
+          ctx.fillStyle = "#ffcf4d";
+          for (let i = 0; i < 3; i++) ctx.fillRect(-18 + i * 7, 12, 4, 4);
           break;
         }
         default:
@@ -5310,7 +5841,10 @@ export default function Battle({
       if (cell.c === src.cell?.c && cell.r === src.cell?.r) return;
       const occ = g.towers.find((x) => x.cell && x.cell.c === cell.c && x.cell.r === cell.r && x.uid !== src.uid);
       if (occ) {
-        if (occ.points === src.points) mergeTowers(src, occ);
+        if (occ.points >= MAX_POINTS) {
+          sfx.error();
+          toastRef.current(`${occ.def.name} is already at ${MAX_POINTS} points`, "#ff4d5e");
+        } else if (occ.points === src.points) mergeTowers(src, occ);
         else {
           sfx.error();
           toastRef.current(`Points must match to merge (${src.points} vs ${occ.points})`, "#ff4d5e");
@@ -5365,6 +5899,35 @@ export default function Battle({
 
   const maxRounds = BATTLE_ROUNDS;
 
+  /**
+   * The results screen's salvage list, built from the run's payout so the card
+   * can tick the rewards in one row at a time.
+   */
+  const endRows = (f: NonNullable<G["final"]>) => {
+    const rows: { icon: React.ReactNode; label: string; val: string; color: string }[] = [];
+    if (f.gold) rows.push({ icon: <CoinIcon size={16} />, label: "Gold", val: f.gold.toLocaleString("en-US"), color: "#ffcf4d" });
+    if (f.gems) rows.push({ icon: <GemIcon size={16} />, label: "Gems", val: f.gems.toLocaleString("en-US"), color: "#35e0ff" });
+    if (f.tokens) rows.push({ icon: <TokenIcon size={16} />, label: "Magic Tokens", val: String(f.tokens), color: "#ff4fd8" });
+    f.frags.forEach((fr) => {
+      const def = TOWER_BY_ID[fr.id];
+      const col = RARITY[def?.rarity ?? "normal"].color;
+      rows.push({ icon: <ShardIcon size={16} color={col} />, label: (def?.name ?? fr.id) + " fragments", val: "x" + fr.n, color: col });
+    });
+    (["basic", "advanced", "elite"] as const).forEach((k) => {
+      const n = f.chips?.[k] || 0;
+      if (n > 0) rows.push({ icon: <ChipIcon id={k} size={16} />, label: k + " chip modules", val: "x" + n, color: "#8fe9ff" });
+    });
+    if (mode === "endless" && f.rounds) rows.push({ icon: <span className="text-[14px]">~</span>, label: "Waves survived", val: String(f.rounds), color: "#ff9be9" });
+    if (mode === "battle")
+      rows.push({
+        icon: <TrophyIcon size={16} />,
+        label: f.won ? "Trophies won" : "Trophies lost",
+        val: (f.won ? "+" : "") + Math.abs(trophyDelta(f.won, EV_BONUS)),
+        color: f.won ? "#3dff8e" : "#ff8f9a",
+      });
+    return rows;
+  };
+
   const collect = () => {
     if (!g?.final) return;
     const f = g.final;
@@ -5410,102 +5973,96 @@ export default function Battle({
   return (
     <div className="app-bg relative flex h-full flex-col">
       <Toasts toasts={toasts} />
-      {/* TOP BAR — status only. The installed-tower strip that used to live up
-          here duplicated the bottom bar and pushed the arena off small screens,
-          so the bar now carries currencies and one SUMMON button. */}
-      <div className="flex shrink-0 items-center gap-2 px-3 pt-2">
+            {/* TOP HUD — one bar, grouped so it always fits. The groups wrap as whole
+          units instead of scattering loose pills: economy on the left, round
+          state and the run stat on the right, SUMMON pinned in front. */}
+      <div className="hud" data-testid="hud">
         <button
-          className="cta-banner shrink-0 px-4 py-2 text-[13px] leading-tight"
+          className="hud-summon"
           disabled={g ? g.sp < cost : true}
           data-testid="summon-btn"
           onClick={() => summonRef.current()}
         >
-          SUMMON
-          <span className="block text-[10px] font-bold opacity-80">SP {cost}</span>
+          <span className="hud-summon-main">SUMMON</span>
+          <span className="hud-summon-cost num">{cost} SP</span>
         </button>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+
         {g && (
-          <div className="flex items-center gap-2 text-[15px] font-bold">
-            <span data-testid="sp-chip" className="pill-dark text-[11px] text-[#7fe9ff]" style={{ borderColor: "#1f6f8c" }}>
-              <span className="num">{Math.floor(g.sp)}</span> SP
-            </span>
-            <span className="pill-dark text-[11px] text-[#ffcf4d]" style={{ borderColor: "#8a6a1a" }}>
-              <CoinIcon size={17} />
-              <span className="num">{Math.floor(g.gold)}</span>
-            </span>
-            <span
-              className="pill-dark text-[11px]"
-              style={{ borderColor: g.lives <= 5 ? "#8a0f1e" : "#5c2532", color: g.lives <= 5 ? "#ff4d5e" : "#ff8f9a" }}
-            >
-              <svg width="17" height="17" viewBox="0 0 20 20">
-                <path d="M10 17S2 11.5 2 6.6C2 4 4 2.5 6 2.5c1.6 0 3 .8 4 2.2 1-1.4 2.4-2.2 4-2.2 2 0 4 1.5 4 4.1C18 11.5 10 17 10 17z" fill="#ff4d5e" />
-              </svg>
-              <span className="num" style={{ color: g.lives <= 5 ? "#ff4d5e" : "#fff" }}>{g.lives}</span>
-            </span>
-            {mode === "endless" ? (
-              <span className="pill-dark text-[11px] text-[#ff9be9]" style={{ borderColor: "#7a2f6a" }}>
-                <span className="num">WAVE {g.round}</span> ENDLESS
+          <>
+            <div className="hud-group" data-testid="hud-economy">
+              <span data-testid="sp-chip" className="hud-pill" style={{ color: "#7fe9ff" }}>
+                <i className="hud-dot" style={{ background: "#7fe9ff" }} />
+                <b className="num">{Math.floor(g.sp)}</b>
+                <em>SP</em>
               </span>
-            ) : (
-              <span className="pill-dark text-[11px] text-[#ffcf4d]" style={{ borderColor: "#8a6a1a" }}>
-                <span className="num">
-                  {Math.min(g.round, maxRounds)}/{maxRounds}
-                </span>{" "}
-                ROUND
+              <span className="hud-pill" style={{ color: "#ffcf4d" }}>
+                <CoinIcon size={14} />
+                <b className="num">{Math.floor(g.gold)}</b>
               </span>
-            )}
-            <span className="pill-dark text-[11px] text-[var(--dim)]">
-              <span className="num">{g.enemies.length + g.spawnQ.length}</span> left
-            </span>
-            <span
-              className="pill-dark text-[11px] text-[#8effc4]"
-              style={{ borderColor: "#1f7a4a" }}
-              data-testid="towers-on-board"
-              title="Towers currently deployed (any type)"
-            >
-              <span className="num">{g.towers.filter((t) => t.cell).length}</span> towers
-            </span>
-            {/* the merged crit stat, plus how many crits this run has landed */}
-            <span
-              className="pill-dark num-pop text-[11px] text-[#ffd23f]"
-              key={`crit-${g.crits}`}
-              style={{ borderColor: "#8a6a1a" }}
-              data-testid="crit-chip"
-              title={`Crit damage merged from ${towerUpgradeCount(save.levels)} tower upgrades`}
-            >
-              <span className="crit-chip-star">✦</span>
-              <span className="num" data-testid="crit-stat">{fmtCritPct(critBonusFrom(save.levels))}</span>
-              {g.crits > 0 && (
-                <span className="crit-chip-runs">
-                  · <span className="num">{g.crits}</span> crits · best <span className="num">{g.bestHit.toLocaleString("en-US")}</span>
+              <span className="hud-pill" style={{ color: g.lives <= 5 ? "#ff4d5e" : "#ff8f9a" }}>
+                <svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true">
+                  <path
+                    d="M10 17S2 11.5 2 6.6C2 4 4 2.5 6 2.5c1.6 0 3 .8 4 2.2 1-1.4 2.4-2.2 4-2.2 2 0 4 1.5 4 4.1C18 11.5 10 17 10 17z"
+                    fill="currentColor"
+                  />
+                </svg>
+                <b className="num">{g.lives}</b>
+              </span>
+              <span className="hud-pill hud-dim" style={{ color: "#8fb0ff" }} data-testid="enemies-left">
+                <b className="num">{g.enemies.length + g.spawnQ.length}</b>
+                <em>left</em>
+              </span>
+              <span className="hud-pill hud-dim" style={{ color: "#8effc4" }} data-testid="towers-on-board" title="Towers deployed">
+                <b className="num">{g.towers.filter((t) => t.cell).length}</b>
+                <em>towers</em>
+              </span>
+              {g.odT > 0 && (
+                <span className="hud-pill" style={{ color: "#8effc4" }}>
+                  <b className="num">{g.odT.toFixed(0)}</b>
+                  <em>overdrive</em>
                 </span>
               )}
-            </span>
-            {/* the run shop moved up here so the ascent cards get the whole bottom bar */}
-            <button
-              data-testid="battle-shop"
-              onClick={() => {
-                sfx.click();
-                setShopOpen(true);
-              }}
-              className="tile tile-hover flex shrink-0 cursor-pointer items-center gap-1.5 px-2.5 py-1"
-              style={{ borderColor: "#1f7a4a" }}
-            >
-              <span className="text-[15px] leading-none">🛒</span>
-              <span className="font-disp text-[11px] leading-none text-[#8effc4]">SHOP</span>
-              <span className="text-[10px] font-bold leading-none text-[var(--dim)]">🪙 {Math.floor(g.gold)}</span>
-            </button>
-            {g.odT > 0 && (
-              <span className="pill-dark text-[11px] text-[#8effc4]" style={{ borderColor: "#1f7a4a" }}>
-                OVERDRIVE <span className="num">{g.odT.toFixed(0)}s</span>
+            </div>
+
+            <div className="hud-group" data-testid="hud-round">
+              <span className="hud-pill" style={{ color: mode === "endless" ? "#ff9be9" : "#ffcf4d" }}>
+                <b className="num">{mode === "endless" ? "W" + g.round : Math.min(g.round, maxRounds) + "/" + maxRounds}</b>
+                <em>{mode === "endless" ? "endless" : "round"}</em>
               </span>
-            )}
-          </div>
+              <span
+                className="hud-pill hud-crit num-pop"
+                key={"crit-" + g.crits}
+                data-testid="crit-chip"
+                title={"Crit damage merged from " + towerUpgradeCount(save.levels) + " tower upgrades"}
+              >
+                <span className="crit-chip-star">✦</span>
+                <b className="num" data-testid="crit-stat">
+                  {fmtCritPct(critBonusFrom(save.levels))}
+                </b>
+                {g.crits > 0 && (
+                  <em>
+                    <span className="num">{g.crits}</span> crits · best <span className="num">{g.bestHit.toLocaleString("en-US")}</span>
+                  </em>
+                )}
+              </span>
+              <button
+                data-testid="battle-shop"
+                onClick={() => {
+                  sfx.click();
+                  setShopOpen(true);
+                }}
+                className="hud-shop"
+                title="Run shop"
+              >
+                <span className="hud-shop-glyph">🛒</span>
+                <span>SHOP</span>
+              </button>
+            </div>
+          </>
         )}
-        </div>
       </div>
 
-      {/* CANVAS */}
+{/* CANVAS */}
       <div className="relative min-h-0 flex-1">
         <div className="scroll-thin h-full w-full overflow-auto">
           <canvas
@@ -5926,97 +6483,80 @@ export default function Battle({
         </div>
       )}
 
-      {/* END OVERLAY */}
+            {/* GAME OVER — a staged results screen: the verdict stamps in, the salvage
+          list ticks in row by row, then one button banks it. */}
       {g?.final && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/70 p-4">
-          <div className="panel anim-pop w-[440px] p-6 text-center" style={{ borderColor: g.final.won ? "#ffcf4d88" : "#ff4d5e88" }}>
-            <div
-              className="font-disp text-4xl"
-              style={{
-                color: mode === "endless" ? "#ff9be9" : g.final.won ? "#ffcf4d" : "#ff4d5e",
-                textShadow:
-                  mode === "endless"
-                    ? "0 0 26px rgba(255,79,216,.6)"
-                    : `0 0 26px ${g.final.won ? "rgba(255,207,77,.6)" : "rgba(255,77,94,.6)"}`,
-              }}
-            >
-              {mode === "endless" ? "RUN OVER" : g.final.won ? "VICTORY" : "DEFEAT"}
+        <div className="gameover" data-testid="game-over">
+          <div className="gameover-bg" />
+          <div className={"gameover-card " + (g.final.won ? "won" : "lost") + (mode === "endless" ? " endless" : "")}>
+            <div className="gameover-rays" />
+            <div className="gameover-head">
+              <div className="gameover-eyebrow">
+                {mode === "endless" ? "ENDLESS RUN" : g.final.won ? "GAUNTLET CLEARED" : "THE LINE BROKE"}
+              </div>
+              <div className="gameover-title">
+                {mode === "endless" ? "RUN OVER" : g.final.won ? "VICTORY" : "DEFEAT"}
+              </div>
+              <div className="gameover-sub">
+                {mode === "endless" ? "REACHED WAVE " + g.final.rounds : g.final.won ? "THE LINE HELD" : "FELL ON ROUND " + g.round} ·{" "}
+                <span className="num">{g.kills.toLocaleString("en-US")}</span> KILLS ·{" "}
+                <span className="num">{g.crits.toLocaleString("en-US")}</span> CRITS
+              </div>
             </div>
-            <div className="mt-1 text-sm font-bold tracking-[0.2em] text-[var(--dim)]">
-              {mode === "endless"
-                ? `REACHED WAVE ${g.final.rounds}`
-                : g.final.won
-                  ? "THE LINE HELD"
-                  : `FELL ON ROUND ${g.round}`}{" "}
-              · {g.kills} KILLS
+
+            <div className="gameover-stats">
+              <div className="gameover-stat">
+                <span>BIGGEST HIT</span>
+                <b className="num">{g.bestHit.toLocaleString("en-US")}</b>
+              </div>
+              <div className="gameover-stat">
+                <span>WAVES CLEARED</span>
+                <b className="num">{g.final.rounds}</b>
+              </div>
+              <div className="gameover-stat">
+                <span>TOWERS BUILT</span>
+                <b className="num">{g.towers.length}</b>
+              </div>
+              <div className="gameover-stat">
+                <span>BEST HIT TIER</span>
+                <b className="num" style={{ color: "#ffd23f" }}>{g.crits > 0 ? Math.min(4, 1 + Math.floor(g.bestHit / Math.max(1, g.bestHit * 0.35))) : 0}</b>
+              </div>
             </div>
-            {mode === "endless" && (
-              <div
-                className="mt-2 inline-block rounded-lg border px-3 py-1 text-[13px] font-bold tracking-widest"
-                style={{
-                  borderColor: g.final.rounds > save.bestEndless ? "#ffcf4d" : "#322767",
-                  color: g.final.rounds > save.bestEndless ? "#ffcf4d" : "var(--dim)",
-                }}
-              >
-                {g.final.rounds > save.bestEndless ? `NEW RECORD · WAS ${save.bestEndless}` : `BEST ${save.bestEndless}`}
-              </div>
-            )}
-            {/* trophy swing — the ladder stake for Battle runs */}
-            {mode === "battle" && (
-              <div
-                className="trophy-pop mx-auto mt-3 inline-flex items-center gap-2 rounded-xl border px-3.5 py-2"
-                data-testid="trophy-swing"
-                style={{
-                  borderColor: g.final.trophies >= 0 ? "#3dff8e88" : "#ff4d5e88",
-                  background: g.final.trophies >= 0 ? "rgba(61,255,142,.08)" : "rgba(255,77,94,.08)",
-                }}
-              >
-                <TrophyIcon size={24} color={g.final.trophies >= 0 ? "#3dff8e" : "#ff4d5e"} />
-                <span className="font-disp text-2xl" style={{ color: g.final.trophies >= 0 ? "#3dff8e" : "#ff4d5e" }}>
-                  {g.final.trophies >= 0 ? "+" : ""}
-                  {g.final.trophies}
-                </span>
-                <span className="text-[11px] font-bold tracking-widest text-[var(--dim)]">
-                  {leagueFor(Math.max(0, save.trophies + g.final.trophies)).name.toUpperCase()} ·{" "}
-                  {Math.max(0, save.trophies + g.final.trophies).toLocaleString()}
-                </span>
-              </div>
-            )}
-            {EV_BONUS !== undefined && (LIVE_EVENT.id === "mineshaft" || LIVE_EVENT.id === "lightning" || LIVE_EVENT.id === "trophy" || LIVE_EVENT.id === "items") && (
-              <div className="mt-2 text-[11px] font-bold tracking-widest" style={{ color: LIVE_EVENT.color }}>
-                {LIVE_EVENT.name.toUpperCase()} BONUS APPLIED
-              </div>
-            )}
-            <div className="mt-4 space-y-1.5 text-left">
-              <RewardRow icon={<CoinIcon size={17} />} label="Gold" val={`+${g.final.gold}`} color="#ffcf4d" />
-              {g.final.gems > 0 && <RewardRow icon={<span className="text-[#35e0ff]">◆</span>} label="Gems" val={`+${g.final.gems}`} color="#35e0ff" />}
-              {g.final.tokens > 0 && <RewardRow icon={<span className="text-[#ff4fd8]">✦</span>} label="Magic Tokens" val={`+${g.final.tokens}`} color="#ff4fd8" />}
-              {g.final.chips &&
-                (Object.keys(g.final.chips) as (keyof typeof g.final.chips)[]).map((k) => (
-                  <RewardRow
-                    key={k}
-                    icon={<ChipIcon id={k} size={18} />}
-                    label={`${String(k)[0].toUpperCase()}${String(k).slice(1)} Chip Module`}
-                    val={`+${g.final!.chips![k]}`}
-                    color={k === "basic" ? "#8fe9ff" : k === "advanced" ? "#c44dff" : "#ffb324"}
-                  />
-                ))}
-              {g.final.frags.map((f) => (
-                <RewardRow
-                  key={f.id}
-                  icon={<TowerIcon def={TOWER_BY_ID[f.id]} size={20} />}
-                  label={`${TOWER_BY_ID[f.id].name} fragments`}
-                  val={`+${f.n}`}
-                  color={RARITY[TOWER_BY_ID[f.id].rarity].color}
-                />
+
+            <div className="gameover-rewards" data-testid="game-over-rewards">
+              <div className="gameover-rewards-title">SALVAGED FROM THE RUN</div>
+              {endRows(g.final).map((r, i) => (
+                <div key={r.label} className="gameover-row" style={{ animationDelay: 0.1 + i * 0.08 + "s" }}>
+                  <span className="gameover-row-icon">{r.icon}</span>
+                  <span className="gameover-row-label">{r.label}</span>
+                  <b className="num" style={{ color: r.color }}>
+                    {r.val}
+                  </b>
+                </div>
               ))}
+              {endRows(g.final).length === 0 && (
+                <div className="gameover-row">
+                  <span className="gameover-row-label text-[var(--dim)]">Nothing recovered from this run.</span>
+                </div>
+              )}
             </div>
-            <button className="btn btn-gold mt-5 w-full py-3 text-lg" onClick={collect}>
-              Collect Rewards
-            </button>
+
+            <div className="gameover-actions">
+              <button className="btn btn-gold flex-1 py-3 text-[15px]" data-testid="game-over-collect" onClick={collect}>
+                COLLECT &amp; RETURN
+              </button>
+            </div>
+            <div className="gameover-note">
+              {mode === "endless"
+                ? "Endless pays on depth — the further you pushed, the richer the salvage."
+                : g.final.won
+                  ? "Win streaks raise your trophy stake for the next run."
+                  : "Trophies dip on a loss — level your towers and try again."}
+            </div>
           </div>
         </div>
       )}
+
     </div>
   );
 }
@@ -6178,16 +6718,3 @@ function BossPortrait({ type }: { type: number }) {
   );
 }
 
-function RewardRow({ icon, label, val, color }: { icon: React.ReactNode; label: string; val: string; color: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-lg border border-[var(--line)] bg-black/30 px-3 py-1.5">
-      <span className="flex items-center gap-2 text-[14px] font-bold">
-        {icon}
-        {label}
-      </span>
-      <span className="text-[15px] font-bold" style={{ color }}>
-        {val}
-      </span>
-    </div>
-  );
-}

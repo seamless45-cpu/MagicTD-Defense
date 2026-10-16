@@ -115,27 +115,27 @@ export function CurrencyBar({
   trophies?: number;
 }) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1.5">
       {typeof trophies === "number" && (
         <div
-          className="pill-dark text-[11px]"
+          className="pill-dark pill-compact text-[10.5px]"
           style={{ borderColor: leagueFor(trophies).color + "88", color: leagueFor(trophies).color }}
           data-currency="trophies"
         >
-          <TrophyIcon size={20} color={leagueFor(trophies).color} />
+          <TrophyIcon size={15} color={leagueFor(trophies).color} />
           <span className="num">{Math.floor(trophies).toLocaleString()}</span>
         </div>
       )}
-      <div className="pill-dark text-[11px] text-[#ffcf4d]" style={{ borderColor: "#8a6a1a" }} data-currency="gold">
-        <CoinIcon size={20} />
+      <div className="pill-dark pill-compact text-[10.5px] text-[#ffcf4d]" style={{ borderColor: "#8a6a1a" }} data-currency="gold">
+        <CoinIcon size={15} />
         <span className="num">{Math.floor(gold).toLocaleString()}</span>
       </div>
-      <div className="pill-dark text-[11px] text-[#35e0ff]" style={{ borderColor: "#1f6f8c" }} data-currency="gems">
-        <GemIcon size={20} />
+      <div className="pill-dark pill-compact text-[10.5px] text-[#35e0ff]" style={{ borderColor: "#1f6f8c" }} data-currency="gems">
+        <GemIcon size={15} />
         <span className="num">{Math.floor(gems).toLocaleString()}</span>
       </div>
-      <div className="pill-dark text-[11px] text-[#ff4fd8]" style={{ borderColor: "#7a2f6a" }} data-currency="tokens">
-        <TokenIcon size={20} />
+      <div className="pill-dark pill-compact text-[10.5px] text-[#ff4fd8]" style={{ borderColor: "#7a2f6a" }} data-currency="tokens">
+        <TokenIcon size={15} />
         <span className="num">{Math.floor(tokens).toLocaleString()}</span>
       </div>
     </div>
@@ -360,6 +360,119 @@ export function TowerIcon({
             <path d="M17 42V23a7 7 0 0 1 14 0v19z" fill="none" stroke={a} strokeWidth="2.2" />
             <path d="M24 30c2 4 4 5 4 8a4 4 0 0 1-8 0c0-3 3-4 4-8z" fill="#ffd23f" />
             <path d="M8 42h32" stroke={c} strokeWidth="3" strokeLinecap="round" />
+          </g>
+        );
+      // ---------- mythic arsenal II ----------
+      case "nova":
+        return (
+          <g>
+            <circle cx="24" cy="24" r="7" fill="#fff2b0" />
+            <circle cx="24" cy="24" r="11" fill="none" stroke={c} strokeWidth="2.4" />
+            {Array.from({ length: 8 }).map((_, i) => {
+              const ang = (i / 8) * Math.PI * 2;
+              const x1 = 24 + Math.cos(ang) * 13;
+              const y1 = 24 + Math.sin(ang) * 13;
+              const x2 = 24 + Math.cos(ang) * 21;
+              const y2 = 24 + Math.sin(ang) * 21;
+              return <path key={i} d={`M${x1} ${y1} L${x2} ${y2}`} stroke={a} strokeWidth="3" strokeLinecap="round" />;
+            })}
+            <circle cx="24" cy="24" r="4" fill="#fff" />
+          </g>
+        );
+      case "well":
+        return (
+          <g>
+            <circle cx="24" cy="24" r="18" fill="rgba(0,0,0,0.55)" stroke={c} strokeWidth="2.2" />
+            <circle cx="24" cy="24" r="12" fill="none" stroke={a} strokeWidth="2" opacity="0.8" />
+            <circle cx="24" cy="24" r="6.5" fill="#1a0f33" stroke={c} strokeWidth="2" />
+            <path d="M24 14v6M24 34v-6M14 24h6M34 24h-6" stroke={a} strokeWidth="2.6" strokeLinecap="round" />
+            <circle cx="24" cy="24" r="2.6" fill="#fff" />
+          </g>
+        );
+      case "crown":
+        return (
+          <g>
+            <path d="M10 20l4-9 5 6 5-9 5 9 5-6 4 9z" fill={c} stroke="#4a3a10" strokeWidth="1.6" />
+            <path d="M12 22h24l-2 6H14z" fill={a} opacity="0.85" />
+            <path d="M26 12l-6 11h5l-3 13 9-14h-6l4-10z" fill="#fff6c4" stroke="#8a6a1a" strokeWidth="1.4" />
+            <circle cx="24" cy="24" r="16" fill="none" stroke={a} strokeWidth="1.6" opacity="0.5" />
+          </g>
+        );
+      case "ripper":
+        return (
+          <g>
+            <path d="M8 24 20 12l4 8-4 4 4 4-4 8z" fill={c} opacity="0.9" />
+            <path d="M40 24 28 12l-4 8 4 4-4 4 4 8z" fill={a} opacity="0.9" />
+            <path d="M24 6v36" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeDasharray="4 4" />
+            <circle cx="24" cy="24" r="4" fill="#fff" />
+          </g>
+        );
+      case "furnace":
+        return (
+          <g>
+            <path d="M12 20h24l-3 20H15z" fill="#3a1d10" stroke={c} strokeWidth="2.2" />
+            <path d="M24 8c3 8 9 9 9 16a9 9 0 0 1-18 0c0-5 3-6 4-11 2 3 4 3 5-5z" fill={a} />
+            <path d="M24 18c1.4 4 5 4.5 5 9a5 5 0 0 1-10 0c0-3 3-3.5 5-9z" fill="#fff2b0" />
+          </g>
+        );
+      case "whirl":
+        return (
+          <g>
+            <path
+              d="M24 6c10 0 18 8 18 18s-8 18-18 18S6 34 6 24 14 6 24 6zm0 7c-6 0-11 5-11 11s5 11 11 11 11-5 11-11-5-11-11-11z"
+              fill={c}
+              opacity="0.5"
+            />
+            <path d="M24 13a11 11 0 0 1 11 11c0 4-2 7-6 9 2-4 1-8-3-10s-8-1-10 3c-1-6 3-13 8-13z" fill={a} />
+            <circle cx="24" cy="24" r="3.6" fill="#fff" />
+          </g>
+        );
+      case "star":
+        return (
+          <g>
+            <path d="M34 6l3 7 7 3-7 3-3 7-3-7-7-3 7-3z" fill="#fff2b0" stroke={c} strokeWidth="1.6" />
+            <path d="M20 16l2.4 5.6L28 24l-5.6 2.4L20 32l-2.4-5.6L12 24l5.6-2.4z" fill={a} opacity="0.9" />
+            <path d="M14 34l14-6M12 40l10-4" stroke={c} strokeWidth="2.6" strokeLinecap="round" />
+          </g>
+        );
+      case "lock":
+        return (
+          <g>
+            <circle cx="24" cy="24" r="15" fill="#10243d" stroke={c} strokeWidth="2.6" />
+            <path d="M24 12v12l8 5" stroke={a} strokeWidth="2.6" strokeLinecap="round" fill="none" />
+            <circle cx="24" cy="24" r="3" fill="#fff" />
+            <path d="M9 33l6 3M39 15l-6-3M15 9l3 6M33 39l-3-6" stroke={a} strokeWidth="2.2" strokeLinecap="round" />
+          </g>
+        );
+      case "bloom":
+        return (
+          <g>
+            {Array.from({ length: 6 }).map((_, i) => {
+              const ang = (i / 6) * Math.PI * 2;
+              return (
+                <ellipse
+                  key={i}
+                  cx={24 + Math.cos(ang) * 11}
+                  cy={24 + Math.sin(ang) * 11}
+                  rx="6"
+                  ry="3.6"
+                  fill={i % 2 ? a : c}
+                  opacity="0.85"
+                  transform={`rotate(${(ang * 180) / Math.PI} ${24 + Math.cos(ang) * 11} ${24 + Math.sin(ang) * 11})`}
+                />
+              );
+            })}
+            <circle cx="24" cy="24" r="5" fill="#0b3d24" stroke="#8effc4" strokeWidth="1.8" />
+            <circle cx="24" cy="24" r="2" fill="#fff" />
+          </g>
+        );
+      case "colossus":
+        return (
+          <g>
+            <path d="M24 5l14 5v13c0 9-6 15-14 20-8-5-14-11-14-20V10z" fill="#2a1220" stroke={c} strokeWidth="2.6" />
+            <rect x="14" y="18" width="20" height="9" rx="3" fill={a} />
+            <rect x="30" y="20" width="12" height="5" rx="2.5" fill="#4a5568" stroke={c} strokeWidth="1.6" />
+            <path d="M18 32h12" stroke={a} strokeWidth="3" strokeLinecap="round" />
           </g>
         );
       case "beam":
@@ -785,52 +898,94 @@ export const GOLD_RAIN_MIN = 1000;
 export const GEM_RAIN_MIN = 100;
 
 /**
- * The falling-currency jackpot layer. When a claim pays 1000+ gold or 100+
- * gems, physical coins and gems tumble down the screen behind the card — more
- * of them the bigger the payout — tumbling in 3D with a bounce at the bottom.
+ * The jackpot cascade. When a claim pays 1000+ gold or 100+ gems the whole
+ * screen becomes the payout: a burst blows out from the card, coins and gems
+ * fall as **comets** with a hot trail and a bounce at the bottom, embers spray
+ * out of the impact line, and the screen pulses warm behind it all. Bigger
+ * payouts make the cascade denser, longer and brighter.
  */
 function CurrencyRain({ gold, gems }: { gold: number; gems: number }) {
-  const drops = useMemo(() => {
-    const out: { id: string; kind: "gold" | "gems"; left: number; delay: number; dur: number; size: number; spin: number; drift: number }[] = [];
+  const { drops, sparks, heat } = useMemo(() => {
+    type Drop = {
+      id: string;
+      kind: "gold" | "gems";
+      left: number;
+      delay: number;
+      dur: number;
+      size: number;
+      spin: number;
+      drift: number;
+    };
+    const out: Drop[] = [];
+    // payout -> density, capped so even an absurd jackpot stays readable
     const mk = (kind: "gold" | "gems", amount: number, floor: number, cap: number) => {
-      // more loot -> a denser downpour, capped so it never becomes soup
-      const n = Math.min(cap, Math.round(floor + Math.sqrt(amount / (kind === "gold" ? 40 : 4))));
+      const n = Math.min(cap, Math.round(floor + Math.sqrt(amount / (kind === "gold" ? 30 : 3))));
       for (let i = 0; i < n; i++) {
         out.push({
           id: `${kind}-${i}`,
           kind,
           left: Math.random() * 100,
-          delay: Math.random() * 1.5,
-          dur: 1.5 + Math.random() * 1.3,
-          size: 16 + Math.random() * 20,
-          spin: Math.round((Math.random() - 0.5) * 1080),
-          drift: Math.round((Math.random() - 0.5) * 120),
+          delay: Math.random() * 1.1,
+          dur: 1.25 + Math.random() * 1.1,
+          size: 14 + Math.random() * 22,
+          spin: Math.round((Math.random() - 0.5) * 1440),
+          drift: Math.round((Math.random() - 0.5) * 160),
         });
       }
     };
-    if (gold >= GOLD_RAIN_MIN) mk("gold", gold, 16, 54);
-    if (gems >= GEM_RAIN_MIN) mk("gems", gems, 14, 44);
-    return out.sort(() => Math.random() - 0.5);
+    if (gold >= GOLD_RAIN_MIN) mk("gold", gold, 22, 62);
+    if (gems >= GEM_RAIN_MIN) mk("gems", gems, 18, 52);
+    // a burst of sparks along the bottom that reads as coins hitting the floor
+    const sp = Array.from({ length: 26 }, (_, i) => ({
+      id: `sp-${i}`,
+      left: Math.random() * 100,
+      bottom: Math.random() * 26,
+      delay: Math.random() * 1.6,
+      dur: 0.6 + Math.random() * 0.5,
+      dx: Math.round((Math.random() - 0.5) * 70),
+      dy: Math.round(-30 - Math.random() * 60),
+    }));
+    const h = Math.min(1, (gold / (GOLD_RAIN_MIN * 12) + gems / (GEM_RAIN_MIN * 8)) / 2);
+    return { drops: out.sort(() => Math.random() - 0.5), sparks: sp, heat: h };
   }, [gold, gems]);
 
   if (!drops.length) return null;
   return (
     <div className="pointer-events-none fixed inset-0 z-[92] overflow-hidden" data-testid="currency-rain">
+      <div className="jackpot-scrim" />
+      <div className="jackpot-burst" />
+      {sparks.map((sp) => (
+        <span
+          key={sp.id}
+          className="jackpot-spark"
+          style={
+            {
+              left: `${sp.left}%`,
+              bottom: `${sp.bottom}%`,
+              animationDelay: `${sp.delay}s`,
+              animationDuration: `${sp.dur}s`,
+              "--dx": `${sp.dx}px`,
+              "--dy": `${sp.dy}px`,
+            } as React.CSSProperties
+          }
+        />
+      ))}
       {drops.map((d) => (
         <span
           key={d.id}
-          className="coin-drop absolute top-0"
+          className="jackpot-coin coin-drop absolute top-0"
           style={
             {
               left: `${d.left}%`,
               animationDelay: `${d.delay}s`,
               animationDuration: `${d.dur}s`,
+              opacity: 0.85 + heat * 0.15,
               "--spin": `${d.spin}deg`,
               "--drift": `${d.drift}px`,
             } as React.CSSProperties
           }
         >
-          <span className="coin-spin block">
+          <span className="jackpot-comet coin-spin block">
             {d.kind === "gold" ? <CoinIcon size={d.size} /> : <GemIcon size={d.size} />}
           </span>
         </span>
@@ -941,8 +1096,8 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
         </div>
         <div className="mt-0.5 text-[11px] font-bold tracking-[0.22em] text-[var(--dim)]">{data.subtitle.toUpperCase()}</div>
         {phase === "loot" && jackpot && (
-          <div className="jackpot-tag mt-1 text-[12px] font-black tracking-[0.3em]" style={{ color: "#ffcf4d" }}>
-            ★ JACKPOT ★
+          <div className="jackpot-tag jackpot-count mt-1 text-[12px] font-black tracking-[0.3em]" style={{ color: "#ffcf4d" }}>
+            ★ JACKPOT · {gold >= GOLD_RAIN_MIN ? `${gold.toLocaleString("en-US")} GOLD` : `${gems.toLocaleString("en-US")} GEMS`} ★
           </div>
         )}
 

@@ -749,7 +749,9 @@ describe("Battle", () => {
     expect(canvas.height).toBe(580);
     const startCalls = canvasStats.calls;
     await waitFor(() => canvasStats.calls > startCalls + 50, "render loop drawing frames");
-    expect(document.body.textContent).toContain("ROUND");
+    // the compact HUD labels the round group in lower case ("1/12 round")
+    expect(document.querySelector('[data-testid="hud-round"]')!.textContent).toContain("round");
+    expect(document.body.textContent).toMatch(/1\/\d+round/);
     expect(document.body.textContent).toContain("1/12");
 
     // the field starts EMPTY now: the opening SP buys four summons
@@ -806,8 +808,8 @@ describe("Battle", () => {
 
     // wave 1 begins ~7s after deploy phase starts
     const enemiesOut = await waitFor(() => {
-      const chip = all("span").find((s) => /^\d+ left$/.test((s.textContent || "").trim()));
-      const n = chip ? parseInt(chip.textContent!, 10) : 0;
+      const chip = document.querySelector('[data-testid="enemies-left"]');
+      const n = parseInt((chip?.textContent || "0").replace(/[^\d]/g, ""), 10);
       return n > 0 ? n : 0;
     }, "first wave to spawn", 15000);
     expect(enemiesOut).toBeGreaterThan(0);
@@ -1005,7 +1007,8 @@ describe("Battle", () => {
     startMode("Endless");
     await waitFor(() => byText("button", "SUMMON"), "endless battle HUD");
     expect(document.body.textContent).toContain("WAVE 1");
-    expect(document.body.textContent).toContain("ENDLESS");
+    expect(document.querySelector('[data-testid="hud-round"]')!.textContent).toContain("endless");
+    expect(document.body.textContent).toMatch(/W\d+endless/);
     expect(document.body.textContent).not.toContain("1/12");
 
     await waitFor(() => canvasStats.calls > 50, "endless render loop drawing");
@@ -1078,6 +1081,55 @@ describe("Battle", () => {
     await waitFor(() => byText("div", "Command Center"), "back home");
     noErrors();
   });
+
+  it("spawns only through the grid and merges without inventing a tower type", async () => {
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => document.querySelector('[data-testid="summon-btn"]'), "battle HUD");
+
+    const boardCount = () =>
+      Number((document.querySelector('[data-testid="towers-on-board"]')!.textContent || "0").replace(/[^\d]/g, ""));
+    const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
+    for (let i = 0; i < 2; i++) {
+      click(summon);
+      await sleep(120);
+    }
+    await waitFor(() => boardCount() === 2, "two towers summoned");
+
+    // the build cells: c=1..5 x r=0..2 (c=0, c=6 and r=3 are the path). The canvas
+    // maps client coordinates 1:1 onto its 1000x580 backing store in jsdom.
+    const cells: [number, number][] = [];
+    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 110 + (r + 0.5) * 90]);
+
+    // drag every cell onto every other cell: the two towers are somewhere in the
+    // grid and both sit on 0 points, so the first real pair merges
+    const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+    for (const [ax, ay] of cells) {
+      for (const [bx, by] of cells) {
+        if (ax === bx && ay === by) continue;
+        pointer("pointerdown", canvas, ax, ay);
+        pointer("pointermove", canvas, bx, by);
+        pointer("pointerup", canvas, bx, by);
+        if (boardCount() === 1) break;
+      }
+      if (boardCount() === 1) break;
+    }
+    await waitFor(() => boardCount() === 1, "two towers merged into one");
+
+    // the merge is a pure upgrade: no new tower type appeared, and the survivor
+    // is sitting on a point tier higher than the pair it came from
+    const merged = await waitFor(
+      () => (document.body.textContent || "").match(/merged to (\d+) pts/),
+      "merge toast"
+    );
+    expect(Number(merged[1])).toBeGreaterThan(0);
+    const barText = (document.querySelector('[data-testid="ascent-bar"]') as HTMLElement).textContent || "";
+    expect(barText).toContain(`${merged[1]}p`);
+
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  }, 40000);
 
   it("maxes out ascension and refuses further upgrades", async () => {
     await mountApp();
