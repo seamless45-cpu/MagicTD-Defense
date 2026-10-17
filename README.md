@@ -15,7 +15,7 @@ Other scripts:
 ```bash
 npm run build      # bundles the game and updates the committed deploy artifact
 npm run preview    # serve the production build
-npm test           # vitest + jsdom suite (27 tests)
+npm test           # vitest + jsdom suite (173 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -37,6 +37,38 @@ serves the app at `/` (it rewrites `/` to `app.html`).
 
 **After changing game code, run `npm run build` and commit `index.html`**, otherwise the
 published site keeps serving the previous version.
+
+## Latest rework
+
+- **Battle control strip.** The arena HUD now carries a real pause button (the simulation freezes
+  but the last frame stays on screen, with Resume / Speed / Abandon in the overlay), a **×1 / ×1.5 /
+  ×2** battle-speed cycle, and a thin **wave strip** under the HUD showing round, enemies cleared,
+  deploy countdown and the enemy-HP multiplier. Deploy and intermission overlays preview the next
+  wave's hostiles and warn before every fourth (boss) wave; **CALL WAVE EARLY** starts it immediately.
+- **Frame interpolation reworked.** Enemies (including the Singularity's lateral pull), projectiles,
+  particles and floating damage text all render between fixed 1/60 simulation steps. Boss teleports
+  snap instead of gliding, dropped backlogs snap alpha to 1, and backgrounded tabs restart their
+  accumulator cleanly.
+- **Performance pass.** The static backdrop (gradient, nebula, starfield, arena slab and circuitry)
+  is pre-rendered once and blitted as a single `drawImage`; ambient motes and parallax twinkles are
+  skipped in power saving; projectiles and particles are culled off-screen; the render FPS counter
+  now measures real frames; and React only re-renders the HUD when a displayed value actually moves.
+- **Power Saving Mode** caps the arena at 30 FPS, turns interpolation off, forces minimal effects,
+  disables shake and calms CSS animations across the shell.
+- **Volume Booster** pushes the master bus to **300%** from Settings → Audio. The existing limiter
+  keeps peaks clean, and the slider label shows the boosted percentage.
+- **Monthly events now have a reward track.** Every finished run banks event points (waves × 8,
+  +40 for a clear); the live month pays out at **120 / 300 / 600 points** with gold, gems, crystal
+  potions and chip modules. The track resets when the calendar month rolls over.
+- **Daily events keep a streak.** Claiming the weekday event on consecutive game-days raises the
+  loot multiplier up to ×1.6 at day 7 and pays **1–7 crystal potions** on every claim.
+- **Crystal Vault (inside Towers).** Six account-wide crystals — Ruby (+2% tower ATK), Sapphire
+  (+1.5% crit chance), Emerald (+3% SP gain), Topaz (+3% run gold), Amethyst (+2% attack speed) and
+  Diamond (+1 starting life, max 10) — each up to level 20. Every level costs **crystal potions**
+  only (`3 × 1.22^level`, rounded). Potions drop from runs, daily tasks and milestones, the daily
+  event streak, daily rewards and the monthly track.
+- **Compact ascent bar.** The bottom bar is now a single short strip: icon, name, battle level,
+  points and one ASCENT button per rotation tower (with the SP price and copy count inline).
 
 ## How to play
 
@@ -165,11 +197,11 @@ The panel shows a live countdown to the next rollover. Miss a day and the streak
 | --- | --- |
 | 1 | 1,200 gems |
 | 2 | Silver Chest |
-| 3 | Legendary Chest |
+| 3 | Legendary Chest + 2 crystal potions |
 | 4 | ×5 random legendary tower fragments |
 | 5 | 25,000 gold + 900 gems |
 | 6 | ×5 Basic Chip Module + ×2 Advanced Chip Module |
-| 7 | ×3 Legendary Chests |
+| 7 | ×3 Legendary Chests + 3 crystal potions |
 
 Chest days roll their contents on claim, so the loot the animation shows is exactly what is
 banked. Every claim — daily streak, event bonus, shop chest, guild chest, competition payout —
@@ -590,10 +622,10 @@ enemies, with Overpenetration and Rail Burn awakenings).
   awakenings: **Super Clone** (20% per attempt) copies towers with ANY point spread and surges the
   copy with **+200% attack speed for 6 seconds**, and **Perfect Replica** chances the copy into
   +1–2 points the moment it is made. The copy keeps the Clone's own cell and points.
-- **Gameplay shop reworked.** Upgrade caps are now **20** across the board — except the two pure
-  stat items, which are held to **max 5** with juicier numbers: Forged Ammo gives **+18%** damage
-  (was 15%) and Quickspring **+21%** attack speed (was 12%). Two new items join: **Keen Sight**
-  (+5% crit rate, max 10) and **Killing Edge** (+15% crit damage, max 10).
+- **Gameplay shop reworked.** Upgrade caps are **20** across the board, including the two pure stat
+  items: Forged Ammo gives **+21%** damage a level (max 20) and Quickspring **+21%** attack speed
+  (max 20). Two further items join: **Keen Sight** (+5% crit rate, max 10) and **Killing Edge**
+  (+15% crit damage, max 10).
 - **Magic token exchange** costs far more gems again (32 / 128 / 272 for 1 / 5 / 12 tokens).
 - **Max frame rate + advanced frame interpolation** in Settings. The renderer can be capped at
   30/60/120/144/240 FPS (or unlimited), and frame interpolation draws between fixed 1/60 sim steps

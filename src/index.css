@@ -4321,3 +4321,175 @@ body,
   animation: none !important;
   opacity: 1;
 }
+
+/* ---------- compact battle controls (reworked battle HUD) ---------- */
+.ascend-btn-compact {
+  min-height: 22px;
+  padding: 1px 4px;
+  gap: 4px;
+  border-width: 1.5px;
+  border-radius: 7px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+.ascend-btn-compact b {
+  font-size: 9px;
+}
+.hud-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  padding: 4px 8px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(53, 224, 255, 0.38);
+  background: linear-gradient(180deg, rgba(12, 30, 52, 0.92), rgba(6, 14, 30, 0.9));
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.55);
+  color: #7fe9ff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 0.12s ease, filter 0.16s ease, border-color 0.16s ease;
+}
+.hud-tool:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.14);
+}
+.hud-tool.on {
+  border-color: #ffcf4d;
+  color: #ffcf4d;
+}
+.wave-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 4px;
+  flex-shrink: 0;
+}
+.wave-strip-label,
+.wave-strip-hp {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--dim);
+  white-space: nowrap;
+}
+.wave-strip-label b {
+  color: #ffcf4d;
+}
+.wave-strip-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.wave-strip-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3dff8e, #35e0ff);
+  transition: width 0.2s linear;
+}
+.battle-pause {
+  background: rgba(4, 2, 12, 0.62);
+  backdrop-filter: blur(3px);
+}
+
+/* ---------- crystal vault cards ---------- */
+.crystal-card {
+  transition: transform 0.16s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.crystal-card:hover {
+  transform: translateY(-2px);
+}
+
+/* ---------- power saving mode ---------- */
+.power-saver .holo,
+.power-saver .holo::after,
+.power-saver .badge-ping,
+.power-saver .live-dot,
+.power-saver .hero-ready,
+.power-saver .nav-btn.on svg,
+.power-saver .crit-band::after,
+.power-saver .screen-enter,
+.power-saver .screen-enter .tile,
+.power-saver .screen-enter .panel,
+.power-saver .screen-enter .row-card,
+.power-saver .toast,
+.power-saver .anim-pop,
+.power-saver .boot-collapse,
+.power-saver .boot-shock,
+.power-saver .boot-wipe,
+.power-saver .load-grid,
+.power-saver .load-logo-scan,
+.power-saver .month-tile,
+.power-saver .task-bar-fill::after {
+  animation: none !important;
+}
+.power-saver *,
+.power-saver *::before,
+.power-saver *::after {
+  transition-duration: 0.06s !important;
+}
+
+.wave-strip-boss {
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid #ff4d5e88;
+  color: #ff8f9a;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}
+.boss-warning {
+  animation: bossWarn 0.9s ease-in-out infinite;
+}
+@keyframes bossWarn {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.power-saver .boss-warning {
+  animation: none;
+}
+
+/* compact ascent cards: the button sits on the title row instead of stacking */
+.ascend-btn-compact {
+  width: auto;
+  min-height: 18px;
+  min-width: 0;
+  padding: 1px 4px;
+  gap: 3px;
+  white-space: nowrap;
+  font-size: 9.5px;
+  line-height: 1.1;
+}
+.ascend-btn-compact b {
+  font-size: 9px;
+}
+
+/* claimable monthly-tier cards get a slow ready pulse */
+.tile.ready {
+  border-color: #ffd76688;
+  box-shadow: 0 0 0 1px #ffd76633, 0 0 24px -12px #ffd766;
+  animation: tileReady 1.8s ease-in-out infinite;
+}
+@keyframes tileReady {
+  0%, 100% { box-shadow: 0 0 0 1px #ffd76633, 0 0 18px -14px #ffd766; }
+  50% { box-shadow: 0 0 0 1px #ffd76666, 0 0 26px -8px #ffd766; }
+}
+.power-saver .tile.ready {
+  animation: none;
+}
+
+.wave-strip-saver {
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid #ffcf4d66;
+  color: #ffcf4d;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+}

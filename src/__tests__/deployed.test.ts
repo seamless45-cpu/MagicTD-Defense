@@ -121,6 +121,12 @@ describe("published build (index.html)", () => {
       "Soul Siphon",
       "Install App",
       "ASCENT",
+      // the reworked towers tab, crystal vault, monthly track and battle controls
+      "CRYSTAL VAULT",
+      "MONTHLY TRACK",
+      "Volume Booster",
+      "Power Saving Mode",
+      "CALL WAVE EARLY",
       "Rift Overlord",
       // 7 A.M. daily rewards, events, trophies, new chests and the guild rework
       "Daily Rewards",

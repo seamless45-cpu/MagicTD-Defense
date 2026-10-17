@@ -1,6 +1,14 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { bumpTask, critBonus, towerUpgrades } from "../game/save";
+import {
+  bumpTask,
+  critBonus,
+  crystalLevel,
+  nextCrystalCost,
+  towerUpgrades,
+  totalCrystalLevels,
+  upgradeCrystal,
+} from "../game/save";
 import { sfx } from "../game/audio";
 import {
   TOWERS,
@@ -16,11 +24,27 @@ import {
   critBonusFrom,
   fmtCritPct,
   towerStatRows,
+  CRYSTALS,
+  CRYSTAL_MAX_LEVEL,
+  crystalBonus,
+  crystalBuffText,
+  type CrystalId,
   type TowerDef,
   monthlyEventBonus,
   monthlyEventForDate,
 } from "../game/data";
-import { Ceremony, CoinIcon, GemIcon, TokenIcon, TowerIcon, UpgradeCeremony, type CeremonyData, type UpgradeData } from "../components/ui";
+import {
+  Ceremony,
+  CoinIcon,
+  CrystalIcon,
+  GemIcon,
+  PotionIcon,
+  TokenIcon,
+  TowerIcon,
+  UpgradeCeremony,
+  type CeremonyData,
+  type UpgradeData,
+} from "../components/ui";
 
 interface Drag {
   id: string;
@@ -50,6 +74,10 @@ export default function Towers({
   /** tower id shown in the preview panel (clicking a card opens it) */
   const [preview, setPreview] = useState<string | null>(null);
   const [ceremony, setCeremony] = useState<CeremonyData | null>(null);
+  /** the tower section has two vaults now: the roster and the crystal vault */
+  const [section, setSection] = useState<"towers" | "crystals">("towers");
+  /** crystal card whose upgrade just landed (drives the pop animation) */
+  const [justUpgraded, setJustUpgraded] = useState<CrystalId | null>(null);
 
   const startDrag = (id: string, e: React.PointerEvent) => {
     (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
@@ -301,6 +329,27 @@ export default function Towers({
     });
   };
 
+  const doUpgradeCrystal = (id: CrystalId) => {
+    const def = CRYSTALS.find((c) => c.id === id)!;
+    const lv = crystalLevel(save, id);
+    if (lv >= def.max) return deny(`${def.name} is already maxed`);
+    const cost = nextCrystalCost(save, id);
+    if (save.potions < cost) return deny(`Need ${cost} crystal potions`);
+    // roll the upgrade on a draft, then commit it in one mutate so the save
+    // write and the React state change can never disagree
+    const next = JSON.parse(JSON.stringify(save)) as SaveData;
+    if (!upgradeCrystal(next, id)) return;
+    mutate((s) => {
+      Object.assign(s, next);
+    });
+    sfx.awaken();
+    setJustUpgraded(id);
+    setTimeout(() => setJustUpgraded(null), 600);
+    push(`${def.name} crystal Lv ${lv + 1} · ${crystalBuffText(def, lv + 1)}`, def.color);
+  };
+
+  const crystalSummary = crystalBonus(save.crystals);
+
   const unlocked = Object.entries(save.levels).filter(([, l]) => l > 0);
   const avg = unlocked.length ? unlocked.reduce((a, [, l]) => a + l, 0) / unlocked.length : 0;
 
@@ -325,6 +374,42 @@ export default function Towers({
        the last rows on a phone. Now the page itself scrolls, the grid is free to
        be as tall as it likes and the filter row sticks to the top of it. */
     <div className="tower-page flex h-full flex-col gap-2.5 overflow-y-auto scroll-thin pb-6 pr-1">
+      {/* SECTION SWITCH — the Towers tab is now two vaults: the tower roster
+          and the crystal vault that feeds it account-wide buffs. */}
+      <div className="flex flex-wrap items-center gap-1.5" data-testid="tower-sections">
+        {(
+          [
+            ["towers", "TOWERS", `#ffcf4d`],
+            ["crystals", "CRYSTALS", `#b98bff`],
+          ] as const
+        ).map(([id, label, color]) => (
+          <button
+            key={id}
+            data-testid={`tower-section-${id}`}
+            className={`tab-btn ${section === id ? "on" : ""}`}
+            style={section === id ? { color } : undefined}
+            onClick={() => {
+              sfx.uiTab();
+              setSection(id);
+            }}
+          >
+            {label}
+            {id === "crystals" && (
+              <span className="ml-1.5 inline-flex items-center gap-1 text-[11px] text-[#b98bff]">
+                <PotionIcon size={13} />
+                <b className="num">{save.potions}</b>
+              </span>
+            )}
+          </button>
+        ))}
+        <span className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-black/35 px-2 py-1 text-[11px] font-bold text-[var(--dim)]">
+          <CrystalIcon size={14} color="#b98bff" />
+          <span className="num" style={{ color: "#b98bff" }}>{totalCrystalLevels(save)}</span> crystal levels
+        </span>
+      </div>
+
+      {section === "towers" && (
+        <>
       {/* The rotation strip and the filter row ride along on top of the scroll:
           the strip is the drop target for drag-to-rotation, so it has to stay
           reachable while the grid (61 cells) scrolls underneath it. */}
@@ -488,20 +573,31 @@ export default function Towers({
       )}
       </div>
 
-      {/* ASCENT ALL */}
-      <div className="panel flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2" style={{ borderColor: "rgba(53,224,255,0.4)" }}>
-        <div>
-          <div className="font-disp text-base text-[#35e0ff]">Ascent All</div>
-          <div className="text-[12px] font-semibold text-[var(--dim)]">Upgrade every unlocked tower +1 level. No fragments required.</div>
+      {/* ASCENT ALL — a compact one-line bar rather than a second panel */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#35e0ff66] bg-[#0d1330]/70 px-2.5 py-1.5" data-testid="ascent-all">
+        <div className="min-w-0 flex-1">
+          <div className="font-disp text-[15px] leading-none text-[#35e0ff]">Ascent All</div>
+          <div className="truncate text-[10.5px] font-semibold text-[var(--dim)]">Every unlocked tower +1 level · no fragments</div>
         </div>
         <button
-          className="btn btn-cyan flex items-center gap-2 px-6 py-2.5"
+          className="btn btn-cyan flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-[12px]"
           disabled={save.gold < ascCost}
           onClick={doAscentAll}
         >
-          <CoinIcon size={16} /> {ascCost}
+          <CoinIcon size={14} /> {ascCost}
         </button>
       </div>
+        </>
+      )}
+
+      {section === "crystals" && (
+        <CrystalVault
+          save={save}
+          summary={crystalSummary}
+          justUpgraded={justUpgraded}
+          onUpgrade={doUpgradeCrystal}
+        />
+      )}
 
       {/* drag ghost */}
       {drag && drag.moved && (
@@ -526,6 +622,126 @@ export default function Towers({
 
       {upg && <UpgradeCeremony data={upg} onClose={() => setUpg(null)} />}
       {ceremony && <Ceremony data={ceremony} onClose={() => setCeremony(null)} />}
+    </div>
+  );
+}
+
+/**
+ * CRYSTAL VAULT — the second vault inside the Towers tab. Six crystals, each
+ * one a small permanent account buff, each level paid for in crystal potions.
+ * Nothing here touches gold or fragments: potions are the only currency.
+ */
+function CrystalVault({
+  save,
+  summary,
+  justUpgraded,
+  onUpgrade,
+}: {
+  save: SaveData;
+  summary: ReturnType<typeof crystalBonus>;
+  justUpgraded: CrystalId | null;
+  onUpgrade: (id: CrystalId) => void;
+}) {
+  const active: { label: string; value: string; color: string }[] = [];
+  if (summary.atk > 0) active.push({ label: "Tower ATK", value: `+${(summary.atk * 100).toFixed(1)}%`, color: "#ff4d5e" });
+  if (summary.aspd > 0) active.push({ label: "ATK Speed", value: `+${(summary.aspd * 100).toFixed(1)}%`, color: "#c44dff" });
+  if (summary.crit > 0) active.push({ label: "Crit Chance", value: `+${(summary.crit * 100).toFixed(1)}%`, color: "#3fb6ff" });
+  if (summary.sp > 0) active.push({ label: "SP Gain", value: `+${(summary.sp * 100).toFixed(1)}%`, color: "#3dff8e" });
+  if (summary.gold > 0) active.push({ label: "Run Gold", value: `+${(summary.gold * 100).toFixed(1)}%`, color: "#ffcf4d" });
+  if (summary.lives > 0) active.push({ label: "Start Lives", value: `+${summary.lives}`, color: "#9fe8ff" });
+
+  return (
+    <div className="flex flex-col gap-2.5" data-testid="crystal-vault">
+      <div className="tile tile-gold holo p-3">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-bold tracking-[0.3em] text-[#b98bff]">CRYSTAL VAULT</div>
+            <div className="font-disp text-2xl leading-none text-white">
+              <span className="num" style={{ color: "#b98bff" }}>{totalCrystalLevels(save)}</span>
+              <span className="text-[var(--dim)]"> / {CRYSTALS.reduce((a, c) => a + c.max, 0)} LEVELS</span>
+            </div>
+            <p className="mt-1 max-w-xl text-[12px] font-semibold text-[var(--dim)]">
+              Every crystal is a small permanent buff for the whole account. Each upgrade costs crystal
+              potions — never gold, never fragments. Potions drop from runs, daily events and monthly crates.
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-xl border-2 border-[#5b3b8c] bg-black/45 px-3 py-2 text-[15px] font-bold text-[#b98bff]" data-testid="potion-balance">
+            <PotionIcon size={22} />
+            <span className="num">{save.potions}</span>
+            <span className="text-[11px] tracking-wider text-[var(--dim)]">POTIONS</span>
+          </div>
+        </div>
+        {active.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5" data-testid="crystal-summary">
+            {active.map((a) => (
+              <span key={a.label} className="pill-dark text-[10.5px] font-bold" style={{ borderColor: a.color + "66", color: a.color }}>
+                {a.label} <b className="num">{a.value}</b>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" data-testid="crystal-grid">
+        {CRYSTALS.map((def) => {
+          const lv = crystalLevel(save, def.id);
+          const maxed = lv >= def.max;
+          const cost = nextCrystalCost(save, def.id);
+          const afford = save.potions >= cost;
+          return (
+            <div
+              key={def.id}
+              className={`crystal-card tile relative flex gap-2.5 p-2.5 ${justUpgraded === def.id ? "anim-pop" : ""}`}
+              data-crystal={def.id}
+              style={{ borderColor: lv > 0 ? def.color + "aa" : undefined, boxShadow: lv > 0 ? `0 0 22px -14px ${def.color}` : undefined }}
+            >
+              <div
+                className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border"
+                style={{ borderColor: def.color + "66", background: `radial-gradient(circle at 35% 25%, ${def.color}33, rgba(0,0,0,0.5))` }}
+              >
+                <CrystalIcon size={30} color={def.color} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-disp text-[17px] leading-none" style={{ color: def.color }}>{def.name}</span>
+                  <span className="num text-[10.5px] font-bold text-[var(--dim)]">
+                    LV {lv}/{def.max}
+                  </span>
+                </div>
+                <div className="truncate text-[11px] font-semibold text-[var(--dim)]">{def.desc}</div>
+                <div className="mt-1 text-[11.5px] font-bold" style={{ color: lv > 0 ? "#8effc4" : "var(--line2)" }}>
+                  {crystalBuffText(def, lv)}
+                </div>
+                <div className="task-bar mt-1.5">
+                  <span
+                    className="task-bar-fill"
+                    style={{ width: `${(lv / def.max) * 100}%`, background: `linear-gradient(90deg,${def.color},#ffffff)` }}
+                  />
+                </div>
+                <div className="mt-1.5 flex items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#b98bff]">
+                    <PotionIcon size={13} />
+                    {maxed ? "MAX" : `${cost} / ${save.potions}`}
+                  </span>
+                  <button
+                    className={`btn flex shrink-0 items-center gap-1 px-2.5 py-1 text-[11px] ${!maxed && afford ? "btn-cyan" : ""}`}
+                    data-testid={`crystal-upgrade-${def.id}`}
+                    disabled={maxed || !afford}
+                    onClick={() => onUpgrade(def.id)}
+                  >
+                    {maxed ? "MAX LEVEL" : (<><PotionIcon size={12} /> UPGRADE</>)}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="rounded-lg border border-[var(--line)] bg-black/30 px-3 py-2 text-[11px] font-semibold leading-snug text-[var(--dim)]">
+        Max level per crystal is {CRYSTAL_MAX_LEVEL} (Diamond stops at 10). Costs climb 22% a level.
+        Potions come from run payouts, the daily event streak, daily tasks, and the monthly track.
+      </div>
     </div>
   );
 }

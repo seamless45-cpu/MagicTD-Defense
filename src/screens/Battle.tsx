@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { addChips, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, heroLevel } from "../game/save";
+import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, heroLevel } from "../game/save";
 import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import {
@@ -69,6 +69,7 @@ import {
   SLOW_VULN,
   RUN_SHOP,
   ROMAN,
+  crystalBonus,
   eventBonus,
   eventForDate,
   trophyDelta,
@@ -82,7 +83,7 @@ import {
   type RunShopItem,
 } from "../game/data";
 import { SKILLS } from "../game/skills";
-import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon, GemIcon, TokenIcon, ShardIcon } from "../components/ui";
+import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon, GemIcon, TokenIcon, ShardIcon, PotionIcon } from "../components/ui";
 
 /**
  * The weekday event is resolved once per module load: it modifies enemy health,
@@ -173,6 +174,9 @@ interface Enemy {
   d: number;
   /** previous-frame distance along the path, for frame interpolation */
   pd?: number;
+  /** previous-frame lateral offset (singularity pulls interpolate too) */
+  pox?: number;
+  poy?: number;
   hp: number;
   max: number;
   speed: number;
@@ -343,6 +347,9 @@ interface Bolt {
 interface Part {
   x: number;
   y: number;
+  /** previous-frame position, for frame interpolation */
+  px?: number;
+  py?: number;
   vx: number;
   vy: number;
   life: number;
@@ -352,6 +359,8 @@ interface Part {
   kind: "spark" | "ring" | "smoke" | "glow" | "shard" | "shock" | "star" | "ember";
   /** rotation + spin, used by shards and stars */
   rot?: number;
+  /** previous-frame rotation, interpolated alongside the position */
+  prot?: number;
   spin?: number;
   /** gravity multiplier */
   grav?: number;
@@ -400,7 +409,7 @@ interface ActiveSkill {
   sx: number;
   sy: number;
 }
-interface FT { x: number; y: number; txt: string; color: string; size: number; life: number; crit: boolean }
+interface FT { x: number; y: number; py?: number; txt: string; color: string; size: number; life: number; crit: boolean }
 
 interface G {
   mode: GameMode;
@@ -425,8 +434,14 @@ interface G {
   critRate: number;
   /** Killing Edge purchases: flat crit damage added for this run */
   critDmg: number;
-  /** extra attack speed bought in the run shop */
+  /** extra attack speed bought in the run shop (plus the Amethyst crystal) */
   bonusAspd: number;
+  /** crystal Topaz folded into every gold payout of the run */
+  goldMul: number;
+  /** total enemies scheduled for the current wave (for the wave progress bar) */
+  waveTotal: number;
+  /** enemies spawned so far this wave */
+  waveSpawned: number;
   /** what has been bought in the run shop this battle */
   shopBought: Record<string, number>;
   /** fps counter for the performance HUD */
@@ -494,6 +509,8 @@ interface G {
     rounds: number;
     /** trophy swing applied on collect (Battle only) */
     trophies: number;
+    /** crystal potions salvaged from the run */
+    potions: number;
     /** chip modules from the Items Finding event */
     chips: ChipBag | null;
   };
@@ -516,24 +533,30 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
   // the field starts empty: the opening SP is the player's to spend, so 4 towers
   // have to be summoned before the first wave rolls in
   const towers: BT[] = [];
+  // crystal vault buffs are resolved once per run and folded into the same
+  // fields the run shop writes to, so everything downstream reads one number
+  const crystal = crystalBonus(save.crystals || {});
   const g: G = {
     mode,
     heroId: HERO_BY_ID[save.hero] ? save.hero : "nova",
     heroLv: heroLevel(save, HERO_BY_ID[save.hero] ? save.hero : "nova"),
-    dmgBonus: 0,
-    spGainMul: 0,
-    critRate: 0,
+    dmgBonus: crystal.atk,
+    spGainMul: crystal.sp,
+    critRate: crystal.crit,
     critDmg: 0,
+    goldMul: 1 + crystal.gold,
     t: 0,
     phase: "deploy",
     phaseT: mode === "endless" ? 6 : 7,
     round: Math.max(1, startRound),
     // endless has no final wave; maxRounds is only used for display
     maxRounds: mode === "battle" ? BATTLE_ROUNDS : 0,
-    lives: mode === "endless" ? 15 : 20,
+    lives: (mode === "endless" ? 15 : 20) + Math.round(crystal.lives),
     // small field-kit budget so the run shop is useful from wave 1
     gold: 120,
-    bonusAspd: 0,
+    bonusAspd: crystal.aspd,
+    waveTotal: 0,
+    waveSpawned: 0,
     shopBought: {},
     fps: 60,
     fpsT: 0,
@@ -707,7 +730,30 @@ export default function Battle({
   const [shopOpen, setShopOpen] = useState(false);
   /** arena zoom: 1 = fitted to the panel, up to 2 = twice as big (scroll to pan) */
   const [zoom, setZoom] = useState(() => clampZoom(save.zoom));
+  /** battle pause + speed controls (the engine reads these through refs) */
+  const [paused, setPaused] = useState(false);
+  const [runSpeed, setRunSpeed] = useState<1 | 1.5 | 2>(1);
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
+  const speedRef = useRef<number>(runSpeed);
+  speedRef.current = runSpeed;
   const dragRef = useRef<{ kind: "lineup" | "field"; uid: number; x: number; y: number; moved: boolean } | null>(null);
+  const shopOpenRef = useRef(shopOpen);
+  shopOpenRef.current = shopOpen;
+
+  // Escape (or P) pauses/resumes with the run shop closed — a keyboard-only
+  // player never has to aim at the HUD to stop the sim
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" && e.key.toLowerCase() !== "p") return;
+      if (shopOpenRef.current) return;
+      if (!gRef.current || gRef.current.final) return;
+      e.preventDefault();
+      setPaused((p2) => !p2);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const toastRef = useRef(push);
   toastRef.current = push;
@@ -735,7 +781,9 @@ export default function Battle({
   // ---------- engine ----------
   useEffect(() => {
     const canvas = canvasRef.current!;
-    const ctx = canvas.getContext("2d")!;
+    // opaque canvas: the cached backdrop covers every pixel, so the browser can
+    // skip per-frame alpha compositing of the whole arena
+    const ctx = canvas.getContext("2d", { alpha: false })!;
     const wrap = canvas.parentElement as HTMLElement;
     const fit = () => {
       const rw = wrap.clientWidth || 1;
@@ -750,6 +798,94 @@ export default function Battle({
     ro.observe(wrap);
     const g = newGame(mode, saveRef.current, debugRound);
     gRef.current = g;
+
+    /**
+     * Static arena backdrop, pre-rendered once. Nothing in here animates, so
+     * the cache stays valid for the whole run and costs one drawImage a frame.
+     */
+    const bgCache = document.createElement("canvas");
+    bgCache.width = W;
+    bgCache.height = H;
+    {
+      const bg = bgCache.getContext("2d") as CanvasRenderingContext2D;
+      const grd = bg.createLinearGradient(0, 0, 0, H);
+      grd.addColorStop(0, "#120a33");
+      grd.addColorStop(0.45, "#0b0726");
+      grd.addColorStop(1, "#05040f");
+      bg.fillStyle = grd;
+      bg.fillRect(0, 0, W, H);
+      // two nebula blooms, baked in place
+      for (let i = 0; i < 2; i++) {
+        const nx = W * (0.3 + i * 0.45);
+        const ny = H * (0.3 + i * 0.35);
+        const nr = Math.min(W, H) * (0.5 + i * 0.12);
+        const ng = bg.createRadialGradient(nx, ny, 0, nx, ny, nr);
+        ng.addColorStop(0, i ? "rgba(53,110,255,0.16)" : "rgba(160,60,255,0.17)");
+        ng.addColorStop(0.5, i ? "rgba(53,110,255,0.05)" : "rgba(160,60,255,0.05)");
+        ng.addColorStop(1, "transparent");
+        bg.fillStyle = ng;
+        bg.fillRect(nx - nr, ny - nr, nr * 2, nr * 2);
+      }
+      // starfield
+      bg.save();
+      bg.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 90; i++) {
+        const hx = Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1;
+        const hy = Math.abs(Math.sin(i * 78.233) * 12345.6789) % 1;
+        const depth = 0.3 + (i % 3) * 0.35;
+        bg.globalAlpha = (0.35 + (i % 5) * 0.12) * depth * 0.8;
+        bg.fillStyle = i % 7 === 0 ? "#9fd8ff" : "#ffffff";
+        bg.fillRect(hx * W, hy * H, depth * 1.5, depth * 1.5);
+      }
+      bg.restore();
+      bg.globalAlpha = 1;
+      // --- arena plate: the raised slab the whole fight happens on ---
+      const padX = OX - C * 0.55;
+      const padY = OY - C * 0.55;
+      const padW = COLS * C + C * 1.1;
+      const padH = ROWS * C + C * 1.1;
+      bg.fillStyle = "rgba(0,0,0,0.55)";
+      bg.beginPath();
+      bg.roundRect(padX + 6, padY + 12, padW, padH, 26);
+      bg.fill();
+      const slab = bg.createLinearGradient(0, padY, 0, padY + padH);
+      slab.addColorStop(0, "#1b1446");
+      slab.addColorStop(0.5, "#140e34");
+      slab.addColorStop(1, "#0d0926");
+      bg.fillStyle = slab;
+      bg.beginPath();
+      bg.roundRect(padX, padY, padW, padH, 24);
+      bg.fill();
+      bg.strokeStyle = "rgba(120,96,255,0.5)";
+      bg.lineWidth = 2.5;
+      bg.stroke();
+      bg.strokeStyle = "rgba(53,224,255,0.16)";
+      bg.lineWidth = 1;
+      bg.beginPath();
+      bg.roundRect(padX + 5, padY + 5, padW - 10, padH - 10, 20);
+      bg.stroke();
+      // etched circuitry along the rim
+      bg.save();
+      bg.clip();
+      bg.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 7; i++) {
+        const f = i / 7;
+        bg.globalAlpha = 0.16;
+        bg.strokeStyle = "#35e0ff";
+        bg.lineWidth = 1;
+        const yy = padY + f * padH;
+        bg.beginPath();
+        bg.moveTo(padX, yy);
+        bg.lineTo(padX + padW * 0.18, yy);
+        bg.lineTo(padX + padW * 0.22, yy + 8);
+        bg.moveTo(padX + padW, yy + 20);
+        bg.lineTo(padX + padW * 0.82, yy + 20);
+        bg.lineTo(padX + padW * 0.78, yy + 28);
+        bg.stroke();
+      }
+      bg.restore();
+      bg.globalAlpha = 1;
+    }
     let raf = 0;
     let last = performance.now();
     let lastDraw = performance.now();
@@ -757,6 +893,8 @@ export default function Battle({
     let boltCache: { x: number; y: number }[] = [];
     /** last font string handed to the context, so text draw never re-parses one */
     let lastFont = "";
+    /** HUD signature: React only re-renders when a visible value actually moved */
+    let hudSig = "";
 
     const fxOn = () => saveRef.current.fx;
     /** the merged crit multiplier: base + 8% for every upgrade on the account.
@@ -788,8 +926,10 @@ export default function Battle({
 
     // ---------- the upgraded FX kit ----------
     const PART_CAP = 620;
+    /** power saving keeps the particle field small: the additive pass is heat */
+    const partCap = () => (saveRef.current.powerSaver ? 180 : PART_CAP);
     const pushPart = (p: Part) => {
-      if (g.parts.length > PART_CAP) {
+      if (g.parts.length > partCap()) {
         // skip rather than pile on: the additive pass is the expensive one,
         // so once the field is saturated new glow/shock FX are simply dropped
         if (p.add) return;
@@ -998,6 +1138,8 @@ export default function Battle({
       g.phase = "wave";
       g.phaseT = 999;
       g.spawnQ = waveComp(g.round).map((type, i) => ({ type, at: g.t + 0.8 + i * 0.72 + Math.random() * 0.25 }));
+      g.waveTotal = g.spawnQ.length;
+      g.waveSpawned = 0;
       // bosses walk in first: their cutscene should open the wave, not trail it
       for (const s2 of g.spawnQ) if (isBossType(s2.type)) s2.at = Math.min(s2.at, g.t + 2.4);
       g.spawnQ.sort((a, b) => a.at - b.at);
@@ -1026,6 +1168,8 @@ export default function Battle({
       const baseGold =
         (mode === "endless" ? endlessGold : won ? reward(150 + 30 * g.maxRounds) : reward(30 + 10 * rounds)) + wallet;
       const baseGems = mode === "endless" ? endlessGems : won ? reward(2) : 0;
+      // crystal potions are salvaged from the run: deeper runs and wins pay more
+      const potions = (won ? 3 : 1) + Math.floor(rounds / 3);
       // Items Finding drops chip modules on a win (one extra advanced on boss waves)
       const chips: ChipBag | null =
         won && EV_BONUS.chipDrop
@@ -1042,6 +1186,7 @@ export default function Battle({
         frags,
         rounds,
         trophies,
+        potions,
         chips,
       };
       if (won) sfx.win();
@@ -1055,7 +1200,7 @@ export default function Battle({
       // whatever Mana Conduit share the run has bought
       g.sp += spGain(e.spv);
       // run gold is 25% richer across the board (kills, bounties, wave clears)
-      g.gold += runGold(Math.round(e.gold * MONTH_BONUS.goldMul));
+      g.gold += runGold(Math.round(e.gold * MONTH_BONUS.goldMul * g.goldMul));
       const p = enemyPos(e);
       const et = ENEMY_TYPES[e.type];
       if (e.elite) {
@@ -1180,7 +1325,7 @@ export default function Battle({
             if (tier > 0 && Math.random() < spec.chance[tier - 1]) goldMul += spec.mult[tier - 1];
           }
           if (goldMul > 0) {
-            const extra = runGold(Math.round(e.gold * goldMul));
+            const extra = runGold(Math.round(e.gold * goldMul * g.goldMul));
             g.gold += extra;
             addText(p.x, p.y - 34, `+${extra}`, "#ffcf4d", 12, false);
           }
@@ -2537,7 +2682,7 @@ export default function Battle({
       sfx.buy();
       switch (item.id) {
         case "dmg":
-          g.dmgBonus += 0.18;
+          g.dmgBonus += 0.21;
           break;
         case "aspd":
           g.bonusAspd = (g.bonusAspd || 0) + 0.21;
@@ -3033,11 +3178,21 @@ export default function Battle({
     const update = (rawDt: number) => {
       // remember where everything was: with frame interpolation on, the draw
       // pass glides between this snapshot and the post-step positions
-      for (const e of g.enemies) e.pd = e.d;
+      for (const e of g.enemies) {
+        e.pd = e.d;
+        e.pox = e.ox;
+        e.poy = e.oy;
+      }
       for (const pr of g.projs) {
         pr.px = pr.x;
         pr.py = pr.y;
       }
+      for (const p of g.parts) {
+        p.px = p.x;
+        p.py = p.y;
+        p.prot = p.rot || 0;
+      }
+      for (const t of g.texts) t.py = t.y;
       // hit-stop freezes the simulation for a few frames on heavy impacts, and
       // Time Dilation scales the whole world down — both leave FX running.
       if (g.hitStop > 0) {
@@ -3103,6 +3258,7 @@ export default function Battle({
       } else if (g.phase === "wave") {
         while (g.spawnQ.length && g.spawnQ[0].at <= g.t) {
           const s = g.spawnQ.shift()!;
+          g.waveSpawned++;
           const et = ENEMY_TYPES[s.type];
           const boss = isBossType(s.type);
           // elites: tougher variants with a golden sigil, 5x sp and double gold
@@ -3137,7 +3293,7 @@ export default function Battle({
           g.sp += spGain(bonus);
           g.wavesCleared++;
           // gold + gem payouts were buffed 40% (REWARD_MUL) in the balance patch
-          g.gold += runGold(reward(bonus / 2));
+          g.gold += runGold(reward(bonus / 2) * g.goldMul);
           if (g.mode !== "endless" && g.round >= g.maxRounds) {
             endGame(true);
           } else {
@@ -3231,6 +3387,7 @@ export default function Battle({
               e.blinkCd = BOSS_BLINK_CD;
               ring(ep0.x, ep0.y, "#35e0ff", 26);
               e.d = Math.min(e.d + 120, PATH_LEN - 4);
+              e.pd = e.d; // teleports must never interpolate across the arena
               const to = enemyPos(e);
               ring(to.x, to.y, "#35e0ff", 34);
               burst(to.x, to.y, "#35e0ff", 14, 200);
@@ -3341,6 +3498,7 @@ export default function Battle({
                 const before = enemyPos(m);
                 ring(before.x, before.y, "#ff4fd8", 26);
                 m.d = Math.min(m.d + BOSS_WARP_DIST, PATH_LEN - 4);
+                m.pd = m.d;
                 const after = enemyPos(m);
                 ring(after.x, after.y, "#ff4fd8", 30);
                 burst(after.x, after.y, "#ff4fd8", 6, 140);
@@ -3886,15 +4044,6 @@ export default function Battle({
       g.enemies = g.enemies.filter((e) => !e.dead);
 
       updateFx(dt);
-
-// performance HUD
-      g.frames++;
-      g.fpsT += dt;
-      if (g.fpsT >= 0.5) {
-        g.fps = Math.round(g.frames / g.fpsT);
-        g.frames = 0;
-        g.fpsT = 0;
-      }
     };
 
     // ---------- draw ----------
@@ -5328,9 +5477,12 @@ export default function Battle({
      * plates, robes and staff, warlord axe, overlord rift crown).
      */
     const drawEnemy = (e: Enemy, now: number) => {
-      // glide between sim steps when frame interpolation is on
+      // glide between sim steps when frame interpolation is on — path distance
+      // and the lateral singularity offset are interpolated independently
       const dDraw = e.pd === undefined ? e.d : e.pd + (e.d - e.pd) * renderAlpha;
-      const p = enemyPos({ d: dDraw, ox: e.ox, oy: e.oy });
+      const oxDraw = e.pox === undefined ? e.ox : e.pox + (e.ox - e.pox) * renderAlpha;
+      const oyDraw = e.poy === undefined ? e.oy : e.poy + (e.oy - e.poy) * renderAlpha;
+      const p = enemyPos({ d: dDraw, ox: oxDraw, oy: oyDraw });
       const et = ENEMY_TYPES[e.type];
       // facing: sample a point slightly ahead on the path
       const ahead = pathPos(e.d + 6);
@@ -6023,6 +6175,8 @@ export default function Battle({
     const drawProj = (pr: Proj) => {
       const px = pr.px === undefined ? pr.x : pr.px + (pr.x - pr.px) * renderAlpha;
       const py = pr.py === undefined ? pr.y : pr.py + (pr.y - pr.py) * renderAlpha;
+      // shots that have just left the arena are never seen again
+      if (px < -80 || px > W + 80 || py < -80 || py > H + 80) return;
       const ang = Math.atan2(pr.ly - py, pr.lx - px);
       ctx.save();
       ctx.translate(px, py);
@@ -6216,106 +6370,45 @@ export default function Battle({
     const draw = () => {
       const now = performance.now();
       ctx.clearRect(0, 0, W, H);
+
+      // ================= BATTLEFIELD =================
+      // The static half of the arena — backdrop, nebula, starfield and the
+      // raised slab — is rendered once into an offscreen canvas. Every frame
+      // just blits it, which removes ~120 gradient/path operations from the
+      // hot path (the single biggest draw win during dense waves). The sky is
+      // blitted before the camera transform so shake/punch never expose its edge.
+      ctx.drawImage(bgCache, 0, 0);
+      if (!saveRef.current.powerSaver) {
+        // a handful of parallax twinkles keep the sky alive without re-running
+        // the full starfield
+        const T = now / 1000;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < 18; i++) {
+          const hx = Math.abs(Math.sin(i * 12.9898 + 7) * 43758.5453) % 1;
+          const hy = Math.abs(Math.sin(i * 78.233 + 3) * 12345.6789) % 1;
+          const depth = 0.35 + (i % 3) * 0.3;
+          const px = (hx * W + T * 5 * depth) % W;
+          const py = hy * H;
+          const tw = 0.3 + 0.7 * Math.abs(Math.sin(T * (0.7 + (i % 5) * 0.3) + i));
+          ctx.globalAlpha = tw * depth * 0.55;
+          ctx.fillStyle = i % 7 === 0 ? "#9fd8ff" : "#ffffff";
+          ctx.fillRect(px, py, depth * 1.4, depth * 1.4);
+        }
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+
+      // camera shake/punch move the arena content but never the sky
       ctx.save();
-      if (g.shake > 0.3 && fxOn()) ctx.translate((Math.random() - 0.5) * g.shake, (Math.random() - 0.5) * g.shake);
-      // camera punch: a quick zoom toward the centre that eases back out
+      if (g.shake > 0.3 && fxOn() && !saveRef.current.powerSaver)
+        ctx.translate((Math.random() - 0.5) * g.shake, (Math.random() - 0.5) * g.shake);
       if (g.punch > 0.01) {
         const sc = 1 + g.punch * 0.045;
         ctx.translate(W / 2, H / 2);
         ctx.scale(sc, sc);
         ctx.translate(-W / 2, -H / 2);
       }
-
-      // ================= BATTLEFIELD =================
-      // Deep space backdrop: a vertical gradient, a drifting nebula, a
-      // parallax starfield and a horizon glow behind the arena plate.
-      const bg = ctx.createLinearGradient(0, 0, 0, H);
-      bg.addColorStop(0, "#120a33");
-      bg.addColorStop(0.45, "#0b0726");
-      bg.addColorStop(1, "#05040f");
-      ctx.fillStyle = bg;
-      ctx.fillRect(-20, -20, W + 40, H + 40);
-
-      const T = now / 1000;
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      // two slow nebula blooms breathing in the background
-      for (let i = 0; i < 2; i++) {
-        const nx = W * (0.3 + i * 0.45) + Math.sin(T * 0.08 + i * 2) * 60;
-        const ny = H * (0.3 + i * 0.35) + Math.cos(T * 0.06 + i) * 40;
-        const nr = Math.min(W, H) * (0.5 + i * 0.12);
-        const ng = ctx.createRadialGradient(nx, ny, 0, nx, ny, nr);
-        ng.addColorStop(0, i ? "rgba(53,110,255,0.16)" : "rgba(160,60,255,0.17)");
-        ng.addColorStop(0.5, i ? "rgba(53,110,255,0.05)" : "rgba(160,60,255,0.05)");
-        ng.addColorStop(1, "transparent");
-        ctx.fillStyle = ng;
-        ctx.fillRect(nx - nr, ny - nr, nr * 2, nr * 2);
-      }
-      // starfield — deterministic positions, twinkling and drifting in parallax
-      for (let i = 0; i < 90; i++) {
-        const hx = Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1;
-        const hy = Math.abs(Math.sin(i * 78.233) * 12345.6789) % 1;
-        const depth = 0.3 + (i % 3) * 0.35;
-        const px = (hx * W + T * 5 * depth) % W;
-        const py = hy * H;
-        const tw = 0.35 + 0.65 * Math.abs(Math.sin(T * (0.7 + (i % 5) * 0.3) + i));
-        ctx.globalAlpha = tw * depth * 0.8;
-        ctx.fillStyle = i % 7 === 0 ? "#9fd8ff" : "#ffffff";
-        const r = depth * 1.5;
-        ctx.fillRect(px, py, r, r);
-      }
-      ctx.restore();
-      ctx.globalAlpha = 1;
-
-      // --- arena plate: the raised slab the whole fight happens on ---
-      const padX = OX - C * 0.55;
-      const padY = OY - C * 0.55;
-      const padW = COLS * C + C * 1.1;
-      const padH = ROWS * C + C * 1.1;
-      ctx.save();
-      // drop shadow under the slab
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
-      ctx.beginPath();
-      ctx.roundRect(padX + 6, padY + 12, padW, padH, 26);
-      ctx.fill();
-      // the slab face
-      const slab = ctx.createLinearGradient(0, padY, 0, padY + padH);
-      slab.addColorStop(0, "#1b1446");
-      slab.addColorStop(0.5, "#140e34");
-      slab.addColorStop(1, "#0d0926");
-      ctx.fillStyle = slab;
-      ctx.beginPath();
-      ctx.roundRect(padX, padY, padW, padH, 24);
-      ctx.fill();
-      // bevelled rim, brighter on top
-      ctx.strokeStyle = "rgba(120,96,255,0.5)";
-      ctx.lineWidth = 2.5;
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(53,224,255,0.16)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.roundRect(padX + 5, padY + 5, padW - 10, padH - 10, 20);
-      ctx.stroke();
-      // etched circuitry along the rim, pulsing
-      ctx.clip();
-      ctx.globalCompositeOperation = "lighter";
-      for (let i = 0; i < 7; i++) {
-        const f = (T * 0.08 + i / 7) % 1;
-        ctx.globalAlpha = 0.1 + 0.1 * Math.sin(T * 2 + i);
-        ctx.strokeStyle = "#35e0ff";
-        ctx.lineWidth = 1;
-        const yy = padY + f * padH;
-        ctx.beginPath();
-        ctx.moveTo(padX, yy);
-        ctx.lineTo(padX + padW * 0.18, yy);
-        ctx.lineTo(padX + padW * 0.22, yy + 8);
-        ctx.moveTo(padX + padW, yy + 20);
-        ctx.lineTo(padX + padW * 0.82, yy + 20);
-        ctx.lineTo(padX + padW * 0.78, yy + 28);
-        ctx.stroke();
-      }
-      ctx.restore();
-      ctx.globalAlpha = 1;
 
       // --- build pads: raised hex-tech platforms with notched corners ---
       const drag = dragRef.current;
@@ -6444,7 +6537,13 @@ export default function Battle({
       ctx.restore();
       ctx.setLineDash([]);
 
-      // --- ambient motes drifting over the arena ---
+      // --- ambient motes drifting over the arena (skipped in power saving) ---
+      const padX = OX - C * 0.55;
+      const padY = OY - C * 0.55;
+      const padW = COLS * C + C * 1.1;
+      const padH = ROWS * C + C * 1.1;
+      const T = now / 1000;
+      if (!saveRef.current.powerSaver) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       for (let i = 0; i < 26; i++) {
@@ -6461,6 +6560,7 @@ export default function Battle({
       }
       ctx.restore();
       ctx.globalAlpha = 1;
+      }
 
       drawPortal(WPX[0].x, WPX[0].y, "#c44dff", "SPAWN");
       drawPortal(WPX[WPX.length - 1].x, WPX[WPX.length - 1].y, "#ff4d5e", "EXIT");
@@ -6771,6 +6871,15 @@ export default function Battle({
       const drawPart = (p: Part) => {
         const al = Math.max(0, p.life / p.max);
         const t = 1 - al; // 0 -> 1 over the particle's life
+        // frame interpolation: draw where the particle was heading, not where
+        // the last 1/60s step left it. Off-screen debris is skipped before any
+        // path work, which is most of the win during a dense crit streak.
+        const px = p.px === undefined ? p.x : p.px + (p.x - p.px) * renderAlpha;
+        const py = p.py === undefined ? p.y : p.py + (p.y - p.py) * renderAlpha;
+        const rot = p.prot === undefined || p.rot === undefined ? p.rot || 0 : p.prot + (p.rot - p.prot) * renderAlpha;
+        if (px < -140 || px > W + 140 || py < -140 || py > H + 140) return;
+        ctx.save();
+        ctx.translate(px - p.x, py - p.y);
         if (p.kind === "ring") {
           ctx.globalAlpha = al * 0.8;
           ctx.strokeStyle = p.color;
@@ -6814,7 +6923,7 @@ export default function Battle({
           ctx.globalAlpha = al;
           ctx.save();
           ctx.translate(p.x, p.y);
-          ctx.rotate(p.rot || 0);
+          ctx.rotate(rot);
           ctx.fillStyle = p.color;
           ctx.beginPath();
           ctx.moveTo(0, -p.size);
@@ -6829,7 +6938,7 @@ export default function Battle({
           ctx.globalAlpha = al;
           ctx.save();
           ctx.translate(p.x, p.y);
-          ctx.rotate(p.rot || 0);
+          ctx.rotate(rot);
           ctx.fillStyle = p.color;
           const L = p.size * 2.1 * sc;
           const Wd = p.size * 0.28 * sc;
@@ -6874,6 +6983,7 @@ export default function Battle({
             ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
           }
         }
+        ctx.restore();
       };
       for (const p of g.parts) if (!p.add) drawPart(p);
       ctx.globalCompositeOperation = "lighter";
@@ -6949,13 +7059,14 @@ export default function Battle({
       for (const t of g.texts) {
         const al = Math.min(1, t.life / 0.4);
         const age = 0.9 - t.life;
+        const ty = t.py === undefined ? t.y : t.py + (t.y - t.py) * renderAlpha;
         ctx.globalAlpha = al;
         ctx.textAlign = "center";
         if (t.crit) {
           // punchy overshoot: snaps in at 1.35x then settles
           const pop = 1 + 0.45 * Math.max(0, 1 - age * 5) + 0.08 * Math.sin(age * 22) * Math.max(0, 1 - age * 3);
           ctx.save();
-          ctx.translate(t.x, t.y);
+          ctx.translate(t.x, ty);
           ctx.scale(pop, pop);
           // the eight-ray starburst behind the number is eight more paths per
           // crit: kept for the crits that matter, dropped when text is busy
@@ -6999,7 +7110,7 @@ export default function Battle({
         }
         ctx.font = `700 ${t.size}px Rajdhani, sans-serif`;
         ctx.fillStyle = t.color;
-        ctx.fillText(t.txt, t.x, t.y);
+        ctx.fillText(t.txt, t.x, ty);
       }
       ctx.globalAlpha = 1;
 
@@ -7054,42 +7165,112 @@ export default function Battle({
     };
 
     // ---------- loop ----------
-    // Fixed 1/60 simulation steps with a render budget: the game speed is the
-    // same on every display, MAX FRAME RATE caps how often we draw, and
-    // ADVANCED FRAME INTERPOLATION glides between sim steps so a capped or
-    // uneven frame rate still looks smooth.
+    // Fixed 1/60 simulation steps with a render budget. The battle can run at
+    // 1x / 1.5x / 2x speed, can be paused, and in POWER SAVING mode caps itself
+    // at 30 FPS with effects dialled back. FRAME INTERPOLATION draws between
+    // the last two sim states; when the loop has to drop a backlog it snaps
+    // alpha to 1 instead of gliding backwards through stale state.
     const STEP = 1 / 60;
     let acc = 0;
+    let pausedDraw = false;
+    const onVisibility = () => {
+      if (document.hidden) return;
+      // a backgrounded tab can return with seconds of backlog: restart clean
+      last = performance.now();
+      lastDraw = last;
+      acc = 0;
+      pausedDraw = false;
+    };
+    document.addEventListener("visibilitychange", onVisibility);
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
-      const cap = saveRef.current.maxFps || 0;
+      if (document.hidden) return;
+      const ps = !!saveRef.current.powerSaver;
+      // power saving wins over the manual cap: never above 30 FPS
+      const cap = ps ? Math.min(30, saveRef.current.maxFps || 30) : saveRef.current.maxFps || 0;
       if (cap > 0 && now - lastDraw < 1000 / cap - 0.6) return;
       lastDraw = now;
+
+      // paused: hold the sim, draw the frozen frame once, and then idle
+      if (pausedRef.current) {
+        last = now;
+        if (!pausedDraw) {
+          renderAlpha = 1;
+          fxUserLevel = ps ? 2 : saveRef.current.fxq || 0;
+          draw();
+          pausedDraw = true;
+        }
+        return;
+      }
+      pausedDraw = false;
+
       // rAF timestamps can start behind performance.now(), which would make dt negative
       const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
       last = now;
-      acc += dt;
+      const speed = speedRef.current || 1;
+      acc += dt * speed;
+      const maxSteps = Math.min(8, Math.ceil(3 * speed));
       let steps = 0;
-      while (acc >= STEP && steps < 3) {
+      while (acc >= STEP && steps < maxSteps) {
         update(STEP);
         acc -= STEP;
         steps++;
       }
-      if (steps >= 3) acc = 0; // fell too far behind: drop the backlog
-      renderAlpha = saveRef.current.frameInterp ? Math.max(0, Math.min(1, acc / STEP)) : 1;
-      fxUserLevel = saveRef.current.fxq || 0;
+      // fell too far behind: drop the backlog and draw the true state
+      const dropped = acc >= STEP;
+      if (dropped) acc = 0;
+      renderAlpha =
+        saveRef.current.frameInterp && !ps
+          ? dropped
+            ? 1
+            : Math.max(0, Math.min(1, acc / STEP))
+          : 1;
+      fxUserLevel = ps ? 2 : saveRef.current.fxq || 0;
       const drawStart = performance.now();
       draw();
+      // render FPS (not simulation steps) so speed ×2 does not read as 120fps
+      g.frames++;
+      g.fpsT += dt;
+      if (g.fpsT >= 0.5) {
+        g.fps = Math.round(g.frames / g.fpsT);
+        g.frames = 0;
+        g.fpsT = 0;
+      }
       // slide the quality factor on the real cost of the last frame
       fxGov.avg += (Math.min(40, performance.now() - drawStart) - fxGov.avg) * 0.08;
       fxGov.q = fxGov.avg > 13 ? 0.4 : fxGov.avg > 8.5 ? 0.7 : 1;
-      if (now - lastHud > 110) {
+
+      // HUD re-render gate: only wake React when a visible value actually moved.
+      if (now - lastHud > (ps ? 320 : 120)) {
         lastHud = now;
-        setTick((t) => t + 1);
+        const sig = [
+          Math.floor(g.sp),
+          Math.floor(g.gold),
+          g.lives,
+          g.round,
+          g.phase,
+          Math.ceil(g.phaseT),
+          g.enemies.length,
+          g.towers.length,
+          g.spawnQ.length,
+          Math.ceil(g.heroCd),
+          g.crits,
+          g.bestHit,
+          g.waveTotal,
+          g.waveSpawned,
+          g.final ? "final" : "-",
+          g.cut ? `cut${Math.ceil(g.cut.t)}${g.cut.locked ? "L" : ""}` : "",
+          g.skill ? `skill${g.skill.phase}${Math.ceil(g.skill.t * 10)}` : "",
+          g.bossCast ? `cast${Math.ceil(g.bossCast.t * 4)}` : "",
+          saveRef.current.perf ? `${g.fps}:${g.projs.length}:${g.parts.length}` : "",
+        ].join("|");
+        if (sig !== hudSig) {
+          hudSig = sig;
+          setTick((t) => t + 1);
+        }
       }
     };
     raf = requestAnimationFrame(loop);
-
     // canvas pointer: drag placed towers / merge
     const toCanvas = (e: PointerEvent) => canvasPoint(canvas, e.clientX, e.clientY);
     const cellAt = (x: number, y: number) => {
@@ -7151,6 +7332,7 @@ export default function Battle({
 
     return () => {
       cancelAnimationFrame(raf);
+      document.removeEventListener("visibilitychange", onVisibility);
       ro.disconnect();
       canvas.removeEventListener("pointerdown", down);
       canvas.removeEventListener("pointermove", move);
@@ -7199,6 +7381,7 @@ export default function Battle({
     if (f.gold) rows.push({ icon: <CoinIcon size={16} />, label: "Gold", val: f.gold.toLocaleString("en-US"), color: "#ffcf4d" });
     if (f.gems) rows.push({ icon: <GemIcon size={16} />, label: "Gems", val: f.gems.toLocaleString("en-US"), color: "#35e0ff" });
     if (f.tokens) rows.push({ icon: <TokenIcon size={16} />, label: "Magic Tokens", val: String(f.tokens), color: "#ff4fd8" });
+    if (f.potions) rows.push({ icon: <PotionIcon size={16} />, label: "Crystal Potions", val: String(f.potions), color: "#b98bff" });
     f.frags.forEach((fr) => {
       const def = TOWER_BY_ID[fr.id];
       const col = RARITY[def?.rarity ?? "normal"].color;
@@ -7226,6 +7409,9 @@ export default function Battle({
       s.gold += f.gold;
       s.gems += f.gems;
       s.tokens += f.tokens;
+      s.potions += f.potions;
+      // every finished run banks monthly event points: waves + a clear bonus
+      addMonthPoints(s, f.rounds * 8 + (f.won ? 40 : 0));
       f.frags.forEach((fr) => {
         s.frags[fr.id] = (s.frags[fr.id] || 0) + fr.n;
       });
@@ -7348,10 +7534,63 @@ export default function Battle({
                 <span className="hud-shop-glyph">🛒</span>
                 <span>SHOP</span>
               </button>
+              <button
+                data-testid="speed-btn"
+                className="hud-tool"
+                title="Battle speed"
+                onClick={() => {
+                  sfx.uiTab();
+                  setRunSpeed((s2) => (s2 === 1 ? 1.5 : s2 === 1.5 ? 2 : 1));
+                }}
+              >
+                <span className="num">×{runSpeed}</span>
+              </button>
+              <button
+                data-testid="pause-btn"
+                className={`hud-tool ${paused ? "on" : ""}`}
+                title={paused ? "Resume" : "Pause"}
+                onClick={() => {
+                  sfx.click();
+                  setPaused((p2) => !p2);
+                }}
+              >
+                {paused ? "▶" : "❚❚"}
+              </button>
             </div>
           </>
         )}
       </div>
+
+      {/* WAVE STRIP — a thin progress line under the HUD, so the arena itself
+          does not need another overlay */}
+      {g && !g.final && (
+        <div className="wave-strip" data-testid="wave-strip">
+          <span className="wave-strip-label">
+            {mode === "endless" ? "WAVE" : "ROUND"} <b className="num">{g.round}</b>
+            {g.phase === "wave" ? (
+              <> · <span className="num">{Math.max(0, g.waveTotal - g.spawnQ.length - g.enemies.filter((e) => !e.dead).length)}</span>/<span className="num">{g.waveTotal}</span> CLEARED</>
+            ) : g.phase === "deploy" ? (
+              <> · DEPLOY <span className="num">{Math.ceil(g.phaseT)}</span>s</>
+            ) : (
+              <> · NEXT IN <span className="num">{Math.ceil(g.phaseT)}</span>s</>
+            )}
+          </span>
+          <span className="wave-strip-track">
+            <span
+              className="wave-strip-fill"
+              style={{
+                width:
+                  g.phase === "wave" && g.waveTotal > 0
+                    ? `${Math.min(100, ((g.waveTotal - g.spawnQ.length - g.enemies.filter((e) => !e.dead).length) / g.waveTotal) * 100)}%`
+                    : "0%",
+              }}
+            />
+          </span>
+          <span className="wave-strip-hp">HP ×{Math.pow(HP_GROWTH, Math.max(0, g.round - 1)).toFixed(1)}</span>
+          {g.round % 4 === 0 && <span className="wave-strip-boss">BOSS</span>}
+          {save.powerSaver && <span className="wave-strip-saver" title="Power Saving Mode is on">SAVER</span>}
+        </div>
+      )}
 
 {/* CANVAS */}
       <div className="relative min-h-0 flex-1">
@@ -7375,6 +7614,45 @@ export default function Battle({
             <div className="mt-1 text-[13px] font-bold tracking-[0.2em] text-[#ff9be9]">
               WAVE {g.phase === "deploy" ? g.round : g.round + 1} · ENEMY HP ×{Math.pow(HP_GROWTH, g.phase === "deploy" ? g.round - 1 : g.round).toFixed(1)}
             </div>
+            {(() => {
+              const nr = g.phase === "deploy" ? g.round : g.round + 1;
+              const kinds = [ENEMY_TYPES[0].name];
+              if (nr >= 3) kinds.push(ENEMY_TYPES[1].name);
+              if (nr >= 5) kinds.push(ENEMY_TYPES[2].name);
+              if (nr >= 7) kinds.push(ENEMY_TYPES[3].name);
+              return (
+                <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[10px] font-bold tracking-[0.14em] text-[var(--dim)]" data-testid="wave-preview">
+                  <span className="num text-[#7fe9ff]">{Math.min(46, 8 + nr * 2)}</span> HOSTILES · {kinds.join(" · ").toUpperCase()}
+                  {nr % 4 === 0 && <span className="text-[#ff8f9a]"> · {ENEMY_TYPES[nr >= 32 ? 6 : nr >= 16 ? 5 : 4].name.toUpperCase()}</span>}
+                </div>
+              );
+            })()}
+            {(g.phase === "deploy" ? g.round : g.round + 1) % 4 === 0 && (
+              <div className="boss-warning mt-1 text-[11px] font-bold tracking-[0.25em] text-[#ff4d5e]">
+                ⚠ BOSS WAVE INCOMING
+              </div>
+            )}
+            <button
+              className="btn pointer-events-auto mt-2 px-4 py-1.5 text-[12px]"
+              data-testid="call-wave"
+              onClick={() => {
+                const gg = gRef.current;
+                if (gg && (gg.phase === "deploy" || gg.phase === "inter")) {
+                  // calling the wave early banks the countdown as bonus SP: a
+                  // small reward for playing forward instead of idling
+                  const bonus = Math.round(Math.max(0, gg.phaseT) * 4);
+                  gg.phaseT = 0;
+                  if (bonus > 0) {
+                    gg.sp += bonus;
+                    push(`Early call · +${bonus} SP`, "#7fe9ff");
+                  }
+                  sfx.click();
+                  setTick((t) => t + 1);
+                }
+              }}
+            >
+              CALL WAVE EARLY{Math.round(Math.max(0, g.phaseT) * 4) > 0 ? ` · +${Math.round(Math.max(0, g.phaseT) * 4)} SP` : ""}
+            </button>
           </div>
         )}
         {/* boss health bar — appears while a boss is on the path */}
@@ -7557,11 +7835,55 @@ export default function Battle({
 
       </div>
 
+      {/* PAUSE — the sim is held, the arena stays visible behind a light scrim */}
+      {paused && g && !g.final && (
+        <div className="battle-pause absolute inset-0 z-[80] flex items-center justify-center p-4" data-testid="pause-overlay">
+          <div className="panel anim-pop w-[380px] max-w-full p-5 text-center" style={{ borderColor: "#35e0ff88" }}>
+            <div className="font-disp text-3xl text-[#35e0ff]">PAUSED</div>
+            <div className="mt-1 text-[12px] font-semibold text-[var(--dim)]">
+              {mode === "endless" ? "ENDLESS" : "BATTLE"} · {mode === "endless" ? "WAVE" : "ROUND"} {g.round} ·{" "}
+              <span className="num">{g.kills}</span> kills · <span className="num">{g.lives}</span> lives
+            </div>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                className="btn btn-cyan py-2.5 text-[14px]"
+                data-testid="resume-btn"
+                onClick={() => {
+                  sfx.click();
+                  setPaused(false);
+                }}
+              >
+                RESUME
+              </button>
+              <button
+                className="btn py-2 text-[12px]"
+                onClick={() => {
+                  sfx.click();
+                  setRunSpeed((s2) => (s2 === 1 ? 1.5 : s2 === 1.5 ? 2 : 1));
+                }}
+              >
+                SPEED ×{runSpeed} → ×{runSpeed === 1 ? 1.5 : runSpeed === 1.5 ? 2 : 1}
+              </button>
+              <button
+                className="btn btn-danger py-2 text-[12px]"
+                data-testid="quit-btn"
+                onClick={() => {
+                  sfx.click();
+                  onExit();
+                }}
+              >
+                ABANDON RUN
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* BOTTOM BAR — one fixed card per lineup tower *type*, not per instance.
-          Spawning more copies of a tower changes the count and the level, never
-          the layout, so the bar can't duplicate itself when the board grows. */}
+          COMPACT: a 40px strip instead of a three-row card, so the arena keeps
+          its height on a phone. The ascent button is the only tall element. */}
       {g && (
-        <div className="flex shrink-0 items-stretch gap-1.5 px-2 pb-1.5" data-testid="ascent-bar">
+        <div className="flex shrink-0 items-stretch gap-1 px-1.5 pb-1" data-testid="ascent-bar">
           {lineupIds.map((id, i) => {
             const def = TOWER_BY_ID[id];
             const copies = g.towers.filter((x) => x.def.id === id);
@@ -7576,31 +7898,19 @@ export default function Battle({
                 key={id}
                 data-slot={i}
                 data-tower={id}
-                className="tile flex min-w-0 flex-1 flex-col gap-1 px-1.5 py-1.5"
+                className="tile flex min-w-0 flex-1 items-center gap-1 px-1 py-0.5"
                 style={{ opacity: lead ? 1 : 0.4, borderColor: lead ? rc.color : undefined }}
               >
-                <div className="flex items-center gap-1.5">
-                  <TowerIcon def={def} size={28} />
-                  <div className="min-w-0 flex-1 leading-tight">
-                    <div className="truncate text-[11px] font-bold" style={{ color: rc.color }}>
-                      {def.name}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1 text-[10px] font-bold">
-                      <span className="text-[var(--dim)]">Lv {bLv}/{MAX_BATTLE_LEVEL}</span>
-                      <span className="rounded bg-black/40 px-1" style={{ color: ptColor(pts) }}>
-                        {pts >= MAX_POINTS ? "MAX" : `${pts}p`}
-                      </span>
-                      {copies.length > 1 && (
-                        <span className="rounded bg-black/40 px-1 text-[#7fe9ff]">×{copies.length}</span>
-                      )}
-                    </div>
+                <TowerIcon def={def} size={16} />
+                <div className="min-w-0 flex-1 leading-none">
+                  <div className="truncate text-[9.5px] font-bold" style={{ color: rc.color }}>
+                    {def.name}
                   </div>
-                </div>
-                <div className="h-1 overflow-hidden rounded-full bg-black/50">
-                  <div
-                    className="h-full rounded-full transition-all duration-200"
-                    style={{ width: `${(bLv / MAX_BATTLE_LEVEL) * 100}%`, background: "linear-gradient(90deg,#35e0ff,#c44dff)" }}
-                  />
+                  <div className="flex items-center gap-x-1 whitespace-nowrap text-[8.5px] font-bold">
+                    <span className="text-[var(--dim)]">Lv {bLv}/{MAX_BATTLE_LEVEL}</span>
+                    <span style={{ color: ptColor(pts) }}>{pts >= MAX_POINTS ? "MAX" : `${pts}p`}</span>
+                    {copies.length > 1 && <span className="text-[#7fe9ff]">×{copies.length}</span>}
+                  </div>
                 </div>
                 <button
                   data-testid={`ascend-${i}`}
@@ -7618,7 +7928,8 @@ export default function Battle({
                     }
                     ascendTower(lead.uid);
                   }}
-                  className={`ascend-btn ${canAscend ? "on" : ""}`}
+                  className={`ascend-btn ascend-btn-compact shrink-0 ${canAscend ? "on" : ""}`}
+                  title={lead ? `Ascend ${def.name} for ${ascentCost} SP` : `${def.name} is not deployed`}
                 >
                   {!lead ? (
                     "NOT DEPLOYED"
@@ -7627,10 +7938,7 @@ export default function Battle({
                   ) : (
                     <>
                       <span>ASCENT</span>
-                      <b>
-                        SP {ascentCost}
-                        {copies.length > 1 ? ` ×${copies.length}` : ""}
-                      </b>
+                      <b>{ascentCost}{copies.length > 1 ? `×${copies.length}` : ""}</b>
                     </>
                   )}
                 </button>

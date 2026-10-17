@@ -1249,10 +1249,10 @@ export interface RunShopItem {
 }
 
 export const RUN_SHOP: RunShopItem[] = [
-  // balance: upgrade caps are 20 across the board, but the two pure-stat items
-  // (damage/attack speed) are held to max 5 with juicier per-purchase numbers
-  { id: "dmg", name: "Forged Ammo", desc: "+18% tower damage for the rest of the run", cost: 90, step: 1.35, max: 5 },
-  { id: "aspd", name: "Quickspring", desc: "+21% attack speed for the rest of the run", cost: 90, step: 1.35, max: 5 },
+  // every run-shop stat ladder is capped at 20 purchases, so a long endless
+  // run can keep scaling without ever hitting a dead end
+  { id: "dmg", name: "Forged Ammo", desc: "+21% tower damage for the rest of the run", cost: 90, step: 1.35, max: 20 },
+  { id: "aspd", name: "Quickspring", desc: "+21% attack speed for the rest of the run", cost: 90, step: 1.35, max: 20 },
   { id: "critrate", name: "Keen Sight", desc: "+5% crit rate for the rest of the run", cost: 110, step: 1.3, max: 10 },
   { id: "critdmg", name: "Killing Edge", desc: "+15% crit damage for the rest of the run", cost: 110, step: 1.3, max: 10 },
   { id: "sp", name: "Mana Battery", desc: "Instantly gain 150 SP", cost: 60, step: 1.15, max: 20 },
@@ -1266,6 +1266,95 @@ export const RUN_SHOP: RunShopItem[] = [
 
 export function runShopCost(item: RunShopItem, bought: number) {
   return Math.round(item.cost * Math.pow(item.step ?? 1, bought));
+}
+
+// ---------- crystals (account-wide small buffs) ----------
+/**
+ * The crystal vault lives inside the Towers tab. Every crystal is a permanent,
+ * account-wide buff paid for with **crystal potions** — a currency that only
+ * drops from runs, events and monthly crates. Levels are deliberately small
+ * (a few percent a level) so six crystals together feel like a slow burn
+ * rather than a second tower ladder.
+ */
+export type CrystalId = "ruby" | "sapphire" | "emerald" | "topaz" | "amethyst" | "diamond";
+
+export interface CrystalDef {
+  id: CrystalId;
+  name: string;
+  /** one-line flavour used on the card */
+  desc: string;
+  /** the stat the crystal feeds */
+  stat: string;
+  /** flat share added per level (0.02 = +2%) */
+  perLevel: number;
+  max: number;
+  color: string;
+  /** true when the buff is flat lives rather than a percentage */
+  flat?: boolean;
+}
+
+export const CRYSTAL_MAX_LEVEL = 20;
+export const POTION_BASE_COST = 3;
+export const POTION_COST_STEP = 1.22;
+
+export const CRYSTALS: CrystalDef[] = [
+  { id: "ruby", name: "Ruby", desc: "Molten core shards ground into every tower's ammunition.", stat: "Tower ATK", perLevel: 0.02, max: CRYSTAL_MAX_LEVEL, color: "#ff4d5e" },
+  { id: "sapphire", name: "Sapphire", desc: "A calm blue lattice that sharpens every critical read.", stat: "Crit Chance", perLevel: 0.015, max: CRYSTAL_MAX_LEVEL, color: "#3fb6ff" },
+  { id: "emerald", name: "Emerald", desc: "Rift sap that makes every kill spill more spell power.", stat: "SP Gain", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#3dff8e" },
+  { id: "topaz", name: "Topaz", desc: "Sun-baked amber that draws extra gold out of the wreck.", stat: "Run Gold", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#ffcf4d" },
+  { id: "amethyst", name: "Amethyst", desc: "A humming shard that speeds up every firing mechanism.", stat: "ATK Speed", perLevel: 0.02, max: CRYSTAL_MAX_LEVEL, color: "#c44dff" },
+  { id: "diamond", name: "Diamond", desc: "A flawless ward crystal. Each level adds a starting life.", stat: "Start Lives", perLevel: 1, max: 10, color: "#9fe8ff", flat: true },
+];
+
+export const CRYSTAL_BY_ID: Record<CrystalId, CrystalDef> = Object.fromEntries(
+  CRYSTALS.map((c) => [c.id, c])
+) as Record<CrystalId, CrystalDef>;
+
+/** potions needed to take a crystal from `level` to `level + 1` */
+export function crystalUpgradeCost(level: number) {
+  return Math.max(POTION_BASE_COST, Math.round(POTION_BASE_COST * Math.pow(POTION_COST_STEP, level)));
+}
+
+export interface CrystalBonus {
+  /** +share of tower damage, e.g. 0.2 = +20% */
+  atk: number;
+  /** flat crit chance added to the base roll */
+  crit: number;
+  /** +share of SP from kills and wave clears */
+  sp: number;
+  /** +share of run gold */
+  gold: number;
+  /** +share of attack speed */
+  aspd: number;
+  /** extra starting lives */
+  lives: number;
+}
+
+export const NO_CRYSTAL_BONUS: CrystalBonus = { atk: 0, crit: 0, sp: 0, gold: 0, aspd: 0, lives: 0 };
+
+/** fold every crystal level into one set of run modifiers */
+export function crystalBonus(levels: Partial<Record<CrystalId, number>>): CrystalBonus {
+  const out: CrystalBonus = { ...NO_CRYSTAL_BONUS };
+  for (const def of CRYSTALS) {
+    const lv = Math.max(0, Math.min(def.max, Math.floor(levels[def.id] || 0)));
+    if (lv <= 0) continue;
+    const v = def.perLevel * lv;
+    if (def.id === "ruby") out.atk += v;
+    else if (def.id === "sapphire") out.crit += v;
+    else if (def.id === "emerald") out.sp += v;
+    else if (def.id === "topaz") out.gold += v;
+    else if (def.id === "amethyst") out.aspd += v;
+    else if (def.id === "diamond") out.lives += v;
+  }
+  return out;
+}
+
+/** "Ruby Lv 4 · +8% Tower ATK" — the line under a crystal card */
+export function crystalBuffText(def: CrystalDef, level: number): string {
+  if (level <= 0) return "Not awakened — spend crystal potions to ignite it";
+  const v = def.perLevel * level;
+  if (def.flat) return `+${Math.round(v)} starting ${v === 1 ? "life" : "lives"}`;
+  return `+${(Math.round(v * 1000) / 10).toFixed(1).replace(/\.0$/, "")}% ${def.stat}`;
 }
 
 export type EnemyShape = "slime" | "runner" | "knight" | "mage" | "warlord" | "overlord" | "titan";
@@ -1751,6 +1840,8 @@ export interface DailyReward {
   gold?: number;
   gems?: number;
   tokens?: number;
+  /** crystal potions, the currency the crystal vault runs on */
+  potions?: number;
   frags?: number;
   /** fragment rarity, used when frags are granted */
   rarity?: Rarity;
@@ -1774,11 +1865,11 @@ export interface DailyReward {
 export const DAILY_REWARDS: DailyReward[] = [
   { gems: 1200, label: "1,200 gems", icon: "gem", accent: "#35e0ff" },
   { chests: [{ id: "silver", n: 1 }], label: "Silver Chest", icon: "chest", accent: "#cfd8e6" },
-  { chests: [{ id: "legendary", n: 1 }], label: "Legendary Chest", icon: "chest", accent: "#ffb324" },
+  { chests: [{ id: "legendary", n: 1 }], potions: 2, label: "Legendary Chest + 2 potions", icon: "chest", accent: "#ffb324" },
   { frags: 5, rarity: "legendary", label: "×5 legendary tower fragments", icon: "frag", accent: "#ffb324" },
   { gold: 25000, gems: 900, label: "25,000 gold + 900 gems", icon: "gold", accent: "#ffcf4d" },
   { chips: { basic: 5, advanced: 2 }, label: "×5 basic + ×2 advanced chips", icon: "chip", accent: "#c44dff" },
-  { chests: [{ id: "legendary", n: 3 }], label: "×3 Legendary Chests", icon: "chest", accent: "#ffb324" },
+  { chests: [{ id: "legendary", n: 3 }], potions: 3, label: "×3 Legendary Chests + 3 potions", icon: "chest", accent: "#ffb324" },
 ];
 
 // ---------- daily tasks ----------
@@ -1827,13 +1918,15 @@ export interface TaskMilestone {
   chests: { id: string; n: number }[];
   gems: number;
   chips: ChipBag;
+  /** crystal potions handed over with the crate */
+  potions?: number;
 }
 
 /** the three chests on the daily task point track */
 export const TASK_MILESTONES: TaskMilestone[] = [
-  { points: 30, label: "Supply Cache", color: "#8fe9ff", chests: [{ id: "silver", n: 1 }], gems: 150, chips: { basic: 2 } },
-  { points: 60, label: "War Cache", color: "#c44dff", chests: [{ id: "support", n: 1 }, { id: "epic", n: 1 }], gems: 400, chips: { basic: 3, advanced: 1 } },
-  { points: TASK_POINTS_TOTAL, label: "Perfect Day", color: "#ffb324", chests: [{ id: "legendary", n: 2 }], gems: 1000, chips: { advanced: 3, elite: 1 } },
+  { points: 30, label: "Supply Cache", color: "#8fe9ff", chests: [{ id: "silver", n: 1 }], gems: 150, chips: { basic: 2 }, potions: 2 },
+  { points: 60, label: "War Cache", color: "#c44dff", chests: [{ id: "support", n: 1 }, { id: "epic", n: 1 }], gems: 400, chips: { basic: 3, advanced: 1 }, potions: 4 },
+  { points: TASK_POINTS_TOTAL, label: "Perfect Day", color: "#ffb324", chests: [{ id: "legendary", n: 2 }], gems: 1000, chips: { advanced: 3, elite: 1 }, potions: 8 },
 ];
 
 // ---------- weekly event rotation ----------
@@ -2142,6 +2235,57 @@ export const BASE_MONTHLY_BONUS: MonthlyBonus = {
   fragBias: 0,
   chestFragBonus: 0,
 };
+
+/**
+ * Monthly events are a three-tier reward track now. Every run banks event
+ * points (waves cleared + a clear bonus), and each monthly event pays out at
+ * 120 / 300 / 600 points. The tiers are deliberately front-loaded so a player
+ * who only plays a little still gets something, while the 600-point cap takes
+ * a couple of weeks of steady runs.
+ */
+export interface MonthlyTier {
+  points: number;
+  label: string;
+  gold: number;
+  gems: number;
+  potions: number;
+  chips?: ChipBag;
+}
+
+export const MONTHLY_TIER_POINTS = [120, 300, 600] as const;
+
+/** the three reward crates for a month's event, coloured by the event itself */
+export function monthlyTiers(id: MonthId): MonthlyTier[] {
+  const ev = MONTH_BY_ID[id] || MONTHLY_EVENTS[0];
+  const idx = MONTHLY_EVENTS.indexOf(ev);
+  const mul = 1 + Math.max(0, idx) * 0.06; // later months pay a touch more
+  return [
+    {
+      points: MONTHLY_TIER_POINTS[0],
+      label: "Event Cache",
+      gold: Math.round(6000 * mul),
+      gems: Math.round(90 * mul),
+      potions: 4,
+      chips: { basic: 3 },
+    },
+    {
+      points: MONTHLY_TIER_POINTS[1],
+      label: "Event Vault",
+      gold: Math.round(16000 * mul),
+      gems: Math.round(240 * mul),
+      potions: 8,
+      chips: { basic: 6, advanced: 2 },
+    },
+    {
+      points: MONTHLY_TIER_POINTS[2],
+      label: "Month Crown",
+      gold: Math.round(36000 * mul),
+      gems: Math.round(520 * mul),
+      potions: 16,
+      chips: { advanced: 4, elite: 1 },
+    },
+  ];
+}
 
 /** numeric modifiers for the monthly event — the single source of truth for its perk */
 export function monthlyEventBonus(id: MonthId): MonthlyBonus {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { loadSave, mailReady, persistSave, seasonReady, tasksReady, type SaveData } from "./game/save";
-import { sfx, setSfx, setVolume, initAudio } from "./game/audio";
+import { sfx, setSfx, setVolume, setVolumeBoost, initAudio } from "./game/audio";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
 import { LaunchIntro, LoadingScreen, Home, Specials, Guild, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
@@ -132,7 +132,8 @@ export default function App() {
   useEffect(() => {
     setSfx(save.sfx);
     setVolume(save.vol);
-  }, [save.sfx, save.vol]);
+    setVolumeBoost(save.volBoost);
+  }, [save.sfx, save.vol, save.volBoost]);
 
   // the static splash in index.html is only there until the app has painted
   useEffect(() => {
@@ -180,7 +181,7 @@ export default function App() {
 
   if (screen === "intro" || screen === "loading") {
     return (
-      <div className={`h-full ${save.reducedMotion ? "calm" : ""}`}>
+      <div className={`h-full ${save.reducedMotion ? "calm" : ""} ${save.powerSaver ? "power-saver" : ""}`}>
         {/* If a stale chunk is missing, dynamic import() fails asynchronously; surface it. */}
         <BootErrors />
         {screen === "intro" ? (
@@ -194,7 +195,7 @@ export default function App() {
 
   if (screen === "battle" || screen === "endless") {
     return (
-      <div className={`h-full ${save.reducedMotion ? "calm" : ""}`}>
+      <div className={`h-full ${save.reducedMotion ? "calm" : ""} ${save.powerSaver ? "power-saver" : ""}`}>
         <Battle
           key={screen + save.hero}
           mode={MODES[screen].mode}
@@ -207,14 +208,14 @@ export default function App() {
   }
 
   return (
-    <div className={`app-bg flex h-full flex-col ${save.reducedMotion ? "calm" : ""}`}>
+    <div className={`app-bg flex h-full flex-col ${save.reducedMotion ? "calm" : ""} ${save.powerSaver ? "power-saver" : ""}`}>
       <Toasts toasts={toasts} />
       {/* top bar — wraps on narrow screens so the settings button is never clipped */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-2 px-3 pt-2.5">
         {/* no title up here — the wordmark lives on the boot screens, which keeps
             this bar from wrapping on narrow phones */}
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <CurrencyBar gold={save.gold} gems={save.gems} tokens={save.tokens} trophies={save.trophies} />
+          <CurrencyBar gold={save.gold} gems={save.gems} tokens={save.tokens} trophies={save.trophies} potions={save.potions} />
           <FullscreenButton compact />
           <button
             className="relative shrink-0 rounded-lg border border-[var(--line)] bg-black/40 p-2 text-[var(--dim)] transition hover:text-[var(--txt)]"

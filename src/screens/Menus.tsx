@@ -27,9 +27,14 @@ import {
   claimGuildChest,
   bumpQuest,
   claimQuest,
+  claimMonthTier,
   donateToGuild,
   donationsLeft,
   eventClaimable,
+  eventStreakMul,
+  monthPoints,
+  monthTierClaimed,
+  nextEventStreak,
   guildChestReady,
   heroLevel,
   joinGuild,
@@ -47,7 +52,7 @@ import {
   compClaimed,
   GUILD_DONATIONS_PER_DAY,
 } from "../game/save";
-import { sfx, setVolume } from "../game/audio";
+import { sfx, setVolume, setVolumeBoost } from "../game/audio";
 import {
   ChipIcon,
   CoinIcon,
@@ -57,6 +62,7 @@ import {
   FpsBars,
   HeroIcon,
   Modal,
+  PotionIcon,
   RewardClaim,
   SetIcon,
   ShardIcon,
@@ -90,6 +96,7 @@ import {
   eventForDate,
   monthlyEventBonus,
   monthlyEventForDate,
+  monthlyTiers,
   MONTHLY_EVENTS,
   guildLevel,
   heroCooldown,
@@ -531,13 +538,15 @@ export function Home({
     if (!loot) return;
     mutate((s) => {
       if (s.lastEvent === todayStr()) return;
+      const chain = nextEventStreak(s);
       grantLoot(s, loot);
       s.lastEvent = todayStr();
+      s.eventStreak = chain;
     });
     sfx.chest();
     setClaim({
       title: liveEv.name.toUpperCase(),
-      subtitle: `${liveEv.tagline} event bonus`,
+      subtitle: `${liveEv.tagline} event bonus · day ${nextEventStreak(save)} streak`,
       lines: lootLines(loot),
       color: liveEv.color,
       chest: liveEv.id === "chestbox",
@@ -1154,7 +1163,31 @@ function EventsPanel({
   const live = eventForDate();
   const month = monthlyEventForDate();
   const monthBonus = monthlyEventBonus(month.id);
+  const tiers = monthlyTiers(month.id);
+  const monthPts = monthPoints(save);
   const today = new Date().getDay();
+  const streak = nextEventStreak(save);
+
+  const doMonthTier = (idx: number) => {
+    const draft = cloneSave(save);
+    const loot = claimMonthTier(draft, idx);
+    if (!loot) {
+      sfx.error();
+      return push(`Need ${tiers[idx].points} event points`, "#ff4d5e");
+    }
+    mutate((s) => {
+      claimMonthTier(s, idx);
+    });
+    sfx.ceremony();
+    setClaim({
+      title: tiers[idx].label.toUpperCase(),
+      subtitle: `${month.name} · ${tiers[idx].points} event points`,
+      lines: lootLines(loot),
+      color: month.color,
+      chest: true,
+      chestCount: 2,
+    });
+  };
 
   const doClaim = () => {
     if (!eventClaimable(save)) {
@@ -1166,13 +1199,17 @@ function EventsPanel({
     if (!loot) return;
     mutate((s) => {
       if (s.lastEvent === todayStr()) return;
+      // resolve the streak against the live save before stamping the date, so
+      // the chain can never be double-counted by a stale render
+      const chain = nextEventStreak(s);
       grantLoot(s, loot);
       s.lastEvent = todayStr();
+      s.eventStreak = chain;
     });
     sfx.chest();
     setClaim({
       title: live.name.toUpperCase(),
-      subtitle: `${live.tagline} event bonus`,
+      subtitle: `${live.tagline} bonus · day ${streak} streak`,
       lines: lootLines(loot),
       color: live.color,
       chest: live.id === "chestbox",
@@ -1199,9 +1236,23 @@ function EventsPanel({
               {live.perk}
             </div>
           </div>
-          <button className="cta-banner shrink-0 px-5 py-3 text-[14px]" disabled={!eventClaimable(save)} onClick={doClaim}>
-            {eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED TODAY"}
-          </button>
+          <div className="flex shrink-0 flex-col items-stretch gap-1.5">
+            <button className="cta-banner px-5 py-3 text-[14px]" disabled={!eventClaimable(save)} onClick={doClaim}>
+              {eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED TODAY"}
+            </button>
+            <div className="rounded-lg border border-[var(--line)] bg-black/35 px-2 py-1 text-center text-[10.5px] font-bold tracking-wider text-[var(--dim)]" data-testid="event-streak">
+              STREAK <span className="num" style={{ color: live.color }}>{save.eventStreak}</span>/7 · NEXT ×{eventStreakMul(streak).toFixed(1)} LOOT
+            </div>
+            <div className="flex justify-center gap-1" aria-hidden="true">
+              {Array.from({ length: 7 }, (_, i) => (
+                <span
+                  key={i}
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: i < save.eventStreak ? live.color : "rgba(120,110,160,0.35)" }}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1227,6 +1278,68 @@ function EventsPanel({
           </div>
         </div>
       </div>
+      {/* MONTHLY TRACK — runs bank event points, three crates pay out */}
+      <div className="panel p-3" data-testid="month-track">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <div className="text-[11px] font-bold tracking-[0.3em]" style={{ color: month.color }}>
+              MONTHLY TRACK
+            </div>
+            <div className="font-disp text-2xl leading-none text-white">
+              <span className="num" style={{ color: month.color }}>{monthPts}</span>
+              <span className="text-[var(--dim)]"> / {tiers[tiers.length - 1].points} EVENT PTS</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-black/35 px-2.5 py-1.5 text-[11.5px] font-bold text-[#b98bff]">
+            <PotionIcon size={15} />
+            <span className="num">{save.potions}</span>
+            <span className="text-[var(--dim)]">potions</span>
+          </div>
+        </div>
+        <div className="task-bar mt-2">
+          <span
+            className="task-bar-fill"
+            style={{ width: `${Math.min(100, (monthPts / tiers[tiers.length - 1].points) * 100)}%`, background: `linear-gradient(90deg,${month.color},#ffe9a8)` }}
+          />
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {tiers.map((t, i) => {
+            const hit = monthPts >= t.points;
+            const got = monthTierClaimed(save, i);
+            return (
+              <button
+                key={t.points}
+                className={`tile flex flex-col gap-1 p-2.5 text-left ${hit && !got ? "ready" : ""}`}
+                data-testid={`month-tier-${i}`}
+                disabled={!hit || got}
+                style={{ borderColor: hit ? month.color : undefined, opacity: got ? 0.5 : 1 }}
+                onClick={() => doMonthTier(i)}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold tracking-wider" style={{ color: hit ? month.color : "var(--dim)" }}>
+                    {t.label.toUpperCase()}
+                  </span>
+                  <span className="num text-[11px] font-bold text-[var(--dim)]">{t.points} PTS</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-bold text-[var(--dim)]">
+                  <span className="num text-[#ffcf4d]">+{t.gold.toLocaleString()}</span>
+                  <span className="num text-[#35e0ff]">+{t.gems}</span>
+                  <span className="inline-flex items-center gap-1 text-[#b98bff]"><PotionIcon size={12} />+{t.potions}</span>
+                  {t.chips && (
+                    <span className="text-[#c44dff]">
+                      +{Object.values(t.chips).reduce((a, b) => a + (b || 0), 0)} chips
+                    </span>
+                  )}
+                </div>
+                <span className="text-[10.5px] font-bold" style={{ color: got ? "#3dff8e" : hit ? month.color : "var(--line2)" }}>
+                  {got ? "CLAIMED" : hit ? "CLAIM CRATE" : "EARN EVENT POINTS IN ANY RUN"}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="panel p-3" data-testid="month-strip">
         <div className="month-strip">
           {MONTHLY_EVENTS.map((m) => (
@@ -1321,6 +1434,7 @@ function CompetitionPanel({
         gold: tier.gold,
         gems: tier.gems,
         tokens: 0,
+        potions: 0,
         frags: [],
         chips: tier.chips,
         heroShards: [],
@@ -2312,6 +2426,7 @@ export function SettingsModal({
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
     ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
+    ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffcf4d"],
   ];
   return (
     <Modal onClose={onClose} w={470}>
@@ -2322,7 +2437,9 @@ export function SettingsModal({
         <SetIcon name="volume" color="#35e0ff" />
         <div className="min-w-0 flex-1">
           <div className="font-bold">Master Volume</div>
-          <div className="text-xs font-semibold text-[var(--dim)]">{Math.round(save.vol * 100)}%</div>
+          <div className="text-xs font-semibold text-[var(--dim)]">
+            {Math.round(save.vol * 100)}%{save.volBoost ? ` · boosted to ${Math.round(save.vol * 300)}%` : ""}
+          </div>
         </div>
         <input
           type="range"
@@ -2336,6 +2453,27 @@ export function SettingsModal({
           }}
           className="w-[150px] shrink-0 accent-[#35e0ff]"
           aria-label="Master Volume"
+        />
+      </div>
+      <div className="row-card mt-1.5" data-testid="volume-boost-row">
+        <SetIcon name="booster" color="#ff4fd8" />
+        <div className="min-w-0 flex-1">
+          <div className="font-bold">Volume Booster</div>
+          <div className="text-xs font-semibold text-[var(--dim)]">
+            Push the master bus up to 300% — for phone speakers in a noisy room. The limiter still keeps peaks clean.
+          </div>
+        </div>
+        <KnobToggle
+          on={save.volBoost}
+          label="Volume Booster"
+          testId="toggle-volBoost"
+          onToggle={() => {
+            const next = !save.volBoost;
+            mutate((s) => { s.volBoost = next; });
+            setVolumeBoost(next);
+            if (next) sfx.uiPop();
+            else sfx.uiOff();
+          }}
         />
       </div>
 
@@ -2514,6 +2652,7 @@ export function SettingsModal({
                     Object.assign(s, next);
                   });
                   setVolume(next.vol);
+                  setVolumeBoost(!!next.volBoost);
                   setImportOpen(false);
                   setImportText("");
                   sfx.gem();

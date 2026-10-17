@@ -32,20 +32,38 @@ let rack: {
 
 let enabled = true;
 let volume = 0.7;
+/** volume booster: pushes the master bus up to 300% of the slider value */
+let boosted = false;
 let lastShot = 0;
 
 const MASTER_LEVEL = 0.42;
+const BOOST_MUL = 3;
+
+/** the gain the master bus should sit at right now */
+const masterGain = () => (enabled ? MASTER_LEVEL * volume * (boosted ? BOOST_MUL : 1) : 0);
 
 export function setSfx(on: boolean) {
   enabled = on;
-  if (rack) rack.master.gain.rampTo(on ? MASTER_LEVEL * volume : 0, 0.06);
+  if (rack) rack.master.gain.rampTo(masterGain(), 0.06);
 }
 
 /** master volume, 0..1 */
 export function setVolume(v: number) {
   volume = Math.min(1, Math.max(0, v));
-  if (rack) rack.master.gain.rampTo(enabled ? MASTER_LEVEL * volume : 0, 0.06);
+  if (rack) rack.master.gain.rampTo(masterGain(), 0.06);
 }
+
+/**
+ * VOLUME BOOSTER — up to 300%. A loudness switch for phone speakers in a noisy
+ * room: it multiplies the master bus by three (the limiter still catches the
+ * peaks, so it gets loud without clipping into fuzz).
+ */
+export function setVolumeBoost(on: boolean) {
+  boosted = !!on;
+  if (rack) rack.master.gain.rampTo(masterGain(), 0.08);
+}
+
+export const volumeBoosterOn = () => boosted;
 
 /**
  * Build the mixer once. Safe to call repeatedly; starts Tone's audio clock
@@ -59,7 +77,7 @@ export function initAudio() {
   }
   if (rack?.built) return;
   try {
-    const master = new Tone.Gain(enabled ? MASTER_LEVEL * volume : 0).toDestination();
+    const master = new Tone.Gain(masterGain()).toDestination();
     const limiter = new Tone.Limiter(-1).connect(master);
     const comp = new Tone.Compressor({
       threshold: -16,

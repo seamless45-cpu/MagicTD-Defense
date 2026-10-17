@@ -1558,3 +1558,89 @@ describe("Season", () => {
     noErrors();
   }, 30000);
 });
+
+describe("Crystal vault UI", () => {
+  it("opens the crystal section inside Towers and spends potions on a level", async () => {
+    persistSave({ ...defaultSave(), potions: 40, crystals: {} });
+    await mountApp();
+    click(byText("button", "Towers")!);
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
+
+    click(document.querySelector('[data-testid="tower-section-crystals"]') as HTMLElement);
+    const vault = await waitFor(
+      () => document.querySelector('[data-testid="crystal-vault"]') as HTMLElement,
+      "crystal vault"
+    );
+    expect(vault.textContent).toContain("CRYSTAL VAULT");
+    expect(document.querySelectorAll("[data-crystal]")).toHaveLength(6);
+    expect((document.querySelector('[data-testid="potion-balance"]') as HTMLElement).textContent).toContain("40");
+
+    const before = saved().potions;
+    click(document.querySelector('[data-testid="crystal-upgrade-ruby"]') as HTMLElement);
+    await waitFor(() => saved().crystals.ruby === 1, "ruby upgraded");
+    expect(saved().potions).toBeLessThan(before);
+    // it costs potions only — gold never moves
+    expect(saved().gold).toBe(defaultSave().gold);
+    expect(saved().frags).toEqual(defaultSave().frags);
+
+    // the roster is still one click away
+    click(document.querySelector('[data-testid="tower-section-towers"]') as HTMLElement);
+    await waitFor(() => document.querySelector('[data-testid="tower-grid"]'), "tower grid");
+    noErrors();
+    unmountApp();
+  }, 30000);
+});
+
+describe("Audio + power settings", () => {
+  it("toggles the 300% volume booster and power saving mode", async () => {
+    await mountApp();
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => byText("div", "Settings"), "settings modal");
+
+    const boostRow = await waitFor(
+      () => document.querySelector('[data-testid="volume-boost-row"]') as HTMLElement,
+      "volume booster row"
+    );
+    expect(boostRow.textContent).toContain("300%");
+    click(document.querySelector('[data-testid="toggle-volBoost"]') as HTMLElement);
+    await waitFor(() => saved().volBoost === true, "booster on");
+    click(document.querySelector('[data-testid="toggle-volBoost"]') as HTMLElement);
+    await waitFor(() => saved().volBoost === false, "booster off");
+
+    const power = document.querySelector('[data-testid="toggle-powerSaver"]') as HTMLElement;
+    expect(power, "power saving toggle").toBeTruthy();
+    click(power);
+    await waitFor(() => saved().powerSaver === true, "power saver on");
+    // the app shell picks up the class that calms CSS animation
+    expect(document.querySelector(".power-saver")).toBeTruthy();
+    noErrors();
+    unmountApp();
+  }, 25000);
+});
+
+describe("Battle controls", () => {
+  it("pauses, resumes and cycles battle speed", async () => {
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+
+    const speed = document.querySelector('[data-testid="speed-btn"]') as HTMLElement;
+    expect(speed.textContent).toContain("×1");
+    click(speed);
+    await waitFor(() => (speed.textContent || "").includes("×1.5"), "speed 1.5x");
+    click(speed);
+    await waitFor(() => (speed.textContent || "").includes("×2"), "speed 2x");
+
+    click(document.querySelector('[data-testid="pause-btn"]') as HTMLElement);
+    await waitFor(() => document.querySelector('[data-testid="pause-overlay"]'), "pause overlay");
+    click(document.querySelector('[data-testid="resume-btn"]') as HTMLElement);
+    await waitFor(() => !document.querySelector('[data-testid="pause-overlay"]'), "resumed");
+
+    // the wave strip replaced the old top-of-arena overlay clutter
+    expect(document.querySelector('[data-testid="wave-strip"]')).toBeTruthy();
+    // and a deploy phase can be called early
+    expect(document.querySelector('[data-testid="call-wave"]')).toBeTruthy();
+    noErrors();
+    unmountApp();
+  }, 30000);
+});

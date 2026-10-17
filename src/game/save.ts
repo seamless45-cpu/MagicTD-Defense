@@ -1,11 +1,16 @@
 import {
   CHEST_BY_ID,
+  CRYSTALS,
+  CRYSTAL_BY_ID,
   DAILY_RESET_HOUR,
   DAILY_TASKS,
   TASK_BY_ID,
   TASK_MILESTONES,
   TASK_POINTS_TOTAL,
   DAILY_REWARDS,
+  MONTHLY_EVENTS,
+  monthlyEventForDate,
+  monthlyTiers,
   GUILD_BY_ID,
   GUILD_QUESTS,
   HERO_BY_ID,
@@ -20,6 +25,8 @@ import {
   seasonTierFor,
   TOWER_BY_ID,
   TROPHY_LOSS,
+  crystalUpgradeCost,
+  type CrystalId,
   TROPHY_WIN,
   eventForDate,
   critBonusFrom,
@@ -125,6 +132,22 @@ export interface SaveData {
   fx: boolean;
   /** 0..1 master volume */
   vol: number;
+  /** volume booster — pushes the master bus up to 300% */
+  volBoost: boolean;
+  /** power saving: 30fps cap, minimal effects, no interpolation */
+  powerSaver: boolean;
+  /** crystal potions, spent on the crystal vault in the Towers tab */
+  potions: number;
+  /** crystal id -> level (0 = dormant) */
+  crystals: Partial<Record<CrystalId, number>>;
+  /** month stamp ("2026-10") the monthly event points belong to */
+  monthKey: string;
+  /** event points banked toward the monthly reward track */
+  monthPts: number;
+  /** monthly tier ids already claimed (`2026-10-1`) */
+  monthClaimed: string[];
+  /** consecutive game-days the weekday event bonus has been claimed */
+  eventStreak: number;
   /** floating damage numbers */
   dmgNums: boolean;
   /** render frame-rate cap, 0 = unlimited */
@@ -209,6 +232,15 @@ export function defaultSave(): SaveData {
     sfx: true,
     fx: true,
     vol: 0.7,
+    volBoost: false,
+    powerSaver: false,
+    // a new account can immediately ignite one crystal
+    potions: 6,
+    crystals: {},
+    monthKey: "",
+    monthPts: 0,
+    monthClaimed: [],
+    eventStreak: 0,
     dmgNums: true,
     maxFps: 0,
     frameInterp: true,
@@ -232,6 +264,23 @@ function normalise(s: SaveData): SaveData {
   s.lineup = s.lineup.filter((id) => s.levels[id]);
   if (!HERO_BY_ID[s.hero]) s.hero = "nova";
   s.vol = Math.min(1, Math.max(0, Number.isFinite(s.vol) ? s.vol : 0.7));
+  s.volBoost = !!s.volBoost;
+  s.powerSaver = !!s.powerSaver;
+  s.potions = Math.max(0, Number.isFinite(s.potions) ? Math.round(s.potions) : 0);
+  s.crystals = s.crystals && typeof s.crystals === "object" ? s.crystals : {};
+  for (const def of CRYSTALS) {
+    const lv = Math.floor(Number(s.crystals[def.id]) || 0);
+    s.crystals[def.id] = Math.max(0, Math.min(def.max, lv));
+  }
+  s.monthClaimed = Array.isArray(s.monthClaimed) ? s.monthClaimed.map(String) : [];
+  s.monthPts = Math.max(0, Number.isFinite(s.monthPts) ? Math.round(s.monthPts) : 0);
+  // a new calendar month wipes the previous month's track
+  if (s.monthKey !== monthStamp()) {
+    s.monthKey = monthStamp();
+    s.monthPts = 0;
+    s.monthClaimed = [];
+  }
+  s.eventStreak = Math.max(0, Math.min(7, Number.isFinite(s.eventStreak) ? Math.round(s.eventStreak) : 0));
   s.zoom = clampZoom(s.zoom);
   s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
   s.heroShards = s.heroShards && typeof s.heroShards === "object" ? s.heroShards : {};
@@ -499,7 +548,7 @@ export function addChips(s: SaveData, bag: ChipBag) {
 // ---------- rewards ----------
 /** one line of loot, used by every claim animation in the UI */
 export interface RewardLine {
-  kind: "gold" | "gems" | "tokens" | "frag" | "chip" | "heroShard" | "trophy";
+  kind: "gold" | "gems" | "tokens" | "potions" | "frag" | "chip" | "heroShard" | "trophy";
   /** tower id / chip id / hero id where it applies */
   id?: string;
   label: string;
@@ -511,6 +560,7 @@ export interface ChestLoot {
   gold: number;
   gems: number;
   tokens: number;
+  potions: number;
   frags: { id: string; n: number }[];
   chips: ChipBag;
   heroShards: { id: string; n: number }[];
@@ -521,7 +571,7 @@ export function emptyLootPublic(): ChestLoot {
 }
 
 function emptyLoot(): ChestLoot {
-  return { gold: 0, gems: 0, tokens: 0, frags: [], chips: {}, heroShards: [] };
+  return { gold: 0, gems: 0, tokens: 0, potions: 0, frags: [], chips: {}, heroShards: [] };
 }
 
 function pushFrag(list: { id: string; n: number }[], id: string, n = 1) {
@@ -562,6 +612,7 @@ export function mergeLoot(a: ChestLoot, b: ChestLoot): ChestLoot {
     gold: a.gold + b.gold,
     gems: a.gems + b.gems,
     tokens: a.tokens + b.tokens,
+    potions: a.potions + b.potions,
     frags: a.frags.map((f) => ({ ...f })),
     chips: { ...a.chips },
     heroShards: a.heroShards.map((h) => ({ ...h })),
@@ -578,6 +629,7 @@ export function grantLoot(s: SaveData, loot: ChestLoot) {
   s.gold += loot.gold;
   s.gems += loot.gems;
   s.tokens += loot.tokens;
+  s.potions += loot.potions || 0;
   loot.frags.forEach((f) => addFrag(s, f.id, f.n));
   addChips(s, loot.chips);
   loot.heroShards.forEach((h) => addHeroShards(s, h.id, h.n));
@@ -589,6 +641,7 @@ export function lootLines(loot: ChestLoot): RewardLine[] {
   if (loot.gold) out.push({ kind: "gold", label: "Gold", n: loot.gold, color: "#ffcf4d" });
   if (loot.gems) out.push({ kind: "gems", label: "Gems", n: loot.gems, color: "#35e0ff" });
   if (loot.tokens) out.push({ kind: "tokens", label: "Magic Tokens", n: loot.tokens, color: "#ff4fd8" });
+  if (loot.potions) out.push({ kind: "potions", label: "Crystal Potions", n: loot.potions, color: "#b98bff" });
   loot.frags.forEach((f) =>
     out.push({
       kind: "frag",
@@ -628,6 +681,7 @@ export function claimDailyReward(s: SaveData): DailyClaim | null {
   loot.gold += reward.gold || 0;
   loot.gems += reward.gems || 0;
   loot.tokens += reward.tokens || 0;
+  loot.potions += reward.potions || 0;
   for (let i = 0; i < (reward.frags || 0); i++) pushFrag(loot.frags, randFrag(rarityBias(reward.rarity)));
   if (reward.chips) {
     (Object.keys(reward.chips) as ChipId[]).forEach((k) => {
@@ -712,7 +766,7 @@ export function claimTask(s: SaveData, id: TaskId): ChestLoot | null {
   rollTasks(s);
   if (!taskComplete(s, id) || taskClaimed(s, id)) return null;
   const t = TASK_BY_ID[id];
-  const loot: ChestLoot = { ...emptyLootPublic(), gold: t.gold, gems: t.gems };
+  const loot: ChestLoot = { ...emptyLootPublic(), gold: t.gold, gems: t.gems, potions: 1 };
   grantLoot(s, loot);
   s.tasks.claimed = [...s.tasks.claimed, id];
   return loot;
@@ -726,7 +780,7 @@ export function claimMilestone(s: SaveData, idx: number): ChestLoot | null {
   rollTasks(s);
   const m = TASK_MILESTONES[idx];
   if (!m || milestoneClaimed(s, idx) || taskPoints(s) < m.points) return null;
-  let loot: ChestLoot = { ...emptyLootPublic(), gems: m.gems, chips: { ...m.chips } };
+  let loot: ChestLoot = { ...emptyLootPublic(), gems: m.gems, chips: { ...m.chips }, potions: m.potions || 0 };
   m.chests.forEach((c) => {
     for (let i = 0; i < c.n; i++) loot = mergeLoot(loot, rollChest(c.id));
   });
@@ -760,14 +814,28 @@ export function liveEvent(d = new Date()) {
   return eventForDate(d);
 }
 
+/** the streak a claim made right now would land on (1..7) */
+export function nextEventStreak(s: SaveData): number {
+  if (s.lastEvent === todayStr()) return Math.max(1, Math.min(7, s.eventStreak));
+  if (s.lastEvent === yesterdayStr() && s.eventStreak >= 1) return Math.min(7, s.eventStreak + 1);
+  return 1;
+}
+
+/** +10% loot for every day of the streak, capped at +60% */
+export function eventStreakMul(streak: number): number {
+  return 1 + 0.1 * Math.max(0, Math.min(7, streak) - 1);
+}
+
 export function eventClaimable(s: SaveData): boolean {
   return s.lastEvent !== todayStr();
 }
 
-/** the once-a-day event participation bonus */
+/** the once-a-day event participation bonus, now streak-scaled */
 export function claimEventBonus(s: SaveData): ChestLoot | null {
   if (!eventClaimable(s)) return null;
   const ev = liveEvent();
+  const streak = nextEventStreak(s);
+  const mul = eventStreakMul(streak);
   let loot = emptyLoot();
   switch (ev.id) {
     case "luck":
@@ -793,10 +861,105 @@ export function claimEventBonus(s: SaveData): ChestLoot | null {
       loot.tokens = 2;
       break;
   }
+  // the streak scales the currency side of the claim and hands out crystal
+  // potions every single day — the vault is fed by showing up
+  loot.gold = Math.round(loot.gold * mul);
+  loot.gems = Math.round(loot.gems * mul);
+  loot.tokens = Math.round(loot.tokens * mul);
+  loot.potions += streak;
   grantLoot(s, loot);
   s.lastEvent = todayStr();
+  s.eventStreak = streak;
   return loot;
 }
+
+// ---------- crystal vault ----------
+export function crystalLevel(s: SaveData, id: CrystalId): number {
+  const def = CRYSTAL_BY_ID[id];
+  if (!def) return 0;
+  return Math.max(0, Math.min(def.max, Math.floor(s.crystals[id] || 0)));
+}
+
+/** the potion price of the next level on a crystal */
+export function nextCrystalCost(s: SaveData, id: CrystalId): number {
+  return crystalUpgradeCost(crystalLevel(s, id));
+}
+
+/**
+ * Spend crystal potions to raise one crystal a level. Every crystal upgrade in
+ * the game is paid for in potions only — no gold, no fragments.
+ */
+export function upgradeCrystal(s: SaveData, id: CrystalId): boolean {
+  const def = CRYSTAL_BY_ID[id];
+  if (!def) return false;
+  const lv = crystalLevel(s, id);
+  if (lv >= def.max) return false;
+  const cost = crystalUpgradeCost(lv);
+  if (s.potions < cost) return false;
+  s.potions -= cost;
+  s.crystals[id] = lv + 1;
+  bumpTask(s, "upgrade", 1);
+  return true;
+}
+
+export function totalCrystalLevels(s: SaveData): number {
+  return CRYSTALS.reduce((a, c) => a + crystalLevel(s, c.id), 0);
+}
+
+// ---------- monthly event track ----------
+/** "2026-10" — the calendar month a monthly event track belongs to */
+export function monthStamp(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** reset the track when a new month starts; returns true when it rolled over */
+export function rollMonth(s: SaveData): boolean {
+  if (s.monthKey === monthStamp()) return false;
+  s.monthKey = monthStamp();
+  s.monthPts = 0;
+  s.monthClaimed = [];
+  return true;
+}
+
+export function monthPoints(s: SaveData): number {
+  return s.monthKey === monthStamp() ? s.monthPts : 0;
+}
+
+/** add monthly event points from a finished run; mutates the save */
+export function addMonthPoints(s: SaveData, n: number): number {
+  if (n <= 0) return 0;
+  rollMonth(s);
+  s.monthPts += Math.round(n);
+  return s.monthPts;
+}
+
+export function monthTierClaimed(s: SaveData, idx: number): boolean {
+  if (s.monthKey !== monthStamp()) return false;
+  return s.monthClaimed.includes(`${monthStamp()}-${idx}`);
+}
+
+export function monthReady(s: SaveData): number {
+  if (s.monthKey !== monthStamp()) return 0;
+  const pts = monthPoints(s);
+  return monthlyTiers(monthlyEventForDate().id).filter(
+    (t, i) => pts >= t.points && !monthTierClaimed(s, i)
+  ).length;
+}
+
+/** cash in one tier of the live monthly track; mutates the save */
+export function claimMonthTier(s: SaveData, idx: number): ChestLoot | null {
+  rollMonth(s);
+  const ev = monthlyEventForDate();
+  const tiers = monthlyTiers(ev.id);
+  const t = tiers[idx];
+  if (!t || monthTierClaimed(s, idx) || monthPoints(s) < t.points) return null;
+  const loot: ChestLoot = { ...emptyLoot(), gold: t.gold, gems: t.gems, potions: t.potions, chips: { ...(t.chips || {}) } };
+  grantLoot(s, loot);
+  s.monthClaimed = [...s.monthClaimed, `${monthStamp()}-${idx}`];
+  return loot;
+}
+
+export const MONTH_TRACK_EVENTS = MONTHLY_EVENTS.length;
 
 // ---------- guild ----------
 export function joinGuild(s: SaveData, id: string): boolean {

@@ -70,6 +70,30 @@ export function ShardIcon({ size = 18, color = "#ff4fd8" }: { size?: number; col
   );
 }
 
+/** a faceted crystal shard — the crystal vault's currency and card art */
+export function CrystalIcon({ size = 18, color = "#c44dff" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M10 1.4 16.2 6.2 13.6 18 6.4 18 3.8 6.2z" fill={color} stroke="#0b0726" strokeWidth="1.3" />
+      <path d="M10 1.4 10 18M3.8 6.2 10 8.4l6.2-2.2M6.4 18 10 8.4l3.6 9.6" fill="none" stroke="#ffffff" strokeWidth="0.9" opacity="0.55" />
+      <path d="M10 3.4 7 6.9 10 16z" fill="#ffffff" opacity="0.28" />
+    </svg>
+  );
+}
+
+/** a round-bottomed potion flask, the crystal upgrade currency */
+export function PotionIcon({ size = 18, color = "#b98bff" }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M8 2.2h4v4.1l3.1 7.2A3.2 3.2 0 0 1 12.2 18H7.8a3.2 3.2 0 0 1-2.9-4.5L8 6.3z" fill={color} stroke="#0b0726" strokeWidth="1.3" />
+      <path d="M6.6 12.4h6.8" stroke="#ffffff" strokeWidth="1" opacity="0.7" />
+      <path d="M7.6 4.2h4.8" stroke="#0b0726" strokeWidth="1.4" />
+      <circle cx="8.5" cy="14" r="1" fill="#ffffff" opacity="0.7" />
+      <circle cx="11.6" cy="15.2" r="0.7" fill="#ffffff" opacity="0.55" />
+    </svg>
+  );
+}
+
 export function GuildIcon({ size = 18, color = "#ffb324" }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20">
@@ -84,6 +108,7 @@ export function RewardIcon({ line, size = 26 }: { line: RewardLine; size?: numbe
   if (line.kind === "gold") return <CoinIcon size={size} />;
   if (line.kind === "gems") return <GemIcon size={size} />;
   if (line.kind === "tokens") return <TokenIcon size={size} />;
+  if (line.kind === "potions") return <PotionIcon size={size} />;
   if (line.kind === "trophy") return <TrophyIcon size={size} />;
   if (line.kind === "chip") return <ChipIcon id={(line.id as ChipId) || "basic"} size={size} />;
   if (line.kind === "heroShard")
@@ -108,11 +133,14 @@ export function CurrencyBar({
   gems,
   tokens,
   trophies,
+  potions,
 }: {
   gold: number;
   gems: number;
   tokens: number;
   trophies?: number;
+  /** crystal potions — shown once the player has any */
+  potions?: number;
 }) {
   return (
     <div className="flex items-center gap-1.5">
@@ -138,6 +166,12 @@ export function CurrencyBar({
         <TokenIcon size={15} />
         <span className="num">{Math.floor(tokens).toLocaleString()}</span>
       </div>
+      {typeof potions === "number" && potions > 0 && (
+        <div className="pill-dark pill-compact text-[10.5px] text-[#b98bff]" style={{ borderColor: "#5b3b8c" }} data-currency="potions">
+          <PotionIcon size={15} />
+          <span className="num">{Math.floor(potions).toLocaleString()}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -884,6 +918,8 @@ export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () =>
 /** ---------- setting glyphs (one shared 24px stroke set) ---------- */
 export type SetIconName =
   | "volume"
+  | "booster"
+  | "power"
   | "sfx"
   | "fx"
   | "dmg"
@@ -908,6 +944,20 @@ const SET_PATHS: Record<SetIconName, ReactNode> = {
       <path d="M4 9h3l5-4v14l-5-4H4z" />
       <path d="M16 8.6a5 5 0 0 1 0 6.8" />
       <path d="M18.6 6a8.4 8.4 0 0 1 0 12" />
+    </>
+  ),
+  booster: (
+    <>
+      <path d="M4 9h3l5-4v14l-5-4H4z" />
+      <path d="M16 8.6a5 5 0 0 1 0 6.8" />
+      <path d="M18.6 6a8.4 8.4 0 0 1 0 12" />
+      <path d="M21 3.2v5M18.5 5.7h5" />
+    </>
+  ),
+  power: (
+    <>
+      <path d="M12 2.6v8.2" />
+      <path d="M6.4 6.3a8 8 0 1 0 11.2 0" />
     </>
   ),
   sfx: (
