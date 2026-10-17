@@ -72,7 +72,7 @@ export type TowerKind =
   | "bloodstone"
   | "venom";
 
-export type GameMode = "battle" | "endless";
+export type GameMode = "battle" | "endless" | "gauntlet";
 
 /**
  * How an awakening behaves, so one implementation in the battle engine can
@@ -1264,6 +1264,43 @@ export const RUN_SHOP: RunShopItem[] = [
   { id: "meteor", name: "Meteor Strike", desc: "Smash every enemy on the field for 25% of its max HP", cost: 240, step: 1.4, max: 20 },
 ];
 
+// ---------- gauntlet: the roguelite mode's boon pool ----------
+export type GauntletBoonId =
+  | "power"
+  | "haste"
+  | "edge"
+  | "greed"
+  | "mana"
+  | "ward"
+  | "barrage"
+  | "ascension"
+  | "bounty";
+
+export interface GauntletBoon {
+  id: GauntletBoonId;
+  name: string;
+  desc: string;
+  color: string;
+  glyph: string;
+}
+
+/**
+ * THE GAUNTLET is a roguelite run: no wave cap, and every cleared wave offers
+ * three boons. A boon is a permanent run modifier, so a deep run snowballs —
+ * but the waves never stop coming and the run ends with your last life.
+ */
+export const GAUNTLET_BOONS: GauntletBoon[] = [
+  { id: "power", name: "Rift Forged", desc: "+18% tower damage for the rest of the run", color: "#ff4d5e", glyph: "⚔" },
+  { id: "haste", name: "Quickening", desc: "+12% attack speed for the rest of the run", color: "#35e0ff", glyph: "≫" },
+  { id: "edge", name: "Killing Edge", desc: "+8% crit chance and +35% crit damage", color: "#ffd23f", glyph: "✦" },
+  { id: "greed", name: "Deep Pockets", desc: "+25% run gold from every payout", color: "#ffb020", glyph: "◈" },
+  { id: "mana", name: "Mana Font", desc: "+20% SP from kills and wave clears", color: "#b06bff", glyph: "❋" },
+  { id: "ward", name: "Bulwark", desc: "+4 lives, right now", color: "#8fb0ff", glyph: "⛨" },
+  { id: "barrage", name: "Barrage", desc: "+2 points on three random towers", color: "#ff4fd8", glyph: "⁂" },
+  { id: "ascension", name: "Rift Surge", desc: "Ascend a random tower one battle level", color: "#3dff8e", glyph: "▲" },
+  { id: "bounty", name: "War Chest", desc: "Instantly bank 500 run gold", color: "#ffe9a8", glyph: "▣" },
+];
+
 export function runShopCost(item: RunShopItem, bought: number) {
   return Math.round(item.cost * Math.pow(item.step ?? 1, bought));
 }
@@ -1357,7 +1394,7 @@ export function crystalBuffText(def: CrystalDef, level: number): string {
   return `+${(Math.round(v * 1000) / 10).toFixed(1).replace(/\.0$/, "")}% ${def.stat}`;
 }
 
-export type EnemyShape = "slime" | "runner" | "knight" | "mage" | "warlord" | "overlord" | "titan";
+export type EnemyShape = "slime" | "runner" | "knight" | "mage" | "warlord" | "overlord" | "titan" | "hound" | "wraith" | "golem" | "leviathan";
 
 export interface EnemyType {
   name: string;
@@ -1511,10 +1548,98 @@ ENEMY_TYPES.push(TITAN);
 /** index of the Void Titan in ENEMY_TYPES, for the wave comp and the cutscene */
 export const TITAN_TYPE = ENEMY_TYPES.length - 1;
 
+/**
+ * THREE NEW RIFT-BORN MONSTERS.
+ *
+ * They are appended after the bosses so every existing type index (and every
+ * saved run / test that pins one) keeps its meaning. Boss detection is a set
+ * lookup rather than "index >= 4", precisely so a late monster can never be
+ * mistaken for a boss.
+ */
+const HOUND: EnemyType = {
+  name: "Rift Hound",
+  title: "Starving Rift Hound",
+  color: "#ff8a3d",
+  accent: "#ffe0b0",
+  shade: "#7a2c00",
+  shape: "hound",
+  hpMul: 1.35,
+  speed: 96,
+  r: 13,
+  armor: 0.05,
+  lives: 1,
+  gold: 6,
+  legs: 4,
+  bobRate: 2.6,
+};
+const WRAITH: EnemyType = {
+  name: "Cinder Wraith",
+  title: "Ashen Cinder Wraith",
+  color: "#b06bff",
+  accent: "#f0dcff",
+  shade: "#3a0f66",
+  shape: "wraith",
+  hpMul: 1.15,
+  speed: 62,
+  r: 14,
+  armor: 0,
+  lives: 2,
+  gold: 7,
+  legs: 0,
+  bobRate: 1.1,
+};
+const GOLEM: EnemyType = {
+  name: "Shard Golem",
+  title: "Riftglass Shard Golem",
+  color: "#6f8bff",
+  accent: "#cfe2ff",
+  shade: "#1d2c66",
+  shape: "golem",
+  hpMul: 2.6,
+  speed: 34,
+  r: 19,
+  armor: 0.5,
+  lives: 3,
+  gold: 11,
+  legs: 2,
+  bobRate: 0.55,
+};
+/** the append slot for the new mobs — never hardcode the index */
+const MOB_APPEND = ENEMY_TYPES.length;
+ENEMY_TYPES.push(HOUND, WRAITH, GOLEM);
+export const HOUND_TYPE = MOB_APPEND;
+/** wraiths are weightless: nothing can slow them down */
+export const WRAITH_TYPE = MOB_APPEND + 1;
+export const GOLEM_TYPE = MOB_APPEND + 2;
 
-/** types 4+ are bosses: they get a cutscene, a health bar and skills */
+/**
+ * THE FOURTH BOSS — Abyss Leviathan. A coiled serpent that drags its own rift
+ * behind it, ships the biggest health pool in the game and cycles the full
+ * nine-skill kit. It leads the deep waves of every mode.
+ */
+const LEVIATHAN: EnemyType = {
+  name: "Abyss Leviathan",
+  title: "Devourer of the Deep Rift",
+  color: "#2ee6c8",
+  accent: "#d6fff7",
+  shade: "#053f39",
+  shape: "leviathan",
+  hpMul: 46,
+  speed: 22,
+  r: 38,
+  armor: 0.34,
+  lives: 12,
+  gold: 120,
+  legs: 0,
+  bobRate: 0.4,
+};
+ENEMY_TYPES.push(LEVIATHAN);
+export const LEVIATHAN_TYPE = ENEMY_TYPES.length - 1;
+
+/** every boss index, in the order they enter the campaign */
+export const BOSS_TYPES = [4, 5, 6, TITAN_TYPE, LEVIATHAN_TYPE];
 export const BOSS_TYPE = 4;
-export const isBossType = (type: number) => type >= BOSS_TYPE;
+export const isBossType = (type: number) => BOSS_TYPES.includes(type);
 
 export type BossSkillId =
   | "summon"
@@ -1563,6 +1688,9 @@ export const BOSS_KITS: Record<number, BossSkillId[]> = {
   5: ["summon", "blink", "ward", "enrage", "nullfield", "devour", "meteor", "chains", "warp"],
   6: ["summon", "blink", "ward", "enrage", "nullfield", "devour", "meteor", "chains", "warp"],
 };
+
+/** the Leviathan's kit is keyed by its real index once the monsters are in */
+BOSS_KITS[LEVIATHAN_TYPE] = ["summon", "blink", "ward", "enrage", "nullfield", "devour", "meteor", "chains", "warp"];
 
 export const bossKit = (type: number): BossSkillId[] => BOSS_KITS[type] || BOSS_KITS[BOSS_TYPE];
 
@@ -1621,15 +1749,20 @@ export function waveComp(round: number): number[] {
   for (let i = 0; i < n; i++) {
     let t = 0;
     const roll = Math.random();
-    if (round >= 7 && roll < 0.18) t = 3;
-    else if (round >= 5 && roll < 0.34) t = 2;
-    else if (round >= 3 && roll < 0.62) t = 1;
+    if (round >= 7 && roll < 0.16) t = 3;
+    else if (round >= 5 && roll < 0.3) t = 2;
+    else if (round >= 3 && roll < 0.54) t = 1;
+    else if (round >= 13 && roll < 0.64) t = GOLEM_TYPE;
+    else if (round >= 11 && roll < 0.76) t = WRAITH_TYPE;
+    else if (round >= 9 && roll < 0.9) t = HOUND_TYPE;
     out.push(t);
   }
   // boss every 4th wave; the roster escalates with the round count
   if (round % 4 === 0) out.push(round >= 32 ? 6 : round >= 16 ? 5 : 4);
   if (round >= 16 && round % 4 === 0) out.push(round >= 32 ? 5 : 4);
   if (round >= 32 && round % 8 === 0) out.push(6);
+  // the Leviathan only surfaces in the deep waves
+  if (round >= 20 && round % 8 === 0) out.push(LEVIATHAN_TYPE);
   return out;
 }
 

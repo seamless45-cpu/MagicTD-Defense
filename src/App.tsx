@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { loadSave, mailReady, persistSave, seasonReady, tasksReady, type SaveData } from "./game/save";
+import { applyFont } from "./game/fonts";
 import { sfx, setSfx, setVolume, setVolumeBoost, initAudio } from "./game/audio";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
 import { LaunchIntro, LoadingScreen, Home, Specials, Guild, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
@@ -20,11 +21,13 @@ type Screen =
   | "mail"
   | "season"
   | "battle"
-  | "endless";
+  | "endless"
+  | "gauntlet";
 
 const MODES = {
   battle: { mode: "battle" as const, title: "BATTLE", rounds: "12 rounds" },
   endless: { mode: "endless" as const, title: "ENDLESS", rounds: "no limit" },
+  gauntlet: { mode: "gauntlet" as const, title: "GAUNTLET", rounds: "roguelite" },
 };
 
 const NAV: { id: Screen; label: string; icon: React.ReactNode }[] = [
@@ -135,6 +138,12 @@ export default function App() {
     setVolumeBoost(save.volBoost);
   }, [save.sfx, save.vol, save.volBoost]);
 
+  // the picked font is applied to the document root (UI + display stacks) and
+  // re-applied whenever the player switches faces in Settings
+  useEffect(() => {
+    applyFont(save.font);
+  }, [save.font]);
+
   // the static splash in index.html is only there until the app has painted
   useEffect(() => {
     document.getElementById("boot-splash")?.remove();
@@ -193,7 +202,7 @@ export default function App() {
     );
   }
 
-  if (screen === "battle" || screen === "endless") {
+  if (screen === "battle" || screen === "endless" || screen === "gauntlet") {
     return (
       <div className={`h-full ${save.reducedMotion ? "calm" : ""} ${save.powerSaver ? "power-saver" : ""}`}>
         <Battle
@@ -243,6 +252,7 @@ export default function App() {
             push={push}
             onBattle={() => setScreen("battle")}
             onEndless={() => setScreen("endless")}
+            onGauntlet={() => setScreen("gauntlet")}
           />
         )}
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}

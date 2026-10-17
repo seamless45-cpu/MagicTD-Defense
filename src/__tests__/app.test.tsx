@@ -364,6 +364,124 @@ describe("Settings", () => {
   });
 });
 
+describe("Font vault", () => {
+  it("offers fifty previewable faces and applies the picked one", async () => {
+    await mountApp();
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => byText("div", "Settings"), "settings modal");
+
+    // every tile carries data-font; the section/grid/count testids do not
+    expect(all("[data-font]").length).toBe(50);
+    expect(document.body.textContent).toContain("Permanent Marker");
+    expect(document.body.textContent).toContain("EDO");
+
+    click(document.querySelector('[data-testid="font-marker"]') as HTMLElement);
+    await waitFor(() => saved().font === "marker", "font persisted");
+    expect(document.documentElement.dataset.magictdFont).toBe("marker");
+    expect(document.documentElement.style.getPropertyValue("--font-ui")).toContain("Permanent Marker");
+
+    click(document.querySelector('[data-testid="font-edo"]') as HTMLElement);
+    await waitFor(() => saved().font === "edo", "font switched");
+    expect(document.documentElement.dataset.magictdFont).toBe("edo");
+
+    // back to the default so the boot screens of later tests stay calm
+    click(document.querySelector('[data-testid="font-rajdhani"]') as HTMLElement);
+    await waitFor(() => saved().font === "rajdhani", "font restored");
+    noErrors();
+  });
+});
+
+describe("Gauntlet mode", () => {
+  it("adds a third home card and starts a boon run", async () => {
+    await mountApp();
+    expect(document.body.textContent).toContain("Gauntlet");
+    startMode("Gauntlet");
+    await waitFor(() => document.querySelector('[data-testid="hud"]'), "battle HUD");
+    // the run is tagged as a gauntlet, with the boon counter live
+    await waitFor(() => byText("em", "gauntlet"), "gauntlet round chip");
+    expect(document.querySelector('[data-testid="gauntlet-boons"]')).toBeTruthy();
+    expect(document.body.textContent).toContain("boons");
+    noErrors();
+  });
+});
+
+describe("Gauntlet content", () => {
+  it("surfaces the Abyss Leviathan and the new mobs in a deep gauntlet wave", async () => {
+    // round 24 guarantees the Leviathan roll (every 8th wave from 20) and every
+    // new mob is unlocked by 13 — so one frame exercises all the new art
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    root.render(
+      <StrictMode>
+        <Battle mode="gauntlet" save={defaultSave()} mutate={() => {}} onExit={() => {}} debugRound={24} />
+      </StrictMode>
+    );
+
+    // the deploy preview lists the new roster before the wave rolls
+    const preview = await waitFor(
+      () => document.querySelector('[data-testid="wave-preview"]') as HTMLElement,
+      "wave preview"
+    );
+    const names = (preview.textContent || "").toUpperCase();
+    expect(names).toContain("RIFT HOUND");
+    expect(names).toContain("CINDER WRAITH");
+    expect(names).toContain("SHARD GOLEM");
+    expect(names).toContain("ABYSS LEVIATHAN");
+
+    // the Leviathan opens the wave with its own portrait card
+    const cut = await waitFor(
+      () => document.querySelector('[data-testid="boss-cutscene"]') as HTMLElement,
+      "leviathan cutscene",
+      20000
+    );
+    const text = (cut.textContent || "").toUpperCase();
+    // several bosses share wave 24 — the card introduces the marquee one
+    expect(text).toContain("ABYSS LEVIATHAN");
+    expect(text).toContain("WAVE 24");
+    // its nine-skill kit is advertised on the card
+    for (const skill of ["Rift Call", "Void Step", "Bulwark", "Blood Frenzy", "Null Field", "Devour", "Meteor Fall", "Rift Chains", "Warp"]) {
+      expect(text, skill).toContain(skill.toUpperCase());
+    }
+
+    // the canvas keeps painting through the new silhouettes
+    await waitFor(() => canvasStats.calls > 0, "canvas painting");
+    noErrors();
+  }, 30000);
+});
+
+describe("Gauntlet boons", () => {
+  it("banks the picked boon and rolls straight into the next wave", async () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    root.render(
+      <StrictMode>
+        <Battle mode="gauntlet" save={defaultSave()} mutate={() => {}} onExit={() => {}} debugBoon />
+      </StrictMode>
+    );
+
+    const overlay = await waitFor(
+      () => document.querySelector('[data-testid="boon-overlay"]') as HTMLElement,
+      "boon overlay"
+    );
+    const cards = Array.from(overlay.querySelectorAll<HTMLElement>('[data-testid^="boon-"]'));
+    expect(cards.length).toBe(3);
+    // every card names its boon and explains the buff
+    cards.forEach((c) => expect((c.textContent || "").length).toBeGreaterThan(10));
+    const picked = cards[0].getAttribute("data-testid")!.replace("boon-", "");
+
+    click(cards[0]);
+    await waitFor(() => !document.querySelector('[data-testid="boon-overlay"]'), "overlay dismissed");
+    // the run is on wave 2 with one boon banked
+    await waitFor(() => document.querySelector('[data-testid="gauntlet-boons"]')?.textContent?.includes("1"), "boon counted");
+    expect(document.body.textContent).toContain("WAVE 2");
+    // the banked stack is still reachable on the next clear
+    expect(picked.length).toBeGreaterThan(0);
+    noErrors();
+  }, 30000);
+});
+
 describe("Crit damage", () => {
   it("shows the merged crit stat and grows it by 8% per tower upgrade", async () => {
     persistSave({

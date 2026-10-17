@@ -11,6 +11,8 @@ import {
   MONTHLY_EVENTS,
   monthlyEventForDate,
   monthlyTiers,
+  GAUNTLET_BOONS,
+  type GauntletBoon,
   GUILD_BY_ID,
   GUILD_QUESTS,
   HERO_BY_ID,
@@ -124,6 +126,8 @@ export interface SaveData {
   season: SeasonState;
   best: number;
   bestEndless: number;
+  /** deepest wave ever reached in the Gauntlet roguelite mode */
+  gauntletBest: number;
   wins: number;
   runs: number;
   /** consecutive Battle victories */
@@ -136,6 +140,8 @@ export interface SaveData {
   volBoost: boolean;
   /** power saving: 30fps cap, minimal effects, no interpolation */
   powerSaver: boolean;
+  /** selected UI font id from the 50-font catalog in game/fonts.ts */
+  font: string;
   /** crystal potions, spent on the crystal vault in the Towers tab */
   potions: number;
   /** crystal id -> level (0 = dormant) */
@@ -226,6 +232,7 @@ export function defaultSave(): SaveData {
     season: emptySeason(),
     best: 0,
     bestEndless: 0,
+    gauntletBest: 0,
     wins: 0,
     runs: 0,
     streak: 0,
@@ -234,6 +241,7 @@ export function defaultSave(): SaveData {
     vol: 0.7,
     volBoost: false,
     powerSaver: false,
+    font: "rajdhani",
     // a new account can immediately ignite one crystal
     potions: 6,
     crystals: {},
@@ -266,6 +274,7 @@ function normalise(s: SaveData): SaveData {
   s.vol = Math.min(1, Math.max(0, Number.isFinite(s.vol) ? s.vol : 0.7));
   s.volBoost = !!s.volBoost;
   s.powerSaver = !!s.powerSaver;
+  s.font = typeof s.font === "string" && s.font ? s.font : "rajdhani";
   s.potions = Math.max(0, Number.isFinite(s.potions) ? Math.round(s.potions) : 0);
   s.crystals = s.crystals && typeof s.crystals === "object" ? s.crystals : {};
   for (const def of CRYSTALS) {
@@ -287,6 +296,9 @@ function normalise(s: SaveData): SaveData {
   s.chips = { ...emptyChips(), ...(s.chips && typeof s.chips === "object" ? s.chips : {}) };
   s.trophies = Math.max(0, Number.isFinite(s.trophies) ? Math.round(s.trophies) : 0);
   s.bestTrophies = Math.max(s.trophies, Number.isFinite(s.bestTrophies) ? Math.round(s.bestTrophies) : 0);
+  s.best = Math.max(0, Math.floor(Number(s.best) || 0));
+  s.bestEndless = Math.max(0, Math.floor(Number(s.bestEndless) || 0));
+  s.gauntletBest = Math.max(0, Math.floor(Number(s.gauntletBest) || 0));
   s.compClaimed = Array.isArray(s.compClaimed) ? s.compClaimed.map(String) : [];
   s.guild = { ...emptyGuild(), ...(s.guild && typeof s.guild === "object" ? s.guild : {}) };
   s.guild.quests = s.guild.quests && typeof s.guild.quests === "object" ? s.guild.quests : {};
@@ -807,6 +819,37 @@ export function applyBattleTrophies(s: SaveData, won: boolean, bonusWin = 0, bon
 
 export function playerLeague(s: SaveData) {
   return leagueFor(s.trophies);
+}
+
+// ---------- gauntlet (roguelite mode) ----------
+/** the three boons offered at the end of a gauntlet wave */
+export function gauntletChoices(): GauntletBoon[] {
+  const pool = [...GAUNTLET_BOONS];
+  const out: GauntletBoon[] = [];
+  while (out.length < 3 && pool.length) {
+    out.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+  }
+  return out;
+}
+
+/** apply one boon to the run's saved stack; mutates the array in place */
+export function takeGauntletBoon(list: GauntletBoon[], boon: GauntletBoon): GauntletBoon[] {
+  list.push(boon);
+  return list;
+}
+
+/** collect a finished gauntlet run: account gold/gems/potions + the new record */
+export function collectGauntlet(s: SaveData, wave: number, boons: number, best: number): { gold: number; gems: number; potions: number; record: boolean } {
+  const record = wave > best;
+  const gold = Math.round(220 + wave * 95 + wave * wave * 14);
+  const gems = Math.floor(wave / 2) + (record ? 40 : 5);
+  const potions = 1 + Math.floor(wave / 4) + boons;
+  s.gold += gold;
+  s.gems += gems;
+  s.potions += potions;
+  if (record) s.gauntletBest = wave;
+  s.runs++;
+  return { gold, gems, potions, record };
 }
 
 // ---------- daily event ----------

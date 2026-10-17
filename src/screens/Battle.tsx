@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, heroLevel } from "../game/save";
+import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, heroLevel } from "../game/save";
 import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import {
@@ -70,6 +70,12 @@ import {
   RUN_SHOP,
   ROMAN,
   crystalBonus,
+  GAUNTLET_BOONS,
+  type GauntletBoon,
+  WRAITH_TYPE,
+  HOUND_TYPE,
+  GOLEM_TYPE,
+  LEVIATHAN_TYPE,
   eventBonus,
   eventForDate,
   trophyDelta,
@@ -264,8 +270,25 @@ interface BT {
   /** Honor Emperor: permanent attack/attack-speed share handed over by honors */
   honorMul: number;
 }
-/** one vertical lightning pillar: a column from the top of the screen to the ground */
-interface Strike { x: number; y: number; life: number; max: number; width: number; color: string; seed: number }
+/**
+ * ONE SKY BOLT. A strike is no longer a straight pillar: it is a segmented
+ * polyline from above the arena down to the impact point, with seeded lateral
+ * jitter and two forked branches, so it reads like real lightning. All the
+ * geometry is derived from `seed`, which means zero per-frame allocation.
+ */
+interface Strike {
+  x: number;
+  y: number;
+  life: number;
+  max: number;
+  width: number;
+  color: string;
+  seed: number;
+  /** how far above the arena the channel starts (px) */
+  top?: number;
+  /** forks drawn off the main channel */
+  forks?: number;
+}
 
 /** a falling rock telegraphed by a boss — the shadow grows, then it lands */
 interface Met {
@@ -415,7 +438,7 @@ interface G {
   mode: GameMode;
   heroId: string;
   t: number;
-  phase: "deploy" | "wave" | "inter" | "won" | "lost";
+  phase: "deploy" | "wave" | "inter" | "boon" | "won" | "lost";
   phaseT: number;
   round: number;
   maxRounds: number;
@@ -442,6 +465,9 @@ interface G {
   waveTotal: number;
   /** enemies spawned so far this wave */
   waveSpawned: number;
+  /** gauntlet: boons banked this run, and the three currently on offer */
+  boons: GauntletBoon[];
+  boonOffer: GauntletBoon[] | null;
   /** what has been bought in the run shop this battle */
   shopBought: Record<string, number>;
   /** fps counter for the performance HUD */
@@ -513,7 +539,30 @@ interface G {
     potions: number;
     /** chip modules from the Items Finding event */
     chips: ChipBag | null;
+    /** gauntlet only: boons taken and whether the run set a new record */
+    gauntlet?: { boons: number; record: boolean };
   };
+}
+
+/**
+ * Canvas text can't inherit a CSS variable, so the picked font is read off the
+ * document root once per mount (and whenever Settings flips it) and cached as a
+ * ready-to-use font shorthand. Falls back to the shipped faces in jsdom or
+ * before fonts.ts has run.
+ */
+let canvasUiFont = "Rajdhani, sans-serif";
+let canvasDispFont = "Bungee, Rajdhani, sans-serif";
+function refreshCanvasFonts() {
+  if (typeof document === "undefined" || typeof getComputedStyle !== "function") return;
+  try {
+    const cs = getComputedStyle(document.documentElement);
+    const ui = (cs.getPropertyValue("--font-ui") || "").trim();
+    const disp = (cs.getPropertyValue("--font-disp") || "").trim();
+    if (ui) canvasUiFont = ui;
+    if (disp) canvasDispFont = disp;
+  } catch {
+    // jsdom with no layout — keep the defaults
+  }
 }
 
 let uidC = 1;
@@ -549,14 +598,16 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     phase: "deploy",
     phaseT: mode === "endless" ? 6 : 7,
     round: Math.max(1, startRound),
-    // endless has no final wave; maxRounds is only used for display
+    // endless and gauntlet have no final wave; maxRounds is display only
     maxRounds: mode === "battle" ? BATTLE_ROUNDS : 0,
-    lives: (mode === "endless" ? 15 : 20) + Math.round(crystal.lives),
+    lives: (mode === "endless" ? 15 : mode === "gauntlet" ? 12 : 20) + Math.round(crystal.lives),
     // small field-kit budget so the run shop is useful from wave 1
     gold: 120,
     bonusAspd: crystal.aspd,
     waveTotal: 0,
     waveSpawned: 0,
+    boons: [],
+    boonOffer: null,
     shopBought: {},
     fps: 60,
     fpsT: 0,
@@ -710,6 +761,7 @@ export default function Battle({
   mutate,
   onExit,
   debugRound,
+  debugBoon,
 }: {
   mode: GameMode;
   save: SaveData;
@@ -717,6 +769,8 @@ export default function Battle({
   onExit: () => void;
   /** start the run on a later round — used by tests to reach boss waves quickly */
   debugRound?: number;
+  /** open the gauntlet boon card immediately — used by tests */
+  debugBoon?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gRef = useRef<G | null>(null);
@@ -740,6 +794,8 @@ export default function Battle({
   const dragRef = useRef<{ kind: "lineup" | "field"; uid: number; x: number; y: number; moved: boolean } | null>(null);
   const shopOpenRef = useRef(shopOpen);
   shopOpenRef.current = shopOpen;
+  /** gauntlet: the sim owns the boon roll, the overlay just calls back into it */
+  const boonPickRef = useRef<(b: GauntletBoon) => void>(() => {});
 
   // Escape (or P) pauses/resumes with the run shop closed — a keyboard-only
   // player never has to aim at the HUD to stop the sim
@@ -757,6 +813,11 @@ export default function Battle({
 
   const toastRef = useRef(push);
   toastRef.current = push;
+
+  // canvas text follows the picked UI/display font
+  useEffect(() => {
+    refreshCanvasFonts();
+  }, [save.font]);
 
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
@@ -798,6 +859,12 @@ export default function Battle({
     ro.observe(wrap);
     const g = newGame(mode, saveRef.current, debugRound);
     gRef.current = g;
+    // test hook: drop straight into the boon card without clearing a wave
+    if (debugBoon && mode === "gauntlet") {
+      g.phase = "boon";
+      g.boonOffer = offerBoons();
+      g.phaseT = 0;
+    }
 
     /**
      * Static arena backdrop, pre-rendered once. Nothing in here animates, so
@@ -1146,13 +1213,79 @@ export default function Battle({
       sfx.wave();
     };
 
+    /**
+     * GAUNTLET BOON: the run's only progression axis. Every cleared wave stops
+     * the sim and offers three of these; the pick is banked in `g.boons` and the
+     * next wave starts immediately (no countdown) so a run never loses rhythm.
+     */
+    const applyBoon = (b: GauntletBoon) => {
+      g.boons.push(b);
+      switch (b.id) {
+        case "power":
+          g.dmgBonus += 0.18;
+          break;
+        case "haste":
+          g.bonusAspd += 0.12;
+          break;
+        case "edge":
+          g.critRate += 0.08;
+          g.critDmg += 0.35;
+          break;
+        case "greed":
+          g.goldMul *= 1.25;
+          break;
+        case "mana":
+          g.spGainMul = Math.min(3, g.spGainMul + 0.2);
+          break;
+        case "ward":
+          g.lives += 4;
+          break;
+        case "barrage": {
+          const live = g.towers.filter((t) => t.cell);
+          for (let i = 0; i < 3 && live.length; i++) {
+            const t = live[Math.floor(Math.random() * live.length)];
+            t.points += 2;
+            const p = cellCenter(t.cell!.c, t.cell!.r);
+            glow(p.x, p.y, b.color, 60, 0.5);
+          }
+          break;
+        }
+        case "ascension": {
+          const live = g.towers.filter((t) => t.cell);
+          if (live.length) {
+            const t = live[Math.floor(Math.random() * live.length)];
+            // battle levels cap at 5 (see run shop); the boon respects the cap
+            t.bLv = Math.min(5, t.bLv + 1);
+            const p = cellCenter(t.cell!.c, t.cell!.r);
+            ring(p.x, p.y, b.color, 70);
+            glow(p.x, p.y, b.color, 90, 0.6);
+          }
+          break;
+        }
+        case "bounty":
+          g.gold += 500;
+          break;
+      }
+      toastRef.current(`${b.glyph} ${b.name} · ${b.desc}`, b.color);
+    };
+
+    const takeBoon = (b: GauntletBoon) => {
+      if (g.phase !== "boon" || g.final) return;
+      applyBoon(b);
+      g.boonOffer = null;
+      g.round++;
+      startWave();
+      sfx.coin();
+    };
+    boonPickRef.current = takeBoon;
+
     const endGame = (won: boolean) => {
       if (g.final) return;
       g.phase = won ? "won" : "lost";
       const rounds = won ? g.maxRounds : Math.max(0, g.round - 1);
       const frags: { id: string; n: number }[] = [];
-      // endless runs pay out on how deep you got
-      const nf = mode === "endless" ? Math.min(12, 1 + Math.floor(rounds / 3)) : won ? 3 : 1;
+      // endless and gauntlet runs pay out on how deep you got
+      const nf = mode !== "battle" ? Math.min(12, 1 + Math.floor(rounds / 3)) : won ? 3 : 1;
       for (let i = 0; i < nf; i++) {
         const id = TOWERS[Math.floor(Math.random() * TOWERS.length)].id;
         const e2 = frags.find((f) => f.id === id);
@@ -1165,11 +1298,24 @@ export default function Battle({
       // whatever is left in the run wallet is paid out on top of the clear bonus
       const wallet = Math.floor(g.gold);
 
+      // GAUNTLET: the payout curve lives in save.ts (collectGauntlet) so the
+      // ledger and the menu best-score agree. Dry-run it against a clone to get
+      // the numbers the results screen shows; collect() applies them for real.
+      let gauntletPay: { gold: number; gems: number; potions: number; record: boolean } | null = null;
+      if (mode === "gauntlet") {
+        gauntletPay = collectGauntlet({ ...saveRef.current }, rounds, g.boons.length, saveRef.current.gauntletBest);
+      }
       const baseGold =
-        (mode === "endless" ? endlessGold : won ? reward(150 + 30 * g.maxRounds) : reward(30 + 10 * rounds)) + wallet;
-      const baseGems = mode === "endless" ? endlessGems : won ? reward(2) : 0;
+        (gauntletPay
+          ? gauntletPay.gold
+          : mode === "endless"
+            ? endlessGold
+            : won
+              ? reward(150 + 30 * g.maxRounds)
+              : reward(30 + 10 * rounds)) + wallet;
+      const baseGems = gauntletPay ? gauntletPay.gems : mode === "endless" ? endlessGems : won ? reward(2) : 0;
       // crystal potions are salvaged from the run: deeper runs and wins pay more
-      const potions = (won ? 3 : 1) + Math.floor(rounds / 3);
+      const potions = gauntletPay ? gauntletPay.potions : (won ? 3 : 1) + Math.floor(rounds / 3);
       // Items Finding drops chip modules on a win (one extra advanced on boss waves)
       const chips: ChipBag | null =
         won && EV_BONUS.chipDrop
@@ -1188,6 +1334,7 @@ export default function Battle({
         trophies,
         potions,
         chips,
+        gauntlet: gauntletPay ? { boons: g.boons.length, record: gauntletPay.record } : undefined,
       };
       if (won) sfx.win();
       else sfx.lose();
@@ -1368,10 +1515,11 @@ export default function Battle({
     };
 
     /**
-     * Lightning Princess: bolts fall *from the sky* onto each enemy as tall
-     * vertical pillars. Nothing travels sideways — a strike column appears, the
-     * ground under it cracks, and the enemy standing there takes the hit. Chain
-     * light then forks between the targets, which is the only lateral bolt left.
+     * Lightning Princess: the whole sky opens AT ONCE. Every target is struck
+     * on the same frame — segmented bolts, forks and damage all land together,
+     * with no per-target stagger — so the ability reads as one storm front
+     * rather than a queue of single strikes. Chain light then forks between the
+     * targets, which is the only travelling bolt left.
      */
     const strikeLightning = (t: BT) => {
       const now = performance.now();
@@ -1383,29 +1531,26 @@ export default function Battle({
       const superbolt = tier1 > 0 && Math.random() < t.def.awk1!.chance[tier1 - 1];
       const judgement = tier2 > 0 && Math.random() < t.def.awk2!.chance[tier2 - 1];
 
-      // ---- one vertical pillar per target ----
-      shown.forEach((e, i) => {
+      // ---- every target is struck on THIS frame, all at once ----
+      shown.forEach((e) => {
         const ep = enemyPos(e);
-        const delay = i * 0.035;
-        // the column: a thick core with two thinner filaments either side, all
-        // drawn top-of-screen down to the ground point, with a bright pool at
-        // the bottom where it lands
         g.strikes.push({
           x: ep.x,
           y: ep.y,
-          life: 0.34 + delay,
-          max: 0.34 + delay,
+          life: 0.42,
+          max: 0.42,
           width: superbolt ? 16 : 10,
           color: superbolt ? "#fff6c4" : "#ffe86b",
           seed: Math.random() * 100,
+          forks: superbolt ? 3 : 2,
         });
         addZone({
           kind: "rift",
           x: ep.x,
           y: ep.y,
           r: superbolt ? 70 : 46,
-          life: 0.36 + delay,
-          max: 0.36 + delay,
+          life: 0.42,
+          max: 0.42,
           dps: 0,
           slow: 0,
           color: superbolt ? "#fff6c4" : "#ffd23f",
@@ -1413,11 +1558,7 @@ export default function Battle({
         sparkAt(ep.x, ep.y, superbolt ? 22 : 12, superbolt ? 300 : 200);
         shock(ep.x, ep.y, superbolt ? "#fff6c4" : "#ffe86b", superbolt ? 90 : 54, 0.32);
         glow(ep.x, ep.y, "#fff2b0", superbolt ? 120 : 70, 0.28);
-        // individual damage lands a beat after its column so the eye follows it
-        schedule(delay, () => {
-          if (e.dead) return;
-          dealDamage(e, dmgBase, { alwaysCrit: judgement, tw: t, color: "#ffe86b" });
-        });
+        if (!e.dead) dealDamage(e, dmgBase, { alwaysCrit: judgement, tw: t, color: "#ffe86b" });
       });
 
       // ---- the storm reads as a single sky event, not ten separate shots ----
@@ -1428,14 +1569,14 @@ export default function Battle({
         // the whole screen dims for a frame as it lands
         const big = shown[Math.floor(Math.random() * shown.length)];
         const bp = enemyPos(big);
-        g.strikes.push({ x: bp.x, y: bp.y, life: 0.5, max: 0.5, width: 30, color: "#ffffff", seed: 7 });
+        g.strikes.push({ x: bp.x, y: bp.y, life: 0.5, max: 0.5, width: 30, color: "#ffffff", seed: 7, forks: 4, top: -120 });
         hitStop(0.05);
         punch(0.4, 0.3);
-        schedule(0.06, () => {
-          if (big.dead) return;
+        // the superbranch lands with the rest of the storm, not after it
+        if (!big.dead) {
           dealDamage(big, dmgBase * t.def.awk1!.mult[tier1 - 1], { alwaysCrit: true, tw: t, color: "#ffffff" });
           addText(bp.x, bp.y - 62, "SUPERBOLT", "#ffffff", 16, true);
-        });
+        }
         sfx.superbolt();
       }
       // ---- restrike awakened: extra columns fall on the same cluster ----
@@ -1446,7 +1587,7 @@ export default function Battle({
         for (let i = 0; i < k; i++) {
           const e = shown[Math.floor(Math.random() * shown.length)];
           const ep = enemyPos(e);
-          g.strikes.push({ x: ep.x, y: ep.y, life: 0.3, max: 0.3, width: 8, color: "#9ff3ff", seed: Math.random() * 100 });
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.36, max: 0.36, width: 8, color: "#9ff3ff", seed: Math.random() * 100, forks: 2 });
           dealDamage(e, dmgBase * 0.8, { tw: t, color: "#9ff3ff" });
         }
       }
@@ -1475,10 +1616,12 @@ export default function Battle({
       const bossShare = tier1 > 0 ? t.def.awk1!.mult[tier1 - 1] : t.def.execBossHp || 0.5;
       const list = g.enemies.filter((e) => !e.dead);
       const shown = list.slice(0, 12);
-      shown.forEach((e, i) => {
+      // every column lands on the same frame: a single crimson storm front
+      shown.forEach((e) => {
         const ep = enemyPos(e);
-        g.strikes.push({ x: ep.x, y: ep.y, life: 0.4 + i * 0.02, max: 0.4 + i * 0.02, width: isBossType(e.type) ? 22 : 12, color: "#ff2b3d", seed: Math.random() * 100 });
-        g.strikes.push({ x: ep.x, y: ep.y, life: 0.26 + i * 0.02, max: 0.26 + i * 0.02, width: isBossType(e.type) ? 9 : 4, color: "#ffffff", seed: Math.random() * 100 });
+        const boss = isBossType(e.type);
+        g.strikes.push({ x: ep.x, y: ep.y, life: 0.46, max: 0.46, width: boss ? 22 : 12, color: "#ff2b3d", seed: Math.random() * 100, forks: boss ? 3 : 2 });
+        g.strikes.push({ x: ep.x, y: ep.y, life: 0.32, max: 0.32, width: boss ? 9 : 4, color: "#ffffff", seed: Math.random() * 100 });
       });
       addZone({ kind: "rift", x: shown[0] ? enemyPos(shown[0]).x : W / 2, y: H * 0.55, r: 150, life: 0.4, max: 0.4, dps: 0, slow: 0, color: "#ff2b3d" });
       flash("#ff2b3d", 0.2);
@@ -1929,9 +2072,8 @@ export default function Battle({
             const ep2 = enemyPos(e);
             g.strikes.push({ x: ep2.x, y: ep2.y, life: 0.34, max: 0.34, width: 9, color: "#ffe86b", seed: (i * 23) % 91 });
             addZone({ kind: "rift", x: ep2.x, y: ep2.y, r: 44, life: 0.3, max: 0.3, dps: 0, slow: 0, color: "#ffe86b" });
-            schedule(i * 0.03, () => {
-              if (!e.dead) dealDamage(e, dmg, { tw: t, color: "#ffe86b" });
-            });
+            // all six columns and their damage resolve on the same frame
+            if (!e.dead) dealDamage(e, dmg, { tw: t, color: "#ffe86b" });
           });
           for (let k = 1; k < Math.min(picks.length, links + 1); k++) {
             const a2 = enemyPos(picks[k - 1]);
@@ -2988,56 +3130,54 @@ export default function Battle({
         return;
       }
 
-      // ===== STORM SOVEREIGN: a bolt front walks the lane and marks everything =====
+      // ===== STORM SOVEREIGN: a single instantaneous sky fracture =====
+      // The old cast walked a bolt front down the lane over 1.5s and finished
+      // with a delayed hammer. Now the whole lane is struck on ONE frame: every
+      // column appears together, every mark/stun/damage lands together, and the
+      // sovereign strike resolves in the same instant.
       const bolts = 8 + Math.round(lv * 1.6);
       const chains = 2 + Math.floor(lv / 2);
       const dmg = (150 + 42 * g.round) * power;
+      const now2 = performance.now();
       for (let i = 0; i < bolts; i++) {
-        schedule(0.25 + i * (1.5 / bolts), () => {
-          const d = ((i + 0.5) / bolts) * PATH_LEN;
-          const p = pathPos(d);
-          const now2 = performance.now();
-          const hit = alive().filter((e) => {
-            const ep = enemyPos(e);
-            return Math.hypot(ep.x - p.x, ep.y - p.y) <= 110;
-          });
-          hit.slice(0, chains + 4).forEach((e) => {
-            e.stun = Math.max(e.stun, 0.5);
-            e.mark = Math.max(e.mark, 6);
-            dealDamage(e, dmg, { alwaysCrit: true, color: hero.color });
-          });
-          for (let k = 1; k < Math.min(hit.length, chains + 1); k++) {
-            const a = enemyPos(hit[k - 1]);
-            const b = enemyPos(hit[k]);
-            if (g.bolts.length < 44) g.bolts.push(randBolt(a.x, a.y, b.x, b.y, hero.color2, 2, 0.26, now2));
-          }
-          // the bolt front falls straight out of the sky, one pillar per step
-          g.strikes.push({ x: p.x, y: p.y, life: 0.3, max: 0.3, width: 8, color: hero.color, seed: (i * 17) % 90 });
-          shock(p.x, p.y, hero.color, 34, 0.5);
-          glow(p.x, p.y, hero.color2, 70, 0.35);
-          stars(p.x, p.y, "#ffffff", 4, 40);
-          g.shake = fxShake(4);
-        });
-      }
-      schedule(1.8, () => {
-        // sovereign strike: one huge pillar on the densest cluster
-        const sp = hotspot();
-        flash(hero.color2, 0.26);
-        g.shake = fxShake(14);
-        punch(0.9, 0.7);
-        hitStop(0.08);
-        for (let i = 0; i < 3; i++) shock(sp.x, sp.y, i % 2 ? hero.color : "#ffffff", 34 + i * 22, 0.7);
-        glow(sp.x, sp.y, hero.color2, 170, 0.7);
-        g.strikes.push({ x: sp.x, y: sp.y, life: 0.62, max: 0.62, width: 26, color: "#fff6c4", seed: 3 });
-        g.strikes.push({ x: sp.x, y: sp.y, life: 0.5, max: 0.5, width: 14, color: "#ffffff", seed: 11 });
-        alive().forEach((e) => {
+        const d = ((i + 0.5) / bolts) * PATH_LEN;
+        const p = pathPos(d);
+        const hit = alive().filter((e) => {
           const ep = enemyPos(e);
-          if (Math.hypot(ep.x - sp.x, ep.y - sp.y) > 200) return;
-          e.mark = Math.max(e.mark, 6);
-          dealDamage(e, dmg * 2.4, { alwaysCrit: true, color: hero.color2 });
+          return Math.hypot(ep.x - p.x, ep.y - p.y) <= 110;
         });
-        addText(sp.x, sp.y - 70, "SOVEREIGN STRIKE", hero.color2, 22, true);
+        hit.slice(0, chains + 4).forEach((e) => {
+          e.stun = Math.max(e.stun, 0.5);
+          e.mark = Math.max(e.mark, 6);
+          dealDamage(e, dmg, { alwaysCrit: true, color: hero.color });
+        });
+        for (let k = 1; k < Math.min(hit.length, chains + 1); k++) {
+          const a = enemyPos(hit[k - 1]);
+          const b = enemyPos(hit[k]);
+          if (g.bolts.length < 44) g.bolts.push(randBolt(a.x, a.y, b.x, b.y, hero.color2, 2, 0.26, now2));
+        }
+        g.strikes.push({ x: p.x, y: p.y, life: 0.42, max: 0.42, width: 9, color: hero.color, seed: (i * 17) % 90, forks: 2 });
+        shock(p.x, p.y, hero.color, 34, 0.5);
+        glow(p.x, p.y, hero.color2, 70, 0.35);
+        stars(p.x, p.y, "#ffffff", 4, 40);
+      }
+      // sovereign strike: the densest cluster takes a colossal bolt instantly
+      const sp = hotspot();
+      flash(hero.color2, 0.26);
+      g.shake = fxShake(14);
+      punch(0.9, 0.7);
+      hitStop(0.08);
+      for (let i = 0; i < 3; i++) shock(sp.x, sp.y, i % 2 ? hero.color : "#ffffff", 34 + i * 22, 0.7);
+      glow(sp.x, sp.y, hero.color2, 170, 0.7);
+      g.strikes.push({ x: sp.x, y: sp.y, life: 0.66, max: 0.66, width: 26, color: "#fff6c4", seed: 3, forks: 4, top: -140 });
+      g.strikes.push({ x: sp.x, y: sp.y, life: 0.5, max: 0.5, width: 14, color: "#ffffff", seed: 11, forks: 2, top: -140 });
+      alive().forEach((e) => {
+        const ep = enemyPos(e);
+        if (Math.hypot(ep.x - sp.x, ep.y - sp.y) > 200) return;
+        e.mark = Math.max(e.mark, 6);
+        dealDamage(e, dmg * 2.4, { alwaysCrit: true, color: hero.color2 });
       });
+      addText(sp.x, sp.y - 70, "SOVEREIGN STRIKE", hero.color2, 22, true);
       addText(W / 2, H / 2 - 110, "STORM SOVEREIGN", hero.color, 30, true);
     };
     heroRef.current = hero;
@@ -3225,6 +3365,12 @@ export default function Battle({
         return;
       }
 
+      // the gauntlet boon card holds the sim: nothing may move behind the pick
+      if (g.phase === "boon") {
+        updateFx(dt);
+        return;
+      }
+
       if (g.bossCast) {
         g.bossCast.t -= dt;
         if (g.bossCast.t <= 0) g.bossCast = null;
@@ -3280,10 +3426,18 @@ export default function Battle({
             encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
             imprisonT: 0, bleedT: 0, bleedTick: 0, bleedPct: 0,
           });
-          // a boss walks in with a cutscene — the sim holds until it finishes
+          // a boss walks in with a cutscene — the sim holds until it finishes.
+          // When a wave carries several bosses the card introduces the marquee
+          // one (highest hpMul), so the Abyss Leviathan is never upstaged by a
+          // Warlord that happened to spawn a frame earlier.
           if (boss && g.bossIntro !== g.round) {
             g.bossIntro = g.round;
-            g.cut = { type: s.type, name: et.name, sub: `${mode === "endless" ? "WAVE" : "ROUND"} ${g.round} · BOSS INCOMING`, t: 3.4, total: 3.4 };
+            let marquee = s.type;
+            for (const q of g.spawnQ) {
+              if (isBossType(q.type) && ENEMY_TYPES[q.type].hpMul > ENEMY_TYPES[marquee].hpMul) marquee = q.type;
+            }
+            const met = ENEMY_TYPES[marquee];
+            g.cut = { type: marquee, name: met.name, sub: `${mode === "battle" ? "ROUND" : "WAVE"} ${g.round} · BOSS INCOMING`, t: 3.4, total: 3.4 };
             g.shake = fxShake(10);
             sfx.boss();
           }
@@ -3294,8 +3448,31 @@ export default function Battle({
           g.wavesCleared++;
           // gold + gem payouts were buffed 40% (REWARD_MUL) in the balance patch
           g.gold += runGold(reward(bonus / 2) * g.goldMul);
-          if (g.mode !== "endless" && g.round >= g.maxRounds) {
+          if (g.mode === "battle" && g.round >= g.maxRounds) {
             endGame(true);
+          } else if (mode === "gauntlet") {
+            // the run is never "won": it ends when the line breaks. Every clear
+            // is a boon beat, and the next wave rolls straight out of the pick.
+            g.phase = "boon";
+            g.boonOffer = offerBoons();
+            g.phaseT = 0;
+            if (saveRef.current.fastWaves) {
+              // fast waves skips the pause and auto-picks a random boon — the
+              // effect must still be applied or the run silently loses power
+              g.phase = "inter";
+              g.phaseT = 0.6;
+              g.boonOffer = null;
+              applyBoon(GAUNTLET_BOONS[Math.floor(Math.random() * GAUNTLET_BOONS.length)]);
+            }
+            sfx.coin();
+            toastRef.current(`Wave ${g.round} cleared · choose a boon`, "#3dff8e");
+            if (g.round % 5 === 0) {
+              mutateRef.current((s) => {
+                s.tokens += 1;
+              });
+              sfx.token();
+              toastRef.current(`Gauntlet wave ${g.round}: +1 Magic Token`, "#ff4fd8");
+            }
           } else {
             g.phase = "inter";
             g.phaseT = saveRef.current.fastWaves ? 1.2 : mode === "endless" ? 3 : 3.5;
@@ -3598,6 +3775,11 @@ export default function Battle({
           if (e.bleedT <= 0) e.bleedPct = 0;
         }
         if (e.dead) continue;
+        // Cinder Wraiths are weightless: chill and slow slide right off them
+        if (e.type === WRAITH_TYPE) {
+          e.slow = 0;
+          e.slowT = 0;
+        }
         const slowMul = e.slowT > 0 ? 1 - e.slow : 1;
         if (e.frozen > 0) e.frozen -= dt;
         else if (e.stun > 0) e.stun -= dt;
@@ -4150,7 +4332,7 @@ export default function Battle({
       ctx.restore();
 
       ctx.globalAlpha = 0.85;
-      ctx.font = "800 11px Rajdhani, sans-serif";
+      ctx.font = `800 11px ${canvasUiFont}`;
       ctx.textAlign = "center";
       ctx.lineWidth = 3;
       ctx.strokeStyle = "rgba(0,0,0,0.8)";
@@ -5454,7 +5636,7 @@ export default function Battle({
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.fillStyle = pc;
-      ctx.font = `700 ${isMax ? 12 : 14}px Rajdhani, sans-serif`;
+      ctx.font = `700 ${isMax ? 12 : 14}px ${canvasUiFont}`;
       ctx.textAlign = "center";
       ctx.fillText(isMax ? "MAX" : String(t.points), 0, 5);
       ctx.restore();
@@ -5463,7 +5645,7 @@ export default function Battle({
         ctx.fillStyle = "#35e0ff";
         ctx.fillRect(x - 30 + i * 5, y - 40, 3, 3);
       }
-      ctx.font = "700 11px Rajdhani, sans-serif";
+      ctx.font = `700 11px ${canvasUiFont}`;
       ctx.textAlign = "center";
       ctx.fillStyle = "rgba(234,230,255,0.85)";
       ctx.fillText(`${t.def.name} · Lv${t.bLv}`, x, y - 46);
@@ -5897,6 +6079,244 @@ export default function Battle({
         ctx.shadowBlur = 12;
         ctx.fillRect(-R * 0.22, -R * 1.05, R * 0.44, R * 0.1);
         ctx.shadowBlur = 0;
+      } else if (et.shape === "hound") {
+        // Rift Hound: a lean quadruped with a spiked spine and a burning maw
+        ctx.save();
+        ctx.scale(flip, 1);
+        // four legs, front and back pairs out of phase
+        ctx.strokeStyle = et.shade;
+        ctx.lineWidth = 3.2;
+        ctx.lineCap = "round";
+        for (let i = 0; i < 4; i++) {
+          const front = i < 2;
+          const lx = (front ? R * 0.55 : -R * 0.6) + (i % 2 ? R * 0.22 : -R * 0.22);
+          const sw = Math.sin(cycle + i * 1.7) * R * 0.32;
+          ctx.beginPath();
+          ctx.moveTo(lx, R * 0.35);
+          ctx.lineTo(lx + sw, R * 0.92);
+          ctx.stroke();
+        }
+        ctx.lineCap = "butt";
+        // barrel body
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.ellipse(0, 0, R * 0.95, R * 0.52, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        // spiked spine
+        ctx.fillStyle = et.accent;
+        for (let i = -1; i <= 1; i++) {
+          ctx.beginPath();
+          ctx.moveTo(i * R * 0.4 - R * 0.1, -R * 0.42);
+          ctx.lineTo(i * R * 0.4, -R * 0.92);
+          ctx.lineTo(i * R * 0.4 + R * 0.12, -R * 0.42);
+          ctx.closePath();
+          ctx.fill();
+        }
+        // head + jaw
+        ctx.fillStyle = et.color;
+        ctx.beginPath();
+        ctx.ellipse(R * 0.92, -R * 0.18, R * 0.36, R * 0.28, -0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#2a0d00";
+        ctx.beginPath();
+        ctx.moveTo(R * 1.16, -R * 0.05);
+        ctx.lineTo(R * 1.42, R * 0.08);
+        ctx.lineTo(R * 1.12, R * 0.2);
+        ctx.closePath();
+        ctx.fill();
+        // ember eye
+        ctx.fillStyle = "#fff6c4";
+        ctx.shadowColor = "#ff8a3d";
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(R * 0.98, -R * 0.26, R * 0.1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      } else if (et.shape === "wraith") {
+        // Cinder Wraith: a hooded ember ghost trailing a tattered hem
+        const float = Math.sin(cycle * 0.8) * 3;
+        ctx.translate(0, float);
+        // ghostly aura
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = et.color;
+        ctx.beginPath();
+        ctx.ellipse(0, R * 0.1, R * 1.15, R * 1.25, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        // robe
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.moveTo(0, -R * 0.9);
+        ctx.quadraticCurveTo(R * 0.75, -R * 0.35, R * 0.62, R * 0.55);
+        // ragged hem
+        for (let i = 0; i < 5; i++) {
+          const t2 = 1 - i / 4;
+          const hx = -R * 0.62 + t2 * R * 1.24;
+          const hem = R * (0.75 + Math.sin(cycle * 1.4 + i) * 0.16);
+          ctx.quadraticCurveTo(hx - R * 0.12, hem, hx - R * 0.2, R * 0.42);
+        }
+        ctx.quadraticCurveTo(-R * 0.75, -R * 0.35, 0, -R * 0.9);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // cowl
+        ctx.fillStyle = "#1a0730";
+        ctx.beginPath();
+        ctx.ellipse(0, -R * 0.52, R * 0.36, R * 0.4, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // ember eyes
+        ctx.fillStyle = et.accent;
+        ctx.shadowColor = et.color;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(-R * 0.13, -R * 0.52, R * 0.07, 0, Math.PI * 2);
+        ctx.arc(R * 0.13, -R * 0.52, R * 0.07, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // rising cinders
+        for (let i = 0; i < 3; i++) {
+          const t3 = ((cycle * 0.25 + i / 3) % 1);
+          ctx.globalAlpha = 0.6 * (1 - t3);
+          ctx.fillStyle = et.color;
+          ctx.beginPath();
+          ctx.arc((i - 1) * R * 0.35 + Math.sin(cycle + i) * 3, R * 0.4 - t3 * R * 1.1, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      } else if (et.shape === "golem") {
+        // Shard Golem: a blocky riftglass brute with a glowing core
+        legs(R * 0.66, R * 0.4, R * 0.5, 7);
+        // chunky torso of stacked slabs
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.roundRect(-R * 0.78, -R * 0.7, R * 1.56, R * 1.4, 7);
+        ctx.fill();
+        ctx.stroke();
+        ctx.strokeStyle = et.shade;
+        ctx.lineWidth = 2.2;
+        for (let i = 0; i < 3; i++) {
+          ctx.beginPath();
+          ctx.moveTo(-R * 0.7, -R * 0.4 + i * R * 0.38);
+          ctx.lineTo(R * 0.7, -R * 0.4 + i * R * 0.38);
+          ctx.stroke();
+        }
+        // crystal core
+        const cg = ctx.createRadialGradient(0, 0, 1, 0, 0, R * 0.5);
+        cg.addColorStop(0, "#ffffff");
+        cg.addColorStop(0.45, et.accent);
+        cg.addColorStop(1, "transparent");
+        ctx.fillStyle = cg;
+        ctx.beginPath();
+        ctx.arc(0, 0, R * 0.5 * (1 + Math.sin(cycle * 2) * 0.07), 0, Math.PI * 2);
+        ctx.fill();
+        // fists
+        ctx.fillStyle = et.shade;
+        [-1, 1].forEach((sgn) => {
+          ctx.beginPath();
+          ctx.roundRect(sgn < 0 ? -R * 1.08 : R * 0.74, R * 0.1, R * 0.34, R * 0.4, 6);
+          ctx.fill();
+        });
+        // crystal shards jutting out of the shoulders
+        ctx.fillStyle = et.accent;
+        [-1, 1].forEach((sgn) => {
+          ctx.beginPath();
+          ctx.moveTo(sgn * R * 0.66, -R * 0.72);
+          ctx.lineTo(sgn * R * 0.86, -R * 1.18);
+          ctx.lineTo(sgn * R * 0.46, -R * 0.78);
+          ctx.closePath();
+          ctx.fill();
+        });
+        // visor
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowColor = et.accent;
+        ctx.shadowBlur = 10;
+        ctx.fillRect(-R * 0.32, -R * 0.6, R * 0.64, R * 0.12);
+        ctx.shadowBlur = 0;
+      } else if (et.shape === "leviathan") {
+        // Abyss Leviathan: a coiled serpent rising out of its own rift
+        const coil = cycle * 0.6;
+        // rift pool under it
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < 3; i++) {
+          const rr = R * (1.25 + i * 0.28);
+          ctx.globalAlpha = 0.16 - i * 0.04;
+          ctx.strokeStyle = et.color;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.ellipse(0, R * 0.85, rr, rr * 0.36, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1;
+        // three coils with a serpentine sway
+        ctx.strokeStyle = et.shade;
+        ctx.lineCap = "round";
+        for (let c = 2; c >= 0; c--) {
+          const cr = R * (0.62 - c * 0.16);
+          const cy = R * (0.5 - c * 0.34);
+          ctx.lineWidth = cr * 1.5;
+          ctx.beginPath();
+          ctx.ellipse(0, cy, cr * 1.35, cr * 0.5, Math.sin(coil + c) * 0.16, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.lineCap = "butt";
+        // neck + head
+        const sway = Math.sin(coil) * R * 0.12;
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.34, R * 0.2);
+        ctx.quadraticCurveTo(-R * 0.2 + sway, -R * 0.7, sway - R * 0.18, -R * 0.95);
+        ctx.lineTo(sway + R * 0.18, -R * 0.95);
+        ctx.quadraticCurveTo(R * 0.2 + sway, -R * 0.7, R * 0.34, R * 0.2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // maw
+        ctx.fillStyle = et.color;
+        ctx.beginPath();
+        ctx.ellipse(sway, -R * 1.02, R * 0.34, R * 0.24, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = "#03211f";
+        ctx.beginPath();
+        ctx.moveTo(sway - R * 0.26, -R * 1.02);
+        ctx.lineTo(sway + R * 0.26, -R * 1.02);
+        ctx.lineTo(sway, -R * 0.78);
+        ctx.closePath();
+        ctx.fill();
+        // teeth
+        ctx.fillStyle = "#eafffb";
+        for (let i = -2; i <= 2; i++) {
+          ctx.beginPath();
+          ctx.moveTo(sway + i * R * 0.09, -R * 1.0);
+          ctx.lineTo(sway + i * R * 0.09 + R * 0.035, -R * 0.86);
+          ctx.lineTo(sway + i * R * 0.09 + R * 0.07, -R * 1.0);
+          ctx.closePath();
+          ctx.fill();
+        }
+        // glowing eyes
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowColor = et.color;
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.ellipse(sway - R * 0.14, -R * 1.1, R * 0.05, R * 0.03, 0, 0, Math.PI * 2);
+        ctx.ellipse(sway + R * 0.14, -R * 1.1, R * 0.05, R * 0.03, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        // dorsal fins
+        ctx.fillStyle = et.accent;
+        for (let i = 0; i < 4; i++) {
+          const fy = -R * 0.2 - i * R * 0.18;
+          ctx.beginPath();
+          ctx.moveTo(-R * 0.2, fy);
+          ctx.lineTo(-R * 0.5 - i * 2, fy - R * 0.1);
+          ctx.lineTo(-R * 0.2, fy + R * 0.1);
+          ctx.closePath();
+          ctx.fill();
+        }
       } else {
         // overlord: a levitating rift sovereign — cloak, crown, orbiting shards
         const float = Math.sin(cycle * 0.5) * 3.5;
@@ -6787,59 +7207,94 @@ export default function Battle({
       // side filaments are the expensive half: past the first ten pillars (or
       // whenever the frame governor is throttling) only the white core spine is
       // drawn, which still reads as a strike from across the arena.
+      // ---------- segmented sky bolts ----------
+      // Every strike is a polyline: a main channel with seeded lateral jitter
+      // plus two forks, drawn glow -> colour -> white core. All geometry comes
+      // from the strike seed, so a bolt does not shimmer randomly frame to
+      // frame. Demon Execution can put a dozen of these on screen at once, so
+      // only the first ten (and only when the frame governor allows) get the
+      // halo and the forks; the rest draw a single cheap white channel.
       let pillarIdx = 0;
+      const hash = (n: number) => {
+        const v = Math.sin(n) * 43758.5453;
+        return v - Math.floor(v);
+      };
       for (const st of g.strikes) {
         const k = Math.max(0, Math.min(1, st.life / st.max)); // 1 -> 0
-        const punch2 = 1 - k; // 0 -> 1 as the column fades
-        const top = -30;
-        const w = st.width * (0.75 + k * 0.5);
+        const top = st.top ?? -70;
+        const w = st.width * (0.72 + k * 0.5);
         const detailed = pillarIdx++ < 10 && fxQ() >= 0.7;
+        const segs = 12;
+        const span = Math.max(40, st.y - top);
+        const sway = w * 1.25;
+        const channel = (salt: number, spread: number, from: number, to: number) => {
+          const out: { x: number; y: number }[] = [];
+          for (let i = 0; i <= segs; i++) {
+            const t = i / segs;
+            // taper the wobble at both ends so the bolt is anchored
+            const env = Math.sin(Math.PI * t) * 0.9 + 0.1;
+            const jx = (hash(st.seed * 3.7 + i * 1.93 + salt) - 0.5) * 2 * spread * env;
+            out.push({ x: st.x + jx, y: top + span * (from + (to - from) * t) });
+          }
+          return out;
+        };
+        const stroke = (pts: { x: number; y: number }[], width: number, color: string, alpha: number) => {
+          if (pts.length < 2) return;
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = width;
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+          ctx.stroke();
+        };
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
-        // wide outer halo
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        const main = channel(0, sway, 0, 1);
         if (detailed) {
-          const halo = ctx.createLinearGradient(st.x - w * 3, 0, st.x + w * 3, 0);
-          halo.addColorStop(0, "transparent");
-          halo.addColorStop(0.5, st.color + "66");
-          halo.addColorStop(1, "transparent");
-          ctx.globalAlpha = 0.5 + k * 0.5;
-          ctx.fillStyle = halo;
-          ctx.fillRect(st.x - w * 3, top, w * 6, st.y - top);
-        }
-        // the core column: three jagged filaments sharing one spine
-        for (let f = detailed ? -1 : 0; f <= 1; f++) {
-          const segments = 7;
-          const jitter = (st.seed + f * 13) % 7;
-          ctx.globalAlpha = (f === 0 ? 0.95 : 0.45) * (0.4 + k * 0.6);
-          ctx.strokeStyle = f === 0 ? "#ffffff" : st.color;
-          ctx.lineWidth = f === 0 ? w : Math.max(1.5, w * 0.45);
-          ctx.lineCap = "round";
-          ctx.beginPath();
-          ctx.moveTo(st.x + f * 2, top);
-          for (let i = 0; i <= segments; i++) {
-            const t2 = i / segments;
-            const y2 = top + (st.y - top) * t2;
-            const wob = Math.sin((i + jitter) * 2.7 + punch2 * 5) * (w * 0.7) * (1 - t2 * 0.35) + f * w * 0.5;
-            ctx.lineTo(st.x + wob, y2);
+          // wide halo first, then the coloured sheath, then the white core
+          stroke(main, w * 4.2, st.color, 0.16 * k);
+          stroke(main, w * 1.9, st.color, 0.5 * k);
+          // forks: two shorter channels peeling off the main line
+          const forks = st.forks ?? 2;
+          for (let f = 0; f < forks; f++) {
+            const at = 0.28 + hash(st.seed * 1.7 + f * 2.3) * 0.42;
+            const dir = f % 2 === 0 ? 1 : -1;
+            const anchor = main[Math.round(at * segs)];
+            const forkPts: { x: number; y: number }[] = [];
+            const len = 3 + Math.floor(hash(st.seed + f) * 3);
+            for (let i = 0; i <= len; i++) {
+              const t = i / len;
+              forkPts.push({
+                x: anchor.x + dir * (t * w * 5 + (hash(st.seed * 9 + f * 3 + i) - 0.5) * w * 2.4),
+                y: anchor.y + t * (span * 0.22) + (hash(st.seed * 5 + i + f) - 0.5) * 16,
+              });
+            }
+            stroke(forkPts, Math.max(0.8, w * 0.6), st.color, 0.34 * k);
+            stroke(forkPts, Math.max(0.6, w * 0.26), "#ffffff", 0.55 * k);
           }
-          ctx.stroke();
         }
-        // the impact pool where the column meets the ground (a flat disc when
-        // the pillar is on the cheap path)
-        ctx.globalAlpha = 0.6 * (0.35 + k * 0.65);
+        stroke(main, Math.max(1.2, w * (detailed ? 0.55 : 0.8)), "#ffffff", 0.9 * k);
+        // the impact pool where the channel meets the ground
         if (detailed) {
           const pool = ctx.createRadialGradient(st.x, st.y, 1, st.x, st.y, w * 4.5);
           pool.addColorStop(0, "#ffffff");
           pool.addColorStop(0.4, st.color);
           pool.addColorStop(1, "transparent");
+          ctx.globalAlpha = 0.6 * (0.35 + k * 0.65);
           ctx.fillStyle = pool;
+          ctx.beginPath();
+          ctx.ellipse(st.x, st.y, w * 4.5, w * 2.1, 0, 0, Math.PI * 2);
+          ctx.fill();
         } else {
-          ctx.globalAlpha *= 0.5;
+          ctx.globalAlpha = 0.3 * k;
           ctx.fillStyle = st.color;
+          ctx.beginPath();
+          ctx.ellipse(st.x, st.y, w * 3, w * 1.4, 0, 0, Math.PI * 2);
+          ctx.fill();
         }
-        ctx.beginPath();
-        ctx.ellipse(st.x, st.y, w * 4.5, w * 2.1, 0, 0, Math.PI * 2);
-        ctx.fill();
         ctx.restore();
       }
 
@@ -7044,7 +7499,7 @@ export default function Battle({
         ctx.translate(l.x, l.y - 46 - ease * 26);
         ctx.scale(pop, pop);
         ctx.textAlign = "center";
-        ctx.font = "800 15px Rajdhani, sans-serif";
+        ctx.font = `800 15px ${canvasUiFont}`;
         ctx.lineWidth = 4;
         ctx.strokeStyle = "rgba(0,0,0,0.85)";
         ctx.strokeText(l.label, 0, 0);
@@ -7089,7 +7544,7 @@ export default function Battle({
             ctx.globalAlpha = al;
           }
           // setting ctx.font re-parses the font string, so only do it on change
-          const font = `700 ${t.size}px Bungee, Rajdhani, sans-serif`;
+          const font = `700 ${t.size}px ${canvasDispFont}`;
           if (font !== lastFont) {
             ctx.font = font;
             lastFont = font;
@@ -7108,7 +7563,7 @@ export default function Battle({
           ctx.globalAlpha = al;
           continue;
         }
-        ctx.font = `700 ${t.size}px Rajdhani, sans-serif`;
+        ctx.font = `700 ${t.size}px ${canvasUiFont}`;
         ctx.fillStyle = t.color;
         ctx.fillText(t.txt, t.x, ty);
       }
@@ -7391,7 +7846,18 @@ export default function Battle({
       const n = f.chips?.[k] || 0;
       if (n > 0) rows.push({ icon: <ChipIcon id={k} size={16} />, label: k + " chip modules", val: "x" + n, color: "#8fe9ff" });
     });
-    if (mode === "endless" && f.rounds) rows.push({ icon: <span className="text-[14px]">~</span>, label: "Waves survived", val: String(f.rounds), color: "#ff9be9" });
+    if (mode !== "battle" && f.rounds)
+      rows.push({
+        icon: <span className="text-[14px]">~</span>,
+        label: "Waves survived",
+        val: String(f.rounds),
+        color: mode === "gauntlet" ? "#3dff8e" : "#ff9be9",
+      });
+    if (f.gauntlet) {
+      rows.push({ icon: <span className="text-[14px]">✦</span>, label: "Boons taken", val: String(f.gauntlet.boons), color: "#b06bff" });
+      if (f.gauntlet.record)
+        rows.push({ icon: <span className="text-[14px]">★</span>, label: "New gauntlet record", val: "BEST", color: "#ffd23f" });
+    }
     if (mode === "battle")
       rows.push({
         icon: <TrophyIcon size={16} />,
@@ -7417,6 +7883,7 @@ export default function Battle({
       });
       s.runs++;
       if (mode === "endless") s.bestEndless = Math.max(s.bestEndless, f.rounds);
+      else if (mode === "gauntlet") s.gauntletBest = Math.max(s.gauntletBest, f.rounds);
       else s.best = Math.max(s.best, f.rounds);
       if (f.won) s.wins++;
       if (f.chips) addChips(s, f.chips);
@@ -7502,10 +7969,22 @@ export default function Battle({
             </div>
 
             <div className="hud-group" data-testid="hud-round">
-              <span className="hud-pill" style={{ color: mode === "endless" ? "#ff9be9" : "#ffcf4d" }}>
-                <b className="num">{mode === "endless" ? "W" + g.round : Math.min(g.round, maxRounds) + "/" + maxRounds}</b>
-                <em>{mode === "endless" ? "endless" : "round"}</em>
+              <span
+                className="hud-pill"
+                style={{ color: mode === "gauntlet" ? "#3dff8e" : mode === "endless" ? "#ff9be9" : "#ffcf4d" }}
+                title={mode === "gauntlet" ? `Gauntlet · best wave ${save.gauntletBest}` : undefined}
+              >
+                <b className="num">
+                  {mode === "battle" ? Math.min(g.round, maxRounds) + "/" + maxRounds : "W" + g.round}
+                </b>
+                <em>{mode === "battle" ? "round" : mode === "gauntlet" ? "gauntlet" : "endless"}</em>
               </span>
+              {mode === "gauntlet" && (
+                <span className="hud-pill hud-dim" style={{ color: "#3dff8e" }} data-testid="gauntlet-boons" title="Boons taken this run">
+                  <b className="num">{g.boons.length}</b>
+                  <em>boons</em>
+                </span>
+              )}
               <span
                 className="hud-pill hud-crit num-pop"
                 key={"crit-" + g.crits}
@@ -7566,8 +8045,10 @@ export default function Battle({
       {g && !g.final && (
         <div className="wave-strip" data-testid="wave-strip">
           <span className="wave-strip-label">
-            {mode === "endless" ? "WAVE" : "ROUND"} <b className="num">{g.round}</b>
-            {g.phase === "wave" ? (
+            {mode === "battle" ? "ROUND" : "WAVE"} <b className="num">{g.round}</b>
+            {g.phase === "boon" ? (
+              <> · <span style={{ color: "#3dff8e" }}>BOON READY</span></>
+            ) : g.phase === "wave" ? (
               <> · <span className="num">{Math.max(0, g.waveTotal - g.spawnQ.length - g.enemies.filter((e) => !e.dead).length)}</span>/<span className="num">{g.waveTotal}</span> CLEARED</>
             ) : g.phase === "deploy" ? (
               <> · DEPLOY <span className="num">{Math.ceil(g.phaseT)}</span>s</>
@@ -7606,7 +8087,9 @@ export default function Battle({
         {g && (g.phase === "deploy" || g.phase === "inter") && (
           <div className="pointer-events-none absolute left-1/2 top-[8%] -translate-x-1/2 text-center">
             <div className="font-disp text-4xl text-[#ffcf4d]" style={{ textShadow: "0 0 26px rgba(255,179,36,.7)" }}>
-              {g.phase === "deploy" ? "DEPLOY TOWERS" : `${mode === "endless" ? "WAVE" : "ROUND"} ${g.round} CLEARED`}
+              {g.phase === "deploy"
+                ? "DEPLOY TOWERS"
+                : `${mode === "battle" ? "ROUND" : "WAVE"} ${g.round} CLEARED`}
             </div>
             <div className="mt-1 text-base font-bold tracking-[0.25em] text-[var(--txt)]">
               {g.phase === "deploy" ? "PRESS SUMMON — TOWERS DROP STRAIGHT ONTO THE GRID" : `NEXT WAVE IN ${Math.ceil(g.phaseT)}`}
@@ -7620,10 +8103,16 @@ export default function Battle({
               if (nr >= 3) kinds.push(ENEMY_TYPES[1].name);
               if (nr >= 5) kinds.push(ENEMY_TYPES[2].name);
               if (nr >= 7) kinds.push(ENEMY_TYPES[3].name);
+              if (nr >= 9) kinds.push(ENEMY_TYPES[HOUND_TYPE].name);
+              if (nr >= 11) kinds.push(ENEMY_TYPES[WRAITH_TYPE].name);
+              if (nr >= 13) kinds.push(ENEMY_TYPES[GOLEM_TYPE].name);
               return (
                 <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[10px] font-bold tracking-[0.14em] text-[var(--dim)]" data-testid="wave-preview">
                   <span className="num text-[#7fe9ff]">{Math.min(46, 8 + nr * 2)}</span> HOSTILES · {kinds.join(" · ").toUpperCase()}
                   {nr % 4 === 0 && <span className="text-[#ff8f9a]"> · {ENEMY_TYPES[nr >= 32 ? 6 : nr >= 16 ? 5 : 4].name.toUpperCase()}</span>}
+                  {nr >= 20 && nr % 8 === 0 && (
+                    <span className="text-[#3dffc0]"> · {ENEMY_TYPES[LEVIATHAN_TYPE].name.toUpperCase()} SURFACES</span>
+                  )}
                 </div>
               );
             })()}
@@ -7725,7 +8214,7 @@ export default function Battle({
         {g && g.phase === "wave" && (
           <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 text-center">
             <div className="font-disp text-xl text-[#ff4fd8]" style={{ textShadow: "0 0 18px rgba(255,79,216,.6)" }}>
-              {mode === "endless" ? "WAVE" : "ROUND"} {g.round}
+              {mode === "battle" ? "ROUND" : "WAVE"} {g.round}
             </div>
             <div className="text-[11px] font-bold tracking-[0.2em] text-[#ff9be9]/80">
               ENEMY HP ×{Math.pow(HP_GROWTH, g.round - 1).toFixed(1)} · +{Math.round((HP_GROWTH - 1) * 100)}% PER WAVE
@@ -7835,13 +8324,68 @@ export default function Battle({
 
       </div>
 
+      {/* GAUNTLET BOON PICK — the run's only progression beat: three cards, one
+          pick, and the next wave rolls the instant it lands */}
+      {g && g.phase === "boon" && g.boonOffer && (
+        <div className="battle-pause absolute inset-0 z-[75] flex items-center justify-center p-4" data-testid="boon-overlay">
+          <div className="panel anim-pop w-[600px] max-w-full p-5" style={{ borderColor: "#3dff8e88" }}>
+            <div className="text-center">
+              <div className="text-[10px] font-bold tracking-[0.3em] text-[#3dff8e]">
+                WAVE <span className="num">{g.round}</span> CLEARED · GAUNTLET
+              </div>
+              <div className="font-disp text-3xl text-[#3dff8e]">CHOOSE A BOON</div>
+              <div className="mt-1 text-[11.5px] font-semibold text-[var(--dim)]">
+                <span className="num">{g.boons.length}</span> banked this run · the next wave starts the moment you pick
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {g.boonOffer.map((b) => (
+                <button
+                  key={b.id}
+                  data-testid={`boon-${b.id}`}
+                  className="tile tile-hover flex flex-col items-center gap-1 p-3 text-center"
+                  style={{ borderColor: b.color }}
+                  onClick={() => {
+                    sfx.click();
+                    boonPickRef.current(b);
+                  }}
+                >
+                  <span className="text-2xl leading-none" style={{ color: b.color, textShadow: `0 0 14px ${b.color}88` }}>
+                    {b.glyph}
+                  </span>
+                  <span className="font-disp text-[15px] leading-tight" style={{ color: b.color }}>
+                    {b.name}
+                  </span>
+                  <span className="text-[11px] font-semibold leading-snug text-[var(--txt)]/80">{b.desc}</span>
+                </button>
+              ))}
+            </div>
+            {g.boons.length > 0 && (
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-1" data-testid="boon-stack">
+                <span className="text-[10px] font-bold tracking-[0.2em] text-[var(--dim)]">BANKED</span>
+                {g.boons.map((b, i) => (
+                  <span
+                    key={i}
+                    className="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                    style={{ color: b.color, background: b.color + "1a", border: `1px solid ${b.color}55` }}
+                  >
+                    {b.glyph} {b.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* PAUSE — the sim is held, the arena stays visible behind a light scrim */}
       {paused && g && !g.final && (
         <div className="battle-pause absolute inset-0 z-[80] flex items-center justify-center p-4" data-testid="pause-overlay">
           <div className="panel anim-pop w-[380px] max-w-full p-5 text-center" style={{ borderColor: "#35e0ff88" }}>
             <div className="font-disp text-3xl text-[#35e0ff]">PAUSED</div>
             <div className="mt-1 text-[12px] font-semibold text-[var(--dim)]">
-              {mode === "endless" ? "ENDLESS" : "BATTLE"} · {mode === "endless" ? "WAVE" : "ROUND"} {g.round} ·{" "}
+              {mode === "gauntlet" ? "GAUNTLET" : mode === "endless" ? "ENDLESS" : "BATTLE"} ·{" "}
+              {mode === "battle" ? "ROUND" : "WAVE"} {g.round} ·{" "}
               <span className="num">{g.kills}</span> kills · <span className="num">{g.lives}</span> lives
             </div>
             <div className="mt-4 flex flex-col gap-2">
@@ -8090,17 +8634,17 @@ export default function Battle({
       {g?.final && (
         <div className="gameover" data-testid="game-over">
           <div className="gameover-bg" />
-          <div className={"gameover-card " + (g.final.won ? "won" : "lost") + (mode === "endless" ? " endless" : "")}>
+          <div className={"gameover-card " + (g.final.won ? "won" : "lost") + (mode !== "battle" ? " endless" : "")}>
             <div className="gameover-rays" />
             <div className="gameover-head">
               <div className="gameover-eyebrow">
-                {mode === "endless" ? "ENDLESS RUN" : g.final.won ? "GAUNTLET CLEARED" : "THE LINE BROKE"}
+                {mode === "gauntlet" ? "GAUNTLET RUN" : mode === "endless" ? "ENDLESS RUN" : g.final.won ? "THE RIFT CLOSED" : "THE LINE BROKE"}
               </div>
               <div className="gameover-title">
-                {mode === "endless" ? "RUN OVER" : g.final.won ? "VICTORY" : "DEFEAT"}
+                {mode === "gauntlet" ? "RUN OVER" : mode === "endless" ? "RUN OVER" : g.final.won ? "VICTORY" : "DEFEAT"}
               </div>
               <div className="gameover-sub">
-                {mode === "endless" ? "REACHED WAVE " + g.final.rounds : g.final.won ? "THE LINE HELD" : "FELL ON ROUND " + g.round} ·{" "}
+                {mode !== "battle" ? "REACHED WAVE " + g.final.rounds : g.final.won ? "THE LINE HELD" : "FELL ON ROUND " + g.round} ·{" "}
                 <span className="num">{g.kills.toLocaleString("en-US")}</span> KILLS ·{" "}
                 <span className="num">{g.crits.toLocaleString("en-US")}</span> CRITS
               </div>
@@ -8149,7 +8693,9 @@ export default function Battle({
               </button>
             </div>
             <div className="gameover-note">
-              {mode === "endless"
+              {mode === "gauntlet"
+                ? "The gauntlet never ends — it only pays deeper. Stack boons and go again."
+                : mode === "endless"
                 ? "Endless pays on depth — the further you pushed, the richer the salvage."
                 : g.final.won
                   ? "Win streaks raise your trophy stake for the next run."
@@ -8314,6 +8860,31 @@ function BossPortrait({ type }: { type: number }) {
           <circle cx={-19} cy={-21} r={5} fill={sh} />
           <circle cx={25} cy={-21} r={5} fill={sh} />
           <circle cy={14} r={16} fill="url(#bp-core)" />
+        </g>
+      )}
+      {et.shape === "leviathan" && (
+        <g stroke={sh} strokeWidth={3}>
+          {/* rift pool */}
+          <ellipse cy={64} rx={82} ry={20} fill="none" stroke={c} strokeWidth={4} opacity={0.55} />
+          <ellipse cy={64} rx={58} ry={13} fill="none" stroke={a} strokeWidth={2} opacity={0.4} />
+          {/* coiled body */}
+          <ellipse cy={38} rx={56} ry={17} fill="none" stroke={sh} strokeWidth={18} strokeLinecap="round" />
+          <ellipse cy={14} rx={38} ry={12} fill="none" stroke={c} strokeWidth={14} strokeLinecap="round" />
+          {/* neck */}
+          <path d="M-14 6 Q-24-42 0-64 Q24-42 14 6 Z" fill={c} />
+          {/* head with an open maw */}
+          <path d="M-30-58 Q0-96 30-58 Q0-38 -30-58 Z" fill={c} />
+          <path d="M-18-58 L18-58 L0-30 Z" fill="#03211f" stroke="none" />
+          {[-12, -6, 0, 6, 12].map((x, i) => (
+            <path key={i} d={`M${x}-58 L${x + 3}-46 L${x + 6}-58 Z`} fill="#eafffb" stroke="none" />
+          ))}
+          {/* eyes */}
+          <circle cx={-16} cy={-74} r={4.5} fill="#ffffff" stroke="none" />
+          <circle cx={16} cy={-74} r={4.5} fill="#ffffff" stroke="none" />
+          {/* dorsal fins */}
+          <path d="M-34 2 L-58-10 L-34 18 Z" fill={a} />
+          <path d="M-38 26 L-64 20 L-38 44 Z" fill={a} />
+          <circle r={20} cy={-52} fill="url(#bp-core)" opacity={0.7} stroke="none" />
         </g>
       )}
     </svg>

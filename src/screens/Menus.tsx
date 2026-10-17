@@ -3,6 +3,7 @@ import type { SaveData } from "../game/save";
 import type { ClaimData, UpgradeData } from "../components/ui";
 import type { DailyTask } from "../game/data";
 import { DAILY_TASKS, TASK_MILESTONES, TASK_POINTS_TOTAL } from "../game/data";
+import { FONTS, FONT_BY_ID, DEFAULT_FONT, applyFont } from "../game/fonts";
 import {
   claimMilestone,
   claimTask,
@@ -440,12 +441,14 @@ export function Home({
   mutate,
   onBattle,
   onEndless,
+  onGauntlet,
   push,
 }: {
   save: SaveData;
   mutate: (fn: (s: SaveData) => void) => void;
   onBattle: () => void;
   onEndless: () => void;
+  onGauntlet: () => void;
   push: (m: string, c?: string) => void;
 }) {
   const hero = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
@@ -663,7 +666,7 @@ export function Home({
       </div>
 
       {/* MODES */}
-      <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
         <ModeCard
           accent="#ffcf4d"
           title="Battle"
@@ -680,6 +683,15 @@ export function Home({
           onClick={onEndless}
           delay="60ms"
           badge={`BEST ${save.bestEndless}`}
+        />
+        <ModeCard
+          accent="#3dff8e"
+          title="Gauntlet"
+          sub="Roguelite · boons every wave"
+          body="No wave cap. Pick a boon after every clear and stack the run until it breaks you."
+          onClick={onGauntlet}
+          delay="120ms"
+          badge={`BEST ${save.gauntletBest}`}
         />
       </div>
 
@@ -2599,6 +2611,44 @@ export function SettingsModal({
             void fs.toggle();
           }}
         />
+      </div>
+
+      {/* FONT VAULT — fifty faces, each tile previews itself. Picking one applies
+          it live (UI + headings) and lazily pulls the Google stylesheet. */}
+      <div className="mt-4 flex items-center gap-2">
+        <div className="text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">FONT</div>
+        <span className="text-[10px] font-bold tracking-[0.18em] text-[var(--dim)]" data-testid="font-count">
+          {FONTS.length} FACES · NOW {((FONT_BY_ID[save.font] || FONT_BY_ID[DEFAULT_FONT]).name || "").toUpperCase()}
+        </span>
+      </div>
+      <div className="mt-1.5 rounded-lg border border-[var(--line)] bg-black/30 p-2" data-testid="font-grid">
+        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
+          {FONTS.map((f) => {
+            const on = (save.font || DEFAULT_FONT) === f.id;
+            return (
+              <button
+                key={f.id}
+                data-testid={`font-${f.id}`}
+                data-font={f.id}
+                title={`${f.name} · ${f.group}`}
+                className={"font-tile" + (on ? " on" : "")}
+                style={{ fontFamily: f.stack }}
+                onClick={() => {
+                  sfx.uiTab();
+                  applyFont(f.id);
+                  mutate((s) => {
+                    s.font = f.id;
+                  });
+                }}
+              >
+                <span className="font-tile-sample">{f.name}</span>
+                <span className="font-tile-group" style={{ fontFamily: "var(--font-ui, inherit)" }}>
+                  {f.group}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">SAVE DATA</div>

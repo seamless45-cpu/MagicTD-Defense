@@ -54,6 +54,11 @@ import {
   BOSS_SKILLS,
   BOSS_KITS,
   TITAN_TYPE,
+  GAUNTLET_BOONS,
+  HOUND_TYPE,
+  WRAITH_TYPE,
+  GOLEM_TYPE,
+  LEVIATHAN_TYPE,
   BOSS_CHAINS_DR,
   BOSS_METEOR_COUNT,
   BOSS_NULL_SLOW,
@@ -99,7 +104,11 @@ import {
   claimTask,
   claimMilestone,
   milestoneClaimed,
+  gauntletChoices,
+  takeGauntletBoon,
+  collectGauntlet,
 } from "../game/save";
+import { FONTS, FONT_BY_ID, DEFAULT_FONT, fontStack, fontDisplayStack, applyFont } from "../game/fonts";
 
 describe("tower data", () => {
   beforeEach(() => {
@@ -1128,16 +1137,50 @@ describe("reworked enemies", () => {
   });
 
   it("keeps the boss indices intact after the rework", () => {
-    expect(ENEMY_TYPES).toHaveLength(7);
+    // 7 launch enemies + Rift Hound, Cinder Wraith, Shard Golem, Abyss Leviathan
+    expect(ENEMY_TYPES).toHaveLength(11);
     expect(isBossType(4)).toBe(true);
     expect(isBossType(3)).toBe(false);
     expect(ENEMY_TYPES[5].name).toBe("Rift Overlord");
-    // the Void Titan closes the table and is the only one with all nine skills
+    // the Abyss Leviathan closes the table and carries the full nine-skill kit
+    expect(ENEMY_TYPES[LEVIATHAN_TYPE].name).toBe("Abyss Leviathan");
+    expect(ENEMY_TYPES[LEVIATHAN_TYPE].shape).toBe("leviathan");
+    expect(isBossType(LEVIATHAN_TYPE)).toBe(true);
+    expect(BOSS_KITS[LEVIATHAN_TYPE]).toHaveLength(9);
+    // the Void Titan keeps its own index and kit
     expect(ENEMY_TYPES[TITAN_TYPE].name).toBe("Void Titan");
     expect(ENEMY_TYPES[TITAN_TYPE].shape).toBe("titan");
     expect(isBossType(TITAN_TYPE)).toBe(true);
     expect(BOSS_KITS[TITAN_TYPE]).toHaveLength(9);
     expect(BOSS_KITS[4]).toHaveLength(6);
+  });
+
+  it("introduces the three new mobs with their own silhouettes and stats", () => {
+    expect(ENEMY_TYPES[HOUND_TYPE].shape).toBe("hound");
+    expect(ENEMY_TYPES[WRAITH_TYPE].shape).toBe("wraith");
+    expect(ENEMY_TYPES[GOLEM_TYPE].shape).toBe("golem");
+    // all are non-bosses
+    [HOUND_TYPE, WRAITH_TYPE, GOLEM_TYPE].forEach((t) => expect(isBossType(t)).toBe(false));
+    // the wraith is the fast-but-frail one, the golem the armoured wall
+    expect(ENEMY_TYPES[HOUND_TYPE].speed).toBeGreaterThan(ENEMY_TYPES[GOLEM_TYPE].speed);
+    expect(ENEMY_TYPES[GOLEM_TYPE].armor).toBeGreaterThan(ENEMY_TYPES[WRAITH_TYPE].armor);
+    expect(ENEMY_TYPES[LEVIATHAN_TYPE].hpMul).toBeGreaterThan(ENEMY_TYPES[TITAN_TYPE].hpMul);
+  });
+
+  it("unlocks the new mobs and the Leviathan as the rounds climb", () => {
+    // waveComp is random, so sample: the deep waves must be able to roll them
+    const sample = (round: number, times = 40) => {
+      const seen = new Set<number>();
+      for (let i = 0; i < times; i++) waveComp(round).forEach((t) => seen.add(t));
+      return seen;
+    };
+    expect(sample(13).has(HOUND_TYPE)).toBe(true);
+    expect(sample(13).has(WRAITH_TYPE)).toBe(true);
+    expect(sample(13).has(GOLEM_TYPE)).toBe(true);
+    expect(sample(24).has(LEVIATHAN_TYPE)).toBe(true);
+    // wave 4 is still a boss wave and nothing deeper should show up front
+    expect(waveComp(4)).toContain(4);
+    expect(waveComp(4)).not.toContain(LEVIATHAN_TYPE);
   });
 });
 
@@ -1473,5 +1516,112 @@ describe("boss skills", () => {
     expect(BOSS_NULL_SLOW).toBeGreaterThan(0);
     expect(BOSS_METEOR_COUNT).toBeGreaterThan(1);
     expect(BOSS_CHAINS_DR).toBeGreaterThan(0);
+  });
+});
+
+// ---------- the font vault ----------
+describe("font vault", () => {
+  it("ships exactly fifty faces with unique ids", () => {
+    expect(FONTS).toHaveLength(50);
+    const ids = FONTS.map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    // the three the brief called out by name
+    expect(FONT_BY_ID.marker.name).toBe("Permanent Marker");
+    expect(FONT_BY_ID.edo.name).toBe("EDO");
+    expect(FONT_BY_ID.system.name).toBe("System");
+    // every entry is renderable and grouped
+    for (const f of FONTS) {
+      expect(f.stack.length).toBeGreaterThan(0);
+      expect(["display", "text", "mono", "script", "system"]).toContain(f.group);
+      // local faces must not claim a Google family, or they'd fetch for nothing
+      if (f.local) expect(f.google).toBeUndefined();
+    }
+  });
+
+  it("resolves stacks and falls back to the default for unknown ids", () => {
+    expect(fontStack("rajdhani")).toContain("Rajdhani");
+    expect(fontStack("not-a-font")).toBe(fontStack(DEFAULT_FONT));
+    expect(fontDisplayStack("marker")).toContain("Permanent Marker");
+    // a face without its own display stack uses the UI stack
+    const f = FONTS.find((x) => !x.display)!;
+    expect(fontDisplayStack(f.id)).toBe(f.stack);
+  });
+
+  it("applies a face to the document root and reports it on the dataset", () => {
+    applyFont("marker");
+    const root = document.documentElement;
+    expect(root.style.getPropertyValue("--font-ui")).toContain("Permanent Marker");
+    expect(root.dataset.magictdFont).toBe("marker");
+    applyFont("system");
+    expect(root.dataset.magictdFont).toBe("system");
+    // unknown ids fall back rather than leaving an empty custom property
+    applyFont("does-not-exist");
+    expect(root.dataset.magictdFont).toBe(DEFAULT_FONT);
+    applyFont(DEFAULT_FONT);
+  });
+});
+
+// ---------- gauntlet mode ----------
+describe("gauntlet mode", () => {
+  it("offers three distinct boons from the full pool", () => {
+    for (let i = 0; i < 8; i++) {
+      const pick = gauntletChoices();
+      expect(pick).toHaveLength(3);
+      expect(new Set(pick.map((b) => b.id)).size).toBe(3);
+      pick.forEach((b) => expect(GAUNTLET_BOONS).toContain(b));
+    }
+  });
+
+  it("banks the picks in the run list", () => {
+    const list: typeof GAUNTLET_BOONS = [];
+    takeGauntletBoon(list, GAUNTLET_BOONS[0]!);
+    takeGauntletBoon(list, GAUNTLET_BOONS[1]!);
+    expect(list.map((b) => b.id)).toEqual([GAUNTLET_BOONS[0]!.id, GAUNTLET_BOONS[1]!.id]);
+  });
+
+  it("pays deeper runs more and records a new best", () => {
+    const s = defaultSave();
+    const before = { gold: s.gold, gems: s.gems, potions: s.potions };
+    const shallow = collectGauntlet(s, 3, 2, s.gauntletBest);
+    expect(shallow.record).toBe(true);
+    expect(s.gauntletBest).toBe(3);
+    expect(shallow.gold).toBe(220 + 3 * 95 + 9 * 14);
+    expect(shallow.potions).toBe(1 + 0 + 2);
+    expect(s.gold).toBe(before.gold + shallow.gold);
+    expect(s.gems).toBe(before.gems + shallow.gems);
+    expect(s.potions).toBe(before.potions + shallow.potions);
+
+    // a shorter follow-up run pays out but does not take the record
+    const deep = collectGauntlet(s, 2, 0, s.gauntletBest);
+    expect(deep.record).toBe(false);
+    expect(s.gauntletBest).toBe(3);
+    expect(deep.gems).toBeLessThan(shallow.gems);
+
+    // and the deeper run is strictly richer
+    const s2 = defaultSave();
+    const deeper = collectGauntlet(s2, 12, 4, s2.gauntletBest);
+    const s3 = defaultSave();
+    const shallow3 = collectGauntlet(s3, 3, 2, s3.gauntletBest);
+    expect(deeper.gold).toBeGreaterThan(shallow3.gold);
+    // deeper runs also salvage more crystal potions (boons add one each)
+    expect(deeper.potions).toBeGreaterThan(0);
+    expect(shallow3.potions).toBeGreaterThan(0);
+  });
+
+  it("round-trips the gauntlet record and the chosen font through a save", () => {
+    const s = defaultSave();
+    s.gauntletBest = 17;
+    s.font = "marker";
+    const back = importSave(JSON.stringify(s));
+    expect(back.gauntletBest).toBe(17);
+    expect(back.font).toBe("marker");
+    // a legacy blob with no font/gauntlet fields gets the defaults
+    const legacy = importSave(JSON.stringify({ gold: 5 }));
+    expect(legacy.gauntletBest).toBe(0);
+    expect(legacy.font).toBe(DEFAULT_FONT);
+    // junk normalises instead of crashing
+    const junk = importSave(JSON.stringify({ gauntletBest: -9, font: "" }));
+    expect(junk.gauntletBest).toBe(0);
+    expect(junk.font).toBe(DEFAULT_FONT);
   });
 });
