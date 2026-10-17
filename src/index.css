@@ -1090,6 +1090,19 @@ body,
   color: var(--dim);
   animation: slideUp 0.4s ease both;
 }
+.load-hint {
+  margin-top: 10px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: var(--line2);
+  animation: hintBlink 2.4s ease-in-out infinite;
+}
+@keyframes hintBlink {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.95; }
+}
 .load-tip-k {
   margin-right: 6px;
   font-weight: 700;
@@ -3002,6 +3015,38 @@ body,
    stretching into big empty boxes */
 .tower-scroll {
   grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+}
+/* ---------- the Towers tab scrolls as one page ----------
+   The grid is 61 cells tall. It used to sit in its own nested scroll box inside a
+   fixed-height flex column (rotation strip above, ASCENT ALL panel pinned below),
+   which left a box barely tall enough to show three rows: reaching the bottom of
+   the roster was a fight. The tab is a single scroll surface now, so the grid can
+   be as tall as it needs and the filter row / crit band stays pinned to the top. */
+.tower-page {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scroll-padding-top: 46px;
+}
+.tower-page::-webkit-scrollbar {
+  width: 8px;
+}
+/* rotation strip + filters, pinned together: the strip is where a dragged tower
+   gets dropped, so it can never be allowed to scroll out of reach */
+.towers-sticky {
+  margin: 0 -2px;
+  padding: 2px 2px 8px;
+  background: linear-gradient(180deg, rgba(6, 4, 20, 0.97) 60%, rgba(6, 4, 20, 0.86) 88%, transparent);
+  backdrop-filter: blur(8px);
+}
+.towers-sticky::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 14px;
+  background: linear-gradient(180deg, rgba(6, 4, 20, 0.5), transparent);
+  pointer-events: none;
 }
 .tw-cell {
   position: relative;

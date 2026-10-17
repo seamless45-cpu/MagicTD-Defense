@@ -47,9 +47,11 @@ Pick a mode from the **Command Center**:
 | **Battle** | 12 rounds | Solo gauntlet. Win it to bank gold, gems and fragments. |
 | **Endless** | no limit | Score attack: survive as long as possible. Rewards scale with your depth — gold grows quadratically, gems every 3 waves, a token every 5. |
 
-**Enemies get 57% stronger every wave** (×1.57 per wave, compounding), and both the wave banner
-and the HUD show the current multiplier. Each wave holds two more enemies than it used to, and
-every round-clear payout (gold + gems) was raised 40%.
+**Enemies get 80% stronger every wave** (×1.8 per wave, compounding — it was ×1.57), and both the
+wave banner and the HUD show the current multiplier. Each wave holds two more enemies than it used
+to, and every round-clear payout (gold + gems) was raised 40%. Two counterweights travel with the
+steeper curve: **bosses spawn with 10% less maximum health** (`BOSS_HP_MUL`) and **run gold pays 25%
+more** (`GOLD_GAIN_MUL`) from every kill, bounty and wave clear.
 
 ### Bosses
 
@@ -651,10 +653,12 @@ enemies, with Overpenetration and Rail Burn awakenings).
 - **Mana Conduit** joins the run shop: +10% SP from every kill and wave clear for the rest of the run,
   up to +100% (ten purchases, each one pricier than the last). It applies to kill payouts, bounty
   awakenings and the wave-clear bonus, and the toast shows the multiplied number.
-- **Merging is a roulette again.** A same-point pair fuses into a **random unlocked tower** that is
-  not one of the two you merged (points still go up by one), so fusing is a way to reroll your board
-  into something new. Honor Emperor is the exception: it hands its point to the tower it is dropped
-  on and leaves that tower standing.
+- **Merging is a roulette again — inside your rotation.** A same-point pair fuses into a **random
+  tower taken from the summon rotation**, preferring one that is neither of the two you merged
+  (points still go up by one), so fusing rerolls your board into something new without ever handing
+  you a tower you did not put on your list. If the rotation holds nothing else, the merge simply
+  keeps the tower you dropped onto and adds the point. Honor Emperor is the exception: it hands its
+  point to the tower it is dropped on and leaves that tower standing.
 - **Crit FX no longer melt the frame.** On top of the earlier throttle, the engine now measures how
   long each `draw()` actually took and slides a quality factor between 1.0 and 0.4: when frames run
   long the crit throttle stretches (90ms → 300ms), particle bursts scale down, the lance back to the
@@ -663,3 +667,29 @@ enemies, with Overpenetration and Rail Burn awakenings).
   260ms (nothing at all while throttled, unless it is a top-tier crit). It recovers the moment the
   frame is cheap again. Settings also exposes the manual version: **Effect Quality → ALL / REDUCED /
   MINIMAL**.
+
+## Harder waves, richer runs, a scrollable Towers tab and a boot that plays
+
+- **The wave curve is steeper.** `HP_GROWTH` went from **1.57 to 1.8** per wave: wave 12 is now
+  ~440x wave 1 instead of ~130x, so late rounds demand the crit/point economy rather than raw
+  tower count. Bosses were brought down by 10% (`BOSS_HP_MUL = 0.9`, applied to the boss's own HP
+  multiplier at spawn — the Void Titan walks in on 34 x 0.9 = 30.6, the Warlord on 13.5) so the four
+  boss waves do not spike harder than the ramp around them. Nothing else about a boss changed.
+- **Run gold pays 25% more.** `runGold()` wraps the three places gold is earned in a battle: the
+  kill payout, the bounty family of awakenings and the wave-clear purse. Whatever is left in the
+  wallet is settled when the run ends, so the bonus carries into the results screen. Account gold
+  (chests, tasks, daily rewards) is a separate economy and is untouched.
+- **The Towers tab scrolls as one page.** The 61-cell grid used to live in its own nested scroll box
+  inside a fixed-height flex column, with the rotation strip above it and the `ASCENT ALL` panel
+  pinned below: on a phone the box was barely three rows tall and the last rarities took real work to
+  reach. The tab is now a single scroll surface — the grid is allowed to be as tall as it needs, the
+  footer follows it, and the rotation strip + filter row (with the crit band) ride along pinned to
+  the top so the drag-to-rotation drop target never scrolls out of reach.
+- **The boot screen can no longer be skipped by accident.** The tap that fast-forwards the intro
+  dispatches its `pointerup`/`click` to whatever is under the finger by then — the loading screen —
+  so a click listener on it ended the car screen in the same gesture. Skips are a `pointerdown` that
+  actually begins on the boot screen, and the first 400ms are ignored, so a leftover gesture can
+  never cut the animation. A skip now also drives the car to the end of the track (340ms) before the
+  launch instead of teleporting it, and the boot waits for the shell and the webfonts (capped at
+  +2.6s) so the arena never opens with a font swap mid-frame. The boot state line reads
+  `LOADING` → `READY` → `ENTERING THE ARENA`.

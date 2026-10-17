@@ -319,11 +319,20 @@ export default function Towers({
   const pv = preview ? TOWER_BY_ID[preview] : null;
 
   return (
-    <div className="flex h-full flex-col gap-2.5">
+    /* ONE scroll surface for the whole tab. The grid is 61 cells tall and used to
+       live in its own nested scroll box (grid inside a fixed-height flex column
+       with a pinned footer), which meant the box was never tall enough to reach
+       the last rows on a phone. Now the page itself scrolls, the grid is free to
+       be as tall as it likes and the filter row sticks to the top of it. */
+    <div className="tower-page flex h-full flex-col gap-2.5 overflow-y-auto scroll-thin pb-6 pr-1">
+      {/* The rotation strip and the filter row ride along on top of the scroll:
+          the strip is the drop target for drag-to-rotation, so it has to stay
+          reachable while the grid (61 cells) scrolls underneath it. */}
+      <div className="towers-sticky sticky top-0 z-30 flex flex-col gap-2">
       {/* SUMMON ROTATION — one horizontal strip that never wraps, so the grid
           below keeps its height no matter how many towers are queued. Order
           decides which towers a summon reaches for first. */}
-      <div className="tile tile-gold shrink-0 p-2" data-testid="lineup-row">
+      <div className="tile tile-gold p-2" data-testid="lineup-row">
         <div className="flex items-center gap-2">
           <div className="rota-head shrink-0" title="Summons draw from the top of this list">
             <span className="rota-head-t">SUMMON ROTATION</span>
@@ -375,8 +384,7 @@ export default function Towers({
           colour; a filter row keeps all 47 towers scannable. No buttons, no
           descriptions: tap a cell for the full sheet, drag it onto the rotation
           bar to reorder. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-1.5" data-testid="tower-grid">
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5" data-testid="tw-filters">
+      <div className="tw-filters flex flex-wrap items-center gap-1.5" data-testid="tw-filters">
           {(
             [
               ["all", "ALL"],
@@ -416,7 +424,9 @@ export default function Towers({
           </div>
         </div>
 
-        <div className="tower-scroll stagger grid content-start gap-1 overflow-y-auto scroll-thin pr-1">
+      </div>
+
+      <div className="tower-scroll stagger grid content-start gap-1 pr-1" data-testid="tower-grid">
           {(["legendary", "epic", "decent", "normal"] as const).map((rarity) => {
             const group = twVisible.filter((def) => def.rarity === rarity);
             if (!group.length) return null;
@@ -470,16 +480,15 @@ export default function Towers({
               </Fragment>
             );
           })}
-          {twVisible.length === 0 && (
-            <div className="col-span-full py-8 text-center text-[12px] font-bold tracking-[0.18em] text-[var(--dim)]">
-              NOTHING MATCHES THIS FILTER
-            </div>
-          )}
-        </div>
+        {twVisible.length === 0 && (
+          <div className="col-span-full py-8 text-center text-[12px] font-bold tracking-[0.18em] text-[var(--dim)]">
+            NOTHING MATCHES THIS FILTER
+          </div>
+        )}
       </div>
 
       {/* ASCENT ALL */}
-      <div className="panel flex shrink-0 items-center justify-between gap-4 px-3 py-2" style={{ borderColor: "rgba(53,224,255,0.4)" }}>
+      <div className="panel flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 py-2" style={{ borderColor: "rgba(53,224,255,0.4)" }}>
         <div>
           <div className="font-disp text-base text-[#35e0ff]">Ascent All</div>
           <div className="text-[12px] font-semibold text-[var(--dim)]">Upgrade every unlocked tower +1 level. No fragments required.</div>

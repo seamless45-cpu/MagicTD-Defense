@@ -10,6 +10,8 @@ import {
   ENEMY_TYPES,
   roundHp,
   HP_GROWTH,
+  BOSS_HP_MUL,
+  runGold,
   waveComp,
   BATTLE_ROUNDS,
   MAX_BATTLE_LEVEL,
@@ -1052,7 +1054,8 @@ export default function Battle({
       // sp payout: 10 base, elites x5, bosses x10, then the monthly modifier and
       // whatever Mana Conduit share the run has bought
       g.sp += spGain(e.spv);
-      g.gold += Math.round(e.gold * MONTH_BONUS.goldMul);
+      // run gold is 25% richer across the board (kills, bounties, wave clears)
+      g.gold += runGold(Math.round(e.gold * MONTH_BONUS.goldMul));
       const p = enemyPos(e);
       const et = ENEMY_TYPES[e.type];
       if (e.elite) {
@@ -1177,7 +1180,7 @@ export default function Battle({
             if (tier > 0 && Math.random() < spec.chance[tier - 1]) goldMul += spec.mult[tier - 1];
           }
           if (goldMul > 0) {
-            const extra = Math.round(e.gold * goldMul);
+            const extra = runGold(Math.round(e.gold * goldMul));
             g.gold += extra;
             addText(p.x, p.y - 34, `+${extra}`, "#ffcf4d", 12, false);
           }
@@ -2424,10 +2427,16 @@ export default function Battle({
       }
 
       // ---------- the merge roulette ----------
-      const unlocked = TOWERS.filter((d) => (saveRef.current.levels[d.id] || 0) > 0);
-      const fresh = unlocked.filter((d) => d.id !== a.def.id && d.id !== b.def.id);
-      const pool = fresh.length ? fresh : unlocked;
-      const nd = pool.length ? pool[Math.floor(Math.random() * pool.length)] : b.def;
+      // The roulette only ever rolls towers that are ON THE SUMMON ROTATION, so a
+      // merge can never hand you something the player did not put on their list.
+      // If the rotation holds nothing else (or the pair IS the whole rotation)
+      // the merge stays what it was: the tower you dropped onto, +1 point.
+      const lineupDefs = [...new Set(saveRef.current.lineup)]
+        .filter((id) => (saveRef.current.levels[id] || 0) > 0 && TOWER_BY_ID[id])
+        .map((id) => TOWER_BY_ID[id]);
+      const fresh = lineupDefs.filter((d) => d.id !== a.def.id && d.id !== b.def.id);
+      const pool = fresh.length ? fresh : lineupDefs.length ? lineupDefs : [b.def];
+      const nd = pool[Math.floor(Math.random() * pool.length)];
       b.def = nd;
       b.points = wanted;
       b.streak = 0;
@@ -3098,7 +3107,10 @@ export default function Battle({
           const boss = isBossType(s.type);
           // elites: tougher variants with a golden sigil, 5x sp and double gold
           const elite = !boss && Math.random() < Math.min(0.35, 0.06 + g.round * 0.015);
-          const hp = roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? 2.2 : 1);
+          // BOSS_HP_MUL trims 10% off every boss's maximum health: the wave curve
+          // is steeper now and a boss is 15-34x a normal enemy on top of it
+          const hp =
+            roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? 2.2 : 1) * (boss ? BOSS_HP_MUL : 1);
           g.enemies.push({
             id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012) * (elite ? 1.08 : 1), type: s.type,
             elite,
@@ -3125,7 +3137,7 @@ export default function Battle({
           g.sp += spGain(bonus);
           g.wavesCleared++;
           // gold + gem payouts were buffed 40% (REWARD_MUL) in the balance patch
-          g.gold += reward(bonus / 2);
+          g.gold += runGold(reward(bonus / 2));
           if (g.mode !== "endless" && g.round >= g.maxRounds) {
             endGame(true);
           } else {
@@ -7722,7 +7734,10 @@ export default function Battle({
               {/* live stat readout, so the cutscene tells you what you're facing */}
               <div className="boss-cut-stats mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-[11px] font-bold">
                 <span className="text-[var(--dim)]">
-                  HEALTH <span className="num" style={{ color: "#ff8f9a" }}>×{ENEMY_TYPES[g.cut.type].hpMul}</span>
+                  HEALTH{" "}
+                  <span className="num" style={{ color: "#ff8f9a" }}>
+                    ×{(ENEMY_TYPES[g.cut.type].hpMul * BOSS_HP_MUL).toFixed(1)}
+                  </span>
                 </span>
                 <span className="text-[var(--dim)]">
                   ARMOUR <span className="num text-[#8fb0ff]">{Math.round(ENEMY_TYPES[g.cut.type].armor * 100)}%</span>

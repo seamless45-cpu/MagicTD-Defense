@@ -221,7 +221,7 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
 
 const LOAD_TIPS = [
   "Gold levels a tower up; fragments push it through ascension.",
-  "Endless waves scale enemy health ×1.57 every single round.",
+  "Endless waves scale enemy health ×1.8 every single round.",
   "Chilled enemies take 25% more damage from every source.",
   "Every tower upgrade adds +8% crit damage to your account.",
   "Bosses start throwing skills at you from round 16.",
@@ -239,30 +239,94 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
   const [p, setP] = useState(0);
   const [launching, setLaunching] = useState(false);
   const [tip, setTip] = useState(0);
+  /** the shell and the fonts are in — the car is only waiting on its own lap now */
+  const [ready, setReady] = useState(false);
   const doneRef = useRef(false);
+  const readyRef = useRef(false);
+  const pRef = useRef(0);
+  const rafRef = useRef(0);
+  const outRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  /** the skip gesture only arms once the screen has been up for a moment */
+  const armedRef = useRef(false);
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
+  pRef.current = p;
 
-  const finish = useCallback(() => {
+  /**
+   * End the warm-up the way it should end: drive the car to the end of the track
+   * first, then let it launch. Cutting straight from 12% to the arena (the old
+   * behaviour) is what made a skipped boot look like a glitch.
+   */
+  const finish = useCallback((from?: number) => {
     if (doneRef.current) return;
     doneRef.current = true;
-    setP(1);
-    setLaunching(true);
-    setTimeout(() => onDoneRef.current(), 620);
+    const start = Math.max(0, Math.min(1, from ?? pRef.current));
+    const t0 = performance.now();
+    const ramp = (t: number) => {
+      const k = start >= 1 ? 1 : Math.min(1, (t - t0) / 340);
+      setP(start + (1 - start) * k);
+      if (k < 1) {
+        rafRef.current = requestAnimationFrame(ramp);
+        return;
+      }
+      setLaunching(true);
+      outRef.current = setTimeout(() => onDoneRef.current(), 620);
+    };
+    rafRef.current = requestAnimationFrame(ramp);
   }, []);
 
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(rafRef.current);
+      if (outRef.current) clearTimeout(outRef.current);
+    },
+    []
+  );
+
+  /**
+   * The lap is driven by two things: a minimum warm-up (so the car is always
+   * seen) and the shell actually being ready (window load + webfonts). The old
+   * version was a bare 2.2s timer, so on a slow first load the car reached the
+   * end and the arena opened while Bungee was still swapping in — the first
+   * frames of the game then reflowed. The hard cap keeps a stuck font request
+   * from stranding the player on the loading screen.
+   */
   useEffect(() => {
     let raf = 0;
+    // "interactive" already means the document is parsed and the bundle ran
+    let shell = document.readyState !== "loading";
+    let fonts = true;
+    const markShell = () => {
+      shell = true;
+    };
+    const markFonts = () => {
+      fonts = true;
+    };
+    window.addEventListener("load", markShell, { once: true });
+    const fontSet = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts;
+    if (fontSet?.ready) {
+      fonts = false;
+      fontSet.ready.then(markFonts, markFonts);
+    }
     const t0 = performance.now();
     const tick = (t: number) => {
       if (doneRef.current) return;
-      const raw = Math.min(1, (t - t0) / LOAD_TIME);
+      const el = t - t0;
+      const raw = Math.min(1, el / LOAD_TIME);
       setP(raw);
-      if (raw < 1) raf = requestAnimationFrame(tick);
-      else finish();
+      const isReady = shell && fonts;
+      if (isReady && !readyRef.current) {
+        readyRef.current = true;
+        setReady(true);
+      }
+      if (raw < 1 || (!isReady && el < LOAD_TIME + 2600)) raf = requestAnimationFrame(tick);
+      else finish(raw);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("load", markShell);
+    };
   }, [finish]);
 
   useEffect(() => {
@@ -270,10 +334,36 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
     return () => clearInterval(t);
   }, []);
 
+  // A skip only counts when the gesture STARTS on this screen. The tap that
+  // fast-forwards the intro dispatches its pointerup and click to whatever sits
+  // under the finger by then — which is this screen — so listening for clicks
+  // meant one tap on the intro also killed the car screen a heartbeat later.
+  // That is the "boot screen is skipped" bug: pointerdown cannot be inherited
+  // from a gesture that began on the previous screen.
+  useEffect(() => {
+    const arm = setTimeout(() => {
+      armedRef.current = true;
+    }, 400);
+    const h = () => {
+      if (armedRef.current) finish();
+    };
+    window.addEventListener("keydown", h);
+    return () => {
+      clearTimeout(arm);
+      window.removeEventListener("keydown", h);
+    };
+  }, [finish]);
+
   const pct = Math.round((launching ? 1 : p) * 100);
 
   return (
-    <div className="load-root h-full w-full" data-testid="loading-screen" onClick={finish}>
+    <div
+      className="load-root h-full w-full"
+      data-testid="loading-screen"
+      onPointerDown={() => {
+        if (armedRef.current) finish();
+      }}
+    >
       <div className="load-grid" />
       <div className="load-orb" style={{ width: 300, height: 300, left: "4%", top: "4%", background: "radial-gradient(circle, rgba(53,224,255,.26), transparent 70%)" }} />
       <div className="load-orb" style={{ width: 340, height: 340, right: "0%", top: "-2%", background: "radial-gradient(circle, rgba(255,79,216,.2), transparent 70%)", animationDelay: "1.4s" }} />
@@ -325,13 +415,14 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
         </div>
         <div className="load-bay-row">
           <span className="load-state" data-testid="load-state">
-            {launching ? "ENTERING THE ARENA" : "LOADING"}
+            {launching ? "ENTERING THE ARENA" : ready ? "READY" : "LOADING"}
           </span>
           <span className="load-pct">{pct}%</span>
         </div>
         <div key={tip} className="load-tip">
           <span className="load-tip-k">TIP</span> {LOAD_TIPS[tip]}
         </div>
+        <div className="load-hint">TAP TO SKIP</div>
       </div>
     </div>
   );
@@ -478,7 +569,7 @@ export function Home({
           Command Center
         </div>
         <div className="mt-0.5 text-[12px] font-semibold tracking-[0.28em] text-[var(--dim)]">
-          ENEMIES GROW +57% STRONGER EVERY WAVE · HOLD THE LINE
+          ENEMIES GROW +80% STRONGER EVERY WAVE · HOLD THE LINE
         </div>
       </div>
 

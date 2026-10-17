@@ -5,7 +5,7 @@ import App from "../App";
 import Battle from "../screens/Battle";
 import { canvasStats, consoleErrors } from "./setup";
 import { defaultSave, persistSave, type SaveData } from "../game/save";
-import { upgradeGoldCost, monthlyEventBonus, monthlyEventForDate } from "../game/data";
+import { upgradeGoldCost, monthlyEventBonus, monthlyEventForDate, TOWERS } from "../game/data";
 
 // ---------- tiny helpers (no testing-library dependency) ----------
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -204,9 +204,19 @@ describe("Boot sequence", () => {
     mountRaw();
     await waitFor(() => document.querySelector('[data-testid="launch-intro"]'), "launch intro");
     window.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
-    await waitFor(() => document.querySelector('[data-testid="loading-screen"]'), "loading screen after skipping");
-    // and a tap on the loading screen drops straight into the game
-    click(document.querySelector('[data-testid="loading-screen"]') as HTMLElement);
+    const loading = await waitFor(
+      () => document.querySelector('[data-testid="loading-screen"]') as HTMLElement,
+      "loading screen after skipping"
+    );
+    // the tap that skipped the intro must NOT also skip the car screen: the skip
+    // gesture only arms once the screen has been up for a moment
+    await sleep(120);
+    pointer("pointerdown", loading, 400, 400);
+    await sleep(250);
+    expect(document.querySelector('[data-testid="loading-screen"]'), "car screen survives the intro tap").toBeTruthy();
+    // a fresh tap once it is armed drops straight into the game
+    await sleep(420);
+    pointer("pointerdown", loading, 400, 400);
     await waitFor(() => byText("div", "Command Center"), "home screen after skipping both");
     noErrors();
   }, 20000);
@@ -567,6 +577,55 @@ describe("Monthly events", () => {
 });
 
 describe("Towers", () => {
+  it("scrolls the whole roster on one surface instead of a nested box", async () => {
+    await mountApp();
+    click(byText("button", "Towers")!);
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
+
+    // the tab is a single scroll surface...
+    const page = document.querySelector(".tower-page") as HTMLElement;
+    expect(page, "tower page").toBeTruthy();
+    expect(page.className).toContain("overflow-y-auto");
+    // ...that is actually bounded by the app shell: the tab is h-full all the way
+    // up into the min-h-0 flex-1 content area, otherwise a 61-cell grid would
+    // just push the nav bar off the bottom of the screen
+    const chain: string[] = [];
+    for (let el = page.parentElement; el && el !== document.body; el = el.parentElement) chain.push(el.className);
+    expect(chain.some((c) => c.includes("min-h-0") && c.includes("flex-1")), `bounded ancestor: ${chain.join(" > ")}`).toBe(true);
+    expect(chain.every((c) => !/overflow-(y-)?(auto|scroll|hidden)/.test(c)), "a second scroller between the tab and the shell").toBe(true);
+
+    // the 61-cell grid hangs directly off it: it used to live inside
+    // `flex min-h-0 flex-1` with a pinned ASCENT ALL footer below, which capped
+    // the box at a handful of rows and made the last groups unreachable
+    const grid = document.querySelector('[data-testid="tower-grid"]') as HTMLElement;
+    expect(grid.parentElement).toBe(page);
+    expect(grid.className).not.toContain("overflow-y-auto");
+    expect(grid.className).not.toContain("min-h-0");
+
+    // no nested vertical scrollers anywhere in the tab
+    const nested = Array.from(page.querySelectorAll<HTMLElement>("*")).filter((el) =>
+      /(^|\s)(overflow-y-auto|overflow-y-scroll|overflow-auto|overflow-scroll)(\s|$)/.test(el.className)
+    );
+    expect(nested, "nested scroll boxes inside the tab").toHaveLength(0);
+
+    // every tower is in that one grid: 61 cells + 4 rarity headers
+    expect(grid.children.length).toBe(65);
+    const towerCells = page.querySelectorAll(".tw-cell[data-tower]").length;
+    expect(towerCells).toBe(61);
+
+    // the rotation strip and the filters ride along on top of the scroll, so the
+    // drag-to-rotation drop target never scrolls out of reach
+    const sticky = document.querySelector(".towers-sticky") as HTMLElement;
+    expect(sticky.className).toContain("sticky");
+    expect(sticky.querySelector('[data-testid="lineup-row"]')).toBeTruthy();
+    expect(sticky.querySelector('[data-testid="tw-filters"]')).toBeTruthy();
+
+    // and the footer still exists, just below the grid instead of pinning it
+    expect(byText("div", "Ascent All")).toBeTruthy();
+    noErrors();
+    unmountApp();
+  });
+
   it("previews a tower and upgrades it from the preview panel", async () => {
     persistSave({
       ...defaultSave(),
@@ -1244,7 +1303,7 @@ describe("Battle", () => {
     noErrors();
   });
 
-  it("spawns only through the grid and merges without inventing a tower type", async () => {
+  it("spawns only through the grid and merges into a tower from the rotation", async () => {
     await mountApp();
     startMode("Battle");
     await waitFor(() => document.querySelector('[data-testid="summon-btn"]'), "battle HUD");
@@ -1278,8 +1337,8 @@ describe("Battle", () => {
     }
     await waitFor(() => boardCount() === 1, "two towers merged into one");
 
-    // the merge is a pure upgrade: no new tower type appeared, and the survivor
-    // is sitting on a point tier higher than the pair it came from
+    // the roulette only rolls the summon rotation: the survivor is a rotation
+    // tower on a point tier higher than the pair it came from
     const merged = await waitFor(
       () => (document.body.textContent || "").match(/merged to (\d+) pts/),
       "merge toast"
@@ -1291,6 +1350,78 @@ describe("Battle", () => {
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
     noErrors();
+  }, 40000);
+
+  it("never rolls a merge result from outside the summon rotation", async () => {
+    // all 61 towers unlocked, but the rotation holds ONE: a merge can only ever
+    // hand back an Arrow. If the roulette drew from the unlocked roster instead,
+    // the survivor would be one of the other 60 and the toast would say so.
+    const everyTower: Record<string, number> = {};
+    for (const t of TOWERS) everyTower[t.id] = 1;
+    persistSave({ ...defaultSave(), levels: everyTower, lineup: ["arrow"] });
+
+    await mountApp();
+    startMode("Battle");
+    const summon = await waitFor(
+      () => document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement,
+      "battle HUD"
+    );
+    const boardCount = () =>
+      Number((document.querySelector('[data-testid="towers-on-board"]')!.textContent || "0").replace(/[^\d]/g, ""));
+    // the opening pool buys exactly four arrows: two 0-point pairs, so two merges
+    for (let i = 0; i < 4; i++) {
+      click(summon);
+      await sleep(120);
+    }
+    await waitFor(() => boardCount() === 4, "four arrows deployed");
+
+    const cells: [number, number][] = [];
+    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 110 + (r + 0.5) * 90]);
+    const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+    // Drag cell onto cell until the board is down to two towers. The engine is
+    // imperative — the HUD count only refreshes on its own tick — so every
+    // attempt gets a beat to land, and the sweep stops the moment the count
+    // moves (one more matched pair and the survivors would fuse into one).
+    const sweep = async () => {
+      for (const [ax, ay] of cells) {
+        for (const [bx, by] of cells) {
+          if (ax === bx && ay === by) continue;
+          const before = boardCount();
+          pointer("pointerdown", canvas, ax, ay);
+          pointer("pointermove", canvas, bx, by);
+          pointer("pointerup", canvas, bx, by);
+          await sleep(25);
+          if (boardCount() < before) {
+            await sleep(160);
+            return true; // a merge landed — let the caller decide what is next
+          }
+        }
+      }
+      return false;
+    };
+    let guard = 0;
+    while (boardCount() > 2 && guard++ < 6) {
+      if (!(await sweep())) break;
+    }
+    await waitFor(() => boardCount() <= 2, "the merges landed");
+
+    // every evolution the toast ever announced has to be the rotation tower.
+    // (Identical toasts collapse into one, so this is a name check rather than a
+    // count: the point tiers below are what prove the roulette ran twice.)
+    const evolutions = Array.from((document.body.textContent || "").matchAll(/Evolved into ([^·]+?) ·/g)).map((m) =>
+      m[1].trim()
+    );
+    expect(evolutions.length, "merges that announced an evolution").toBeGreaterThanOrEqual(1);
+    for (const name of evolutions) expect(name, "a merge left the summon rotation").toBe("Arrow");
+    // the survivors are still the rotation tower, on real point tiers
+    const bar = document.querySelector('[data-testid="ascent-bar"]')!.textContent || "";
+    expect(bar, "the survivors kept their type").toContain("Arrow");
+    expect(document.body.textContent || "").toMatch(/merged to [1-8] pts/);
+
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+    unmountApp();
   }, 40000);
 
   it("maxes out ascension and refuses further upgrades", async () => {

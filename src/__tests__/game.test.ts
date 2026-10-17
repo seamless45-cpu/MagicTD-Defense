@@ -19,6 +19,9 @@ import {
   BATTLE_ROUNDS,
   ENEMY_TYPES,
   HP_GROWTH,
+  BOSS_HP_MUL,
+  GOLD_GAIN_MUL,
+  runGold,
   POINT_DMG_STEP,
   ASC_DMG_MUL,
   towerDamage,
@@ -148,12 +151,35 @@ describe("tower data", () => {
     expect(roundHp(12)).toBeGreaterThan(roundHp(11));
   });
 
-  it("makes enemies exactly 1.57x stronger every wave", () => {
-    expect(HP_GROWTH).toBeCloseTo(1.57, 10);
+  it("makes enemies exactly 1.8x stronger every wave", () => {
+    // the curve was 1.57x a wave; it is 1.8x now, so late waves bite much harder
+    expect(HP_GROWTH).toBeCloseTo(1.8, 10);
     for (const w of [1, 2, 5, 11, 30, 60]) {
-      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(1.57, 8);
+      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(1.8, 8);
     }
-    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.57, 29), 3);
+    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.8, 29), 3);
+    expect(roundHp(2)).toBeCloseTo(46 * 1.8, 6);
+  });
+
+  it("trims 10% off every boss's maximum health", () => {
+    expect(BOSS_HP_MUL).toBeCloseTo(0.9, 10);
+    // the trim lands on the boss's own HP multiplier, so a Warlord walks in on
+    // 15 x 0.9 = 13.5 and a Void Titan on 34 x 0.9 = 30.6
+    const bossMul = ENEMY_TYPES.map((e, i) => ({ e, i })).filter(({ i }) => isBossType(i)).map(({ e }) => e.hpMul * BOSS_HP_MUL);
+    const normalMul = ENEMY_TYPES.map((e, i) => ({ e, i })).filter(({ i }) => !isBossType(i)).map(({ e }) => e.hpMul);
+    expect(bossMul.length).toBeGreaterThan(0);
+    expect(bossMul.every((m) => m > Math.max(...normalMul)), "bosses still dwarf the horde after the trim").toBe(true);
+    // every boss is trimmed, and nothing else is touched
+    expect(bossMul.every((m) => m > 10)).toBe(true);
+  });
+
+  it("pays 25% more run gold from kills, bounties and wave clears", () => {
+    expect(GOLD_GAIN_MUL).toBeCloseTo(1.25, 10);
+    expect(runGold(2)).toBe(3); // a slime's 2 base gold
+    expect(runGold(30)).toBe(38); // a Warlord
+    expect(runGold(0)).toBe(0);
+    // it is a straight multiplier, so ordering never matters
+    for (const v of [4, 9, 17, 55, 140]) expect(runGold(v)).toBe(Math.round(v * 1.25));
   });
 
   it("ships the new towers with distinct mechanics", () => {

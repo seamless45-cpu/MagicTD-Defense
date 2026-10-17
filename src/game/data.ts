@@ -1054,14 +1054,14 @@ export function spawnBudget(n = SPAWN_BUDGET_TOWERS) {
 export const REWARD_MUL = 1.4;
 export const reward = (v: number) => Math.round(v * REWARD_MUL);
 
-/** Enemies get 57% stronger every wave - the game's difficulty curve. */
-export const HP_GROWTH = 1.57;
+/** Enemies get 80% stronger every wave - the game's difficulty curve. */
+export const HP_GROWTH = 1.8;
 
 /**
  * Damage a tower deals per shot.
  * Menu levels add flat damage, battle levels multiply it, points multiply it again,
  * and aura buffs come in as `atkMul`. Growth is multiplicative so it can keep up
- * with the 1.57x enemy curve.
+ * with the 1.8x enemy curve.
  */
 // ---------- crit damage ----------------
 /**
@@ -1506,6 +1506,24 @@ export const BOSS_WARP_DIST = 150;
 export function roundHp(round: number) {
   return 46 * Math.pow(HP_GROWTH, round - 1);
 }
+
+/**
+ * Bosses carry 10% less maximum health than their type's raw multiplier.
+ * The wave curve got steeper (57% -> 80% a wave), and a boss is worth 15-34x a
+ * normal enemy on top of it: without this trim the Warlord, Overlord and Titan
+ * spike far harder than the ramp around them. Only maximum health moves — boss
+ * speed, armour, lives and gold are untouched.
+ */
+export const BOSS_HP_MUL = 0.9;
+
+/**
+ * Run gold is paid out 25% richer: every kill, every bounty awakening and the
+ * wave-clear purse. Account gold from chests and tasks is a different economy
+ * and is not touched by this. Whatever is left in the wallet is settled when the
+ * run ends, so the bonus carries into the results screen too.
+ */
+export const GOLD_GAIN_MUL = 1.25;
+export const runGold = (v: number) => Math.round(v * GOLD_GAIN_MUL);
 
 export function waveComp(round: number): number[] {
   const out: number[] = [];

@@ -88,5 +88,16 @@ describe("launch intro", () => {
     tap();
     await waitFor(() => document.querySelector('[data-testid="loading-screen"]'), "tap fast-forwarded the intro", 4000);
     expect(intro(), "intro is gone after the skip").toBeFalsy();
+
+    // ...and the car screen must still be there afterwards. The tap that skipped
+    // the intro dispatches its pointerup/click to whatever is under the finger by
+    // then — the loading screen — so a click listener on it used to end the car
+    // screen in the same gesture: the boot looked like it had been skipped.
+    await sleep(1400);
+    expect(
+      document.querySelector('[data-testid="loading-screen"]'),
+      "the car screen survives the tap that skipped the intro"
+    ).toBeTruthy();
+    expect(document.querySelector('[data-testid="loading-car"]')).toBeTruthy();
   }, 20000);
 });
