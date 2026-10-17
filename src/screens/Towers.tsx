@@ -329,62 +329,58 @@ export default function Towers({
           the strip is the drop target for drag-to-rotation, so it has to stay
           reachable while the grid (61 cells) scrolls underneath it. */}
       <div className="towers-sticky sticky top-0 z-30 flex flex-col gap-2">
-      {/* SUMMON ROTATION — one horizontal strip that never wraps, so the grid
-          below keeps its height no matter how many towers are queued. Order
-          decides which towers a summon reaches for first. */}
-      <div className="tile tile-gold p-2" data-testid="lineup-row">
-        <div className="flex items-center gap-2">
-          <div className="rota-head shrink-0" title="Summons draw from the top of this list">
-            <span className="rota-head-t">SUMMON ROTATION</span>
-            <span className="rota-head-n num">{save.lineup.length}</span>
-          </div>
-          <div className="rota-strip scroll-thin" ref={stripRef}>
-            {save.lineup.map((id, i) => {
-              const def = TOWER_BY_ID[id];
-              if (!def) return null;
-              const rc = RARITY[def.rarity];
-              return (
-                <div
-                  key={id}
-                  ref={(el) => {
-                    slotRefs.current[i] = el;
-                  }}
-                  className="tw-chip"
-                  style={{ borderColor: rc.color, background: "rgba(8,5,26,0.55)" }}
-                  title={`#${i + 1} in the rotation · ${def.name}`}
-                >
-                  <span className="tw-chip-i num">{i + 1}</span>
-                  <TowerIcon def={def} size={26} />
-                  <span className="tw-chip-name" style={{ color: rc.color }}>{def.name}</span>
-                  <span className="tw-chip-lv num">{save.levels[def.id]}</span>
-                  <button
-                    className="tw-chip-x"
-                    data-testid={`chip-x-${id}`}
-                    title="Remove from rotation"
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onClick={() => toggleLineup(id)}
+        {/* SUMMON ROTATION — one horizontal strip that never wraps, so the grid
+            below keeps its height no matter how many towers are queued. Order
+            decides which towers a summon reaches for first. */}
+        <div className="tile tile-gold p-2" data-testid="lineup-row">
+          <div className="flex items-center gap-2">
+            <div className="rota-head shrink-0" title="Summons draw from the top of this list">
+              <span className="rota-head-t">SUMMON ROTATION</span>
+              <span className="rota-head-n num">{save.lineup.length}</span>
+            </div>
+            <div className="rota-strip scroll-thin" ref={stripRef}>
+              {save.lineup.map((id, i) => {
+                const def = TOWER_BY_ID[id];
+                if (!def) return null;
+                const rc = RARITY[def.rarity];
+                return (
+                  <div
+                    key={id}
+                    ref={(el) => {
+                      slotRefs.current[i] = el;
+                    }}
+                    className="tw-chip"
+                    style={{ borderColor: rc.color, background: "rgba(8,5,26,0.55)" }}
+                    title={`#${i + 1} in the rotation · ${def.name}`}
                   >
-                    ✕
-                  </button>
-                </div>
-              );
-            })}
-            {save.lineup.length === 0 && (
-              <span className="self-center text-[11.5px] font-semibold text-[var(--line2)]">
-                Empty — summons pick at random until you set an order.
-              </span>
-            )}
+                    <span className="tw-chip-i num">{i + 1}</span>
+                    <TowerIcon def={def} size={26} />
+                    <span className="tw-chip-name" style={{ color: rc.color }}>{def.name}</span>
+                    <span className="tw-chip-lv num">{save.levels[def.id]}</span>
+                    <button
+                      className="tw-chip-x"
+                      data-testid={`chip-x-${id}`}
+                      title="Remove from rotation"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={() => toggleLineup(id)}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                );
+              })}
+              {save.lineup.length === 0 && (
+                <span className="self-center text-[11.5px] font-semibold text-[var(--line2)]">
+                  Empty — summons pick at random until you set an order.
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* TOWER GRID — one flat grid of icons in rarity order (legendary
-          first), each rarity introduced by a sticky header row. Cells carry the
-          icon, the level underneath and an outline in the tower's rarity
-          colour; a filter row keeps all 47 towers scannable. No buttons, no
-          descriptions: tap a cell for the full sheet, drag it onto the rotation
-          bar to reorder. */}
-      <div className="tw-filters flex flex-wrap items-center gap-1.5" data-testid="tw-filters">
+        {/* FILTERS + CRIT BAND — pinned under the rotation strip so the counts,
+            the filters and the merged crit total never scroll away from the grid */}
+        <div className="tw-filters flex flex-wrap items-center gap-1.5" data-testid="tw-filters">
           {(
             [
               ["all", "ALL"],
@@ -423,68 +419,73 @@ export default function Towers({
             </span>
           </div>
         </div>
-
       </div>
 
+      {/* TOWER GRID — one flat grid of icons in rarity order (legendary first),
+          each rarity introduced by its own header row. Cells carry the icon, the
+          level underneath and an outline in the tower's rarity colour. No
+          buttons, no descriptions: tap a cell for the full sheet, drag it onto
+          the rotation bar to reorder. The grid is a direct child of the scroll
+          surface, so it is allowed to be all 61 cells tall. */}
       <div className="tower-scroll stagger grid content-start gap-1 pr-1" data-testid="tower-grid">
-          {(["legendary", "epic", "decent", "normal"] as const).map((rarity) => {
-            const group = twVisible.filter((def) => def.rarity === rarity);
-            if (!group.length) return null;
-            const rc = RARITY[rarity];
-            return (
-              <Fragment key={rarity}>
-                <div className="tw-group-head col-span-full" style={{ color: rc.color }}>
-                  <i style={{ background: rc.color }} />
-                  {rarity.toUpperCase()}
-                  <span className="num">· {group.length}</span>
-                </div>
-                {group.map((def, i) => {
-                  const lv = save.levels[def.id] || 0;
-                  const locked = lv === 0;
-                  const fr = lv > 0 ? upgradeFragCost(lv) : def.unlockFrags;
-                  const have = save.frags[def.id] || 0;
-                  const inLine = save.lineup.includes(def.id);
-                  const awoken = (save.awn[def.id]?.[0] || 0) + (save.awn[def.id]?.[1] || 0);
-                  const maxed = lv >= MAX_MENU_LEVEL;
-                  const ready = have >= fr;
-                  return (
-                    <button
-                      key={def.id}
-                      data-tower={def.id}
-                      data-locked={locked ? "1" : "0"}
-                      title={def.name + " — " + (locked ? "locked, needs " + def.unlockFrags + " fragments" : "Lv " + lv + (maxed ? " (max)" : ""))}
-                      className={"tw-cell " + (shakeCard === def.id ? "anim-shake " : "") + (inLine ? "in-line " : "") + "anim-pop"}
-                      style={{
-                        animationDelay: i * 12 + "ms",
-                        borderColor: locked ? "#4a3a9688" : rc.color,
-                        boxShadow: locked ? "none" : "0 0 0 1px " + rc.color + "22, 0 6px 16px -10px " + rc.color + "aa",
-                      }}
-                      onPointerDown={(e) => startDrag(def.id, e)}
-                    >
-                      <span className="tw-cell-art">
-                        <TowerIcon def={def} size={42} locked={locked} />
-                      </span>
-                      <span className="tw-cell-lv" style={{ color: locked ? "var(--dim)" : rc.color }}>
-                        {locked ? "LOCKED" : maxed ? "MAX" : "LV " + lv}
-                      </span>
-                      <span className="tw-cell-frag" style={{ color: locked ? "var(--dim)" : ready ? "#8effc4" : "var(--dim)" }}>
-                        <GemIcon size={11} />
-                        <b className="num">{have}</b>
-                        {!maxed && <i>/{fr}</i>}
-                      </span>
-                      {awoken > 0 && <span className="tw-cell-awk">✦{awoken}</span>}
-                      {inLine && <span className="tw-cell-line">✓</span>}
-                    </button>
-                  );
-                })}
-              </Fragment>
-            );
-          })}
-        {twVisible.length === 0 && (
-          <div className="col-span-full py-8 text-center text-[12px] font-bold tracking-[0.18em] text-[var(--dim)]">
-            NOTHING MATCHES THIS FILTER
-          </div>
-        )}
+        {(["legendary", "epic", "decent", "normal"] as const).map((rarity) => {
+          const group = twVisible.filter((def) => def.rarity === rarity);
+          if (!group.length) return null;
+          const rc = RARITY[rarity];
+          return (
+            <Fragment key={rarity}>
+              <div className="tw-group-head col-span-full" style={{ color: rc.color }}>
+                <i style={{ background: rc.color }} />
+                {rarity.toUpperCase()}
+                <span className="num">· {group.length}</span>
+              </div>
+              {group.map((def, i) => {
+                const lv = save.levels[def.id] || 0;
+                const locked = lv === 0;
+                const fr = lv > 0 ? upgradeFragCost(lv) : def.unlockFrags;
+                const have = save.frags[def.id] || 0;
+                const inLine = save.lineup.includes(def.id);
+                const awoken = (save.awn[def.id]?.[0] || 0) + (save.awn[def.id]?.[1] || 0);
+                const maxed = lv >= MAX_MENU_LEVEL;
+                const ready = have >= fr;
+                return (
+                  <button
+                    key={def.id}
+                    data-tower={def.id}
+                    data-locked={locked ? "1" : "0"}
+                    title={def.name + " — " + (locked ? "locked, needs " + def.unlockFrags + " fragments" : "Lv " + lv + (maxed ? " (max)" : ""))}
+                    className={"tw-cell " + (shakeCard === def.id ? "anim-shake " : "") + (inLine ? "in-line " : "") + "anim-pop"}
+                    style={{
+                      animationDelay: i * 12 + "ms",
+                      borderColor: locked ? "#4a3a9688" : rc.color,
+                      boxShadow: locked ? "none" : "0 0 0 1px " + rc.color + "22, 0 6px 16px -10px " + rc.color + "aa",
+                    }}
+                    onPointerDown={(e) => startDrag(def.id, e)}
+                  >
+                    <span className="tw-cell-art">
+                      <TowerIcon def={def} size={42} locked={locked} />
+                    </span>
+                    <span className="tw-cell-lv" style={{ color: locked ? "var(--dim)" : rc.color }}>
+                      {locked ? "LOCKED" : maxed ? "MAX" : "LV " + lv}
+                    </span>
+                    <span className="tw-cell-frag" style={{ color: locked ? "var(--dim)" : ready ? "#8effc4" : "var(--dim)" }}>
+                      <GemIcon size={11} />
+                      <b className="num">{have}</b>
+                      {!maxed && <i>/{fr}</i>}
+                    </span>
+                    {awoken > 0 && <span className="tw-cell-awk">✦{awoken}</span>}
+                    {inLine && <span className="tw-cell-line">✓</span>}
+                  </button>
+                );
+              })}
+            </Fragment>
+          );
+        })}
+      {twVisible.length === 0 && (
+        <div className="col-span-full py-8 text-center text-[12px] font-bold tracking-[0.18em] text-[var(--dim)]">
+          NOTHING MATCHES THIS FILTER
+        </div>
+      )}
       </div>
 
       {/* ASCENT ALL */}
