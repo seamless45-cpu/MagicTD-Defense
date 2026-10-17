@@ -1,26 +1,28 @@
 /**
- * MagicTD's audio engine — built on **Tone.js** (https://tonejs.github.io), the
- * Web Audio framework that ships as a real dependency of this project.
+ * MagicTD's audio engine — a **sample-first** mixer with a Tone.js fallback.
  *
- * The sounds are authored the way a game sound designer would author them in
- * Tone rather than as bare beeps:
+ * PRIMARY LAYER (`game/sfxSamples.ts`)
+ *   Every cue is built from short, real recordings — Kenney's CC0 interface,
+ *   UI, RPG, impact, sci-fi and music-jingle packs — layered transient + body +
+ *   tail, with a little random pitch so repeated shots never sound identical.
+ *   The clips live in `public/sfx/`; the first user gesture unlocks the bus and
+ *   preloads them. A compressor keeps a screen full of explosions from clipping,
+ *   per-cue throttles gate rapid fire, and a voice cap protects the frame rate.
  *
- *  - a Tone signal graph instead of one gain node: a `Gain` SFX bus into a
- *    `Compressor` and `Limiter` (so a wave of explosions never clips), a
- *    `Reverb` plate fed by a send, a `FeedbackDelay` for slap, and a separate
- *    bass lane through a lowpass so sub hits can be shaped alone
- *  - voices are Tone instruments/nodes: `Oscillator` + `AmplitudeEnvelope` +
- *    `Filter` sweeps for shaped tones, `Noise` bursts through sweeping filters
- *    for impacts and whooshes, `FMSynth` clangs for metal, `MembraneSynth`
- *    booms for explosions and heavy hits, `MetalSynth` for coins and chests
- *  - every sound is a small multi-layer composition (transient + body + tail),
- *    scheduled on Tone's clock so everything stays sample-accurate together
+ * FALLBACK LAYER (this file, Tone.js)
+ *   If a browser has no Web Audio, a clip cannot be fetched/decoded, or the game
+ *   is opened from file://, the original Tone synth voices below take over. The
+ *   sound design is still multi-layered: `Oscillator` + `AmplitudeEnvelope` +
+ *   `Filter` sweeps for tones, `Noise` bursts for impacts and whooshes,
+ *   `FMSynth` clangs for metal, `MembraneSynth` booms for explosions, a
+ *   `MetalSynth` for coins/chests, a plate reverb send and a sub-bass lane.
  *
- * The engine racks itself up on the first user gesture (`initAudio`) and
- * degrades to silence where Web Audio is unavailable. Every sfx.* entry keeps
- * its original name, so gameplay code is unchanged.
+ * `sfx.*` keeps its original API, so gameplay code is unchanged. Every call
+ * tries the external samples first and only falls through to the synth when the
+ * sample layer has nothing to play.
  */
 import * as Tone from "tone";
+import { initSamples, playSample, setSampleState } from "./sfxSamples";
 
 let rack: {
   master: Tone.Gain;
@@ -45,12 +47,14 @@ const masterGain = () => (enabled ? MASTER_LEVEL * volume * (boosted ? BOOST_MUL
 export function setSfx(on: boolean) {
   enabled = on;
   if (rack) rack.master.gain.rampTo(masterGain(), 0.06);
+  setSampleState(enabled, volume, boosted);
 }
 
 /** master volume, 0..1 */
 export function setVolume(v: number) {
   volume = Math.min(1, Math.max(0, v));
   if (rack) rack.master.gain.rampTo(masterGain(), 0.06);
+  setSampleState(enabled, volume, boosted);
 }
 
 /**
@@ -61,21 +65,19 @@ export function setVolume(v: number) {
 export function setVolumeBoost(on: boolean) {
   boosted = !!on;
   if (rack) rack.master.gain.rampTo(masterGain(), 0.08);
+  setSampleState(enabled, volume, boosted);
 }
 
 export const volumeBoosterOn = () => boosted;
 
-/**
- * Build the mixer once. Safe to call repeatedly; starts Tone's audio clock
- * (which needs a gesture) and then leaves the graph alone.
- */
-export function initAudio() {
+/** build the Tone fallback graph; safe to call repeatedly */
+function initRack() {
+  if (rack?.built) return;
   try {
     void Tone.start().catch(() => {});
   } catch {
     /* no Web Audio: stay silent */
   }
-  if (rack?.built) return;
   try {
     const master = new Tone.Gain(masterGain()).toDestination();
     const limiter = new Tone.Limiter(-1).connect(master);
@@ -100,6 +102,27 @@ export function initAudio() {
   } catch {
     rack = rack ?? { master: new Tone.Gain(0) as Tone.Gain, bus: new Tone.Gain(0) as Tone.Gain, bass: new Tone.Gain(0) as Tone.Gain, send: new Tone.Gain(0) as Tone.Gain, built: false };
   }
+}
+
+/** call before any synth fallback voice, so it starts inside the user gesture */
+function useSynth() {
+  initRack();
+  try {
+    void Tone.start().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Unlock audio on the first gesture. The external sample bus is the primary
+ * engine; the Tone rack is only built when the sample engine is unavailable
+ * (no AudioContext), or later if every clip failed to decode.
+ */
+export function initAudio() {
+  const samplesOk = initSamples(() => initRack());
+  setSampleState(enabled, volume, boosted);
+  if (!samplesOk) initRack();
 }
 
 const now = () => {
@@ -308,7 +331,7 @@ function impact(vol = 0.3, size = 1) {
   boom(90 * size, 0.42 * size, vol * 0.85);
 }
 
-export const sfx = {
+const synthSfx = {
   // ---------- UI ----------
   click: () => {
     tone(660, 0.05, "square", 0.16, -180, 0, { cutoff: 2600, q: 1.5 });
@@ -718,3 +741,25 @@ export const sfx = {
     stab([523, 784, 1046], 0.4, 0.16, 0.12, "triangle");
   },
 } as const;
+
+/**
+ * Public sound API. Every name from the original Tone voice book is preserved:
+ * gameplay calls `sfx.shoot(kind)`, `sfx.chestLoot(n)`, etc. and never needs to
+ * know which engine handled it. External samples win; the synth is the safety
+ * net for a missing clip or a browser without Web Audio.
+ */
+type SynthApi = typeof synthSfx;
+
+const sfxApi = {} as SynthApi;
+for (const name of Object.keys(synthSfx) as (keyof SynthApi)[]) {
+  const synth = synthSfx[name] as (...args: unknown[]) => void;
+  (sfxApi as Record<string, (...args: unknown[]) => void>)[name as string] = (...args: unknown[]) => {
+    if (!enabled) return;
+    const first = args[0] as string | number | undefined;
+    if (playSample(name as string, first)) return;
+    useSynth();
+    synth(...args);
+  };
+}
+
+export const sfx = sfxApi;

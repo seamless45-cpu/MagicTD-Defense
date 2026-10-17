@@ -1734,6 +1734,42 @@ export function roundHp(round: number) {
 export const BOSS_HP_MUL = 0.9;
 
 /**
+ * Global enemy health bonus: every enemy walks in with 18% more maximum
+ * health. Applied at spawn time (normal waves and Rift Call summons) so it
+ * stacks cleanly with the boss trim, elite bonus and event multipliers
+ * instead of being baked into any one of them.
+ */
+export const ENEMY_HP_SCALE = 1.18;
+
+/**
+ * Compact number for the in-battle health readout: 987, 12.3k, 4.56M, 7.9B.
+ * Enemies scale exponentially with the wave, so a raw 47-digit number would
+ * never fit over a slime's head.
+ */
+export function shortHp(v: number): string {
+  const n = Math.max(0, v);
+  if (n < 1000) return String(Math.ceil(n - 1e-9));
+  const units = ["k", "M", "B", "T", "Qa"];
+  let x = n;
+  let u = -1;
+  while (x >= 1000 && u < units.length - 1) {
+    x /= 1000;
+    u++;
+  }
+  const pick = () => (x >= 100 ? 0 : x >= 10 ? 1 : 2);
+  let digits = pick();
+  let t = x.toFixed(digits);
+  // rounding can push 999.6k to "1000k" - step up a unit instead
+  if (Number(t) >= 1000 && u < units.length - 1) {
+    x /= 1000;
+    u++;
+    digits = pick();
+    t = x.toFixed(digits);
+  }
+  return `${t.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "")}${units[u]}`;
+}
+
+/**
  * Run gold is paid out 25% richer: every kill, every bounty awakening and the
  * wave-clear purse. Account gold from chests and tasks is a different economy
  * and is not touched by this. Whatever is left in the wallet is settled when the

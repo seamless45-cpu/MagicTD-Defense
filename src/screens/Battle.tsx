@@ -11,6 +11,8 @@ import {
   roundHp,
   HP_GROWTH,
   BOSS_HP_MUL,
+  ENEMY_HP_SCALE,
+  shortHp,
   runGold,
   waveComp,
   BATTLE_ROUNDS,
@@ -2756,9 +2758,11 @@ export default function Battle({
         }
         const dur = def.mergeBuffT || 13;
         const board = [...g.towers];
+        // every blessing bolt falls on the same frame: the judgement is one
+        // sky event, not a queue of single strikes
         for (let i = 0; i < bolts && board.length; i++) {
           const pick = board[Math.floor(Math.random() * board.length)];
-          schedule(i * 0.09, () => blessTower(pick, pts, buff, dur, "#ffe86b", "BLESSED"));
+          blessTower(pick, pts, buff, dur, "#ffe86b", "BLESSED");
         }
         sfx.superbolt();
         flash("#fff6c4", 0.16);
@@ -3410,9 +3414,10 @@ export default function Battle({
           // elites: tougher variants with a golden sigil, 5x sp and double gold
           const elite = !boss && Math.random() < Math.min(0.35, 0.06 + g.round * 0.015);
           // BOSS_HP_MUL trims 10% off every boss's maximum health: the wave curve
-          // is steeper now and a boss is 15-34x a normal enemy on top of it
+          // is steeper now and a boss is 15-34x a normal enemy on top of it.
+          // ENEMY_HP_SCALE then lifts the whole horde by a flat 18%.
           const hp =
-            roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? 2.2 : 1) * (boss ? BOSS_HP_MUL : 1);
+            roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? 2.2 : 1) * (boss ? BOSS_HP_MUL : 1) * ENEMY_HP_SCALE;
           g.enemies.push({
             id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012) * (elite ? 1.08 : 1), type: s.type,
             elite,
@@ -3537,7 +3542,7 @@ export default function Battle({
               const et0 = ENEMY_TYPES[0];
               const nSum = 2 + (g.round >= 16 ? 1 : 0);
               for (let i = 0; i < nSum; i++) {
-                const hp = roundHp(g.round) * et0.hpMul * MONTH_BONUS.hpMul * 0.6;
+                const hp = roundHp(g.round) * et0.hpMul * MONTH_BONUS.hpMul * 0.6 * ENEMY_HP_SCALE;
                 const back = Math.max(0, e.d - 30 - i * 26);
                 g.enemies.push({
                   id: eidC++, d: back, hp, max: hp, speed: et0.speed * (1 + g.round * 0.012) * 1.25, type: 0,
@@ -3981,11 +3986,10 @@ export default function Battle({
           }
           case "teleport": {
             // a shard blinking through every target at once
-            front.slice(0, sk.hits).forEach((e, i) => {
+            front.slice(0, sk.hits).forEach((e) => {
               const ep = enemyPos(e);
-              schedule(i * 0.05, () => {
-                if (!e.dead) dealDamage(e, base, { tw: t, color: sk.color });
-              });
+              // all shards land together - no 50ms trickle of damage
+              if (!e.dead) dealDamage(e, base, { tw: t, color: sk.color });
               stars(ep.x, ep.y, sk.color, 6, 60);
               if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, sk.color, 2, 0.18, now2));
             });
@@ -6573,10 +6577,24 @@ export default function Battle({
       }
       ctx.restore();
       // health bar: rounded, outlined, with a lighter cap so it reads at speed
-      const w3 = Math.max(26, et.r * 2);
+      const boss = isBossType(e.type);
+      const w3 = Math.max(28, et.r * 2);
       const hpPct = Math.max(0, Math.min(1, e.hp / e.max));
-      const by = p.y - et.r - (isBossType(e.type) ? 22 : 15) + bob;
-      const bh = isBossType(e.type) ? 6 : 5;
+      const by = p.y - et.r - (boss ? 22 : 15) + bob;
+      const bh = boss ? 7 : 5;
+      // current/max readout: sits just above the bar, outlined for contrast
+      const hpLabel = `${shortHp(e.hp)}/${shortHp(e.max)}`;
+      ctx.save();
+      const fs = boss ? 12 : 10;
+      ctx.font = `800 ${fs}px ${canvasUiFont}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(0,0,0,0.88)";
+      ctx.strokeText(hpLabel, p.x, by - 4);
+      ctx.fillStyle = hpPct > 0.25 ? "#eafff2" : "#ffd7db";
+      ctx.fillText(hpLabel, p.x, by - 4);
+      ctx.restore();
       ctx.fillStyle = "rgba(0,0,0,0.72)";
       ctx.beginPath();
       ctx.roundRect(p.x - w3 / 2 - 1, by - 1, w3 + 2, bh + 2, 3);
@@ -6589,6 +6607,11 @@ export default function Battle({
       ctx.fillStyle = hpGrad;
       ctx.beginPath();
       ctx.roundRect(p.x - w3 / 2, by, Math.max(1, w3 * hpPct), bh, 2);
+      ctx.fill();
+      // a thin cap line on top keeps the fill edge readable at max health
+      ctx.fillStyle = "#ffffff55";
+      ctx.beginPath();
+      ctx.roundRect(p.x - w3 / 2, by, Math.max(1, w3 * hpPct), 1.5, 1);
       ctx.fill();
     };
 
@@ -8160,8 +8183,8 @@ export default function Battle({
                   </span>
                   {e.enraged && <span className="rounded bg-[#ff4d5e] px-1 text-[9px] font-bold leading-tight text-black">ENRAGED</span>}
                   {e.ward > 0 && <span className="rounded bg-[#8fb0ff] px-1 text-[9px] font-bold leading-tight text-black">WARD {e.ward.toFixed(1)}s</span>}
-                  <span className="ml-auto text-[10px] font-bold text-[var(--dim)]">
-                    {bosses.length > 1 ? `${bosses.length} BOSSES` : `${Math.ceil(frac * 100)}%`}
+                  <span className="num ml-auto text-[10px] font-bold text-[var(--dim)]">
+                    {bosses.length > 1 ? `${bosses.length} BOSSES` : `${shortHp(e.hp)} / ${shortHp(e.max)} · ${Math.ceil(frac * 100)}%`}
                   </span>
                 </div>
                 <div className="mt-1.5 h-3 overflow-hidden rounded-full border border-black/60 bg-black/70">
@@ -8588,7 +8611,7 @@ export default function Battle({
                 <span className="text-[var(--dim)]">
                   HEALTH{" "}
                   <span className="num" style={{ color: "#ff8f9a" }}>
-                    ×{(ENEMY_TYPES[g.cut.type].hpMul * BOSS_HP_MUL).toFixed(1)}
+                    ×{(ENEMY_TYPES[g.cut.type].hpMul * BOSS_HP_MUL * ENEMY_HP_SCALE).toFixed(1)}
                   </span>
                 </span>
                 <span className="text-[var(--dim)]">

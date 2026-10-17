@@ -1,7 +1,8 @@
 # MagicTD Defense
 
 A 2D browser tower defense / merge game built with React 19, TypeScript, Tailwind CSS 4 and Vite.
-Everything — menus, engine, audio, art and particles — is code; there are no image or audio assets.
+Everything — menus, engine, audio, art and particles — is code. The only binary assets are the
+CC0 sound bank in `public/sfx/` and the app icons.
 
 ## Run it
 
@@ -15,7 +16,7 @@ Other scripts:
 ```bash
 npm run build      # bundles the game and updates the committed deploy artifact
 npm run preview    # serve the production build
-npm test           # vitest + jsdom suite (173 tests)
+npm test           # vitest + jsdom suite (188 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -40,6 +41,20 @@ published site keeps serving the previous version.
 
 ## Latest rework
 
+- **Lightning lands as one event.** Every sky effect resolves its whole target list on the same
+  frame: the Lightning Princess volley and restrikes, Superbolt, Demon Execution, Thundercrown,
+  Ion Storm chain rings, the Heavenly God blessing bolts, and Storm Sovereign's lane-wide fracture
+  with its Sovereign Strike follow-up. No strike queues, no per-target delay — chain arcs are the
+  only travelling bolt left.
+- **Every enemy shows its health numbers.** The existing bar now carries a `current/max` readout
+  (`12.3k/45.6k`), outlined so it stays readable at battle speed; bosses get a larger bar and the
+  top boss bar lists exact health alongside its percentage.
+- **Enemies are 18% tougher.** A flat `ENEMY_HP_SCALE` lifts every spawn — normal, elite, boss and
+  Rift Call summon — on top of the existing boss trim and event multipliers.
+- **Rebuilt sound bank.** All 53 cues (and every tower's firing voice) now play layered recordings
+  from Kenney's CC0 interface, RPG, impact, sci-fi and music-jingle packs instead of synth
+  oscillators, with a compressor, per-cue throttles and a voice cap on top. The old Tone.js engine
+  stays as an automatic fallback when the bank cannot load, so the game is never silent.
 - **Battle control strip.** The arena HUD now carries a real pause button (the simulation freezes
   but the last frame stays on screen, with Resume / Speed / Abandon in the overlay), a **×1 / ×1.5 /
   ×2** battle-speed cycle, and a thin **wave strip** under the HUD showing round, enemies cleared,
@@ -356,7 +371,8 @@ src/
   components/ErrorBoundary.tsx  crash panel (never leave a blank page)
   game/data.ts         tower/enemy definitions, wave and cost formulas
   game/save.ts         localStorage save schema
-  game/audio.ts        WebAudio synth SFX (no audio files)
+  game/audio.ts        sample-first mixer, Tone.js synth fallback
+  game/sfxSamples.ts   CC0 cue map, lazy loader and voice mixer for public/sfx/
   screens/Battle.tsx   canvas engine: update/draw loop, input, merging, FX
   screens/Menus.tsx    loading, home, specials, guild, settings
   screens/Shop.tsx     chests and reward rolls
@@ -364,7 +380,7 @@ src/
   __tests__/           vitest suite: data, app integration, deployed artifact
 app.html               Vite entry (edit this)
 index.html             generated build served by GitHub Pages (do not edit)
-public/                manifest, service worker and app icons (mirrored to the root by the build)
+public/                manifest, service worker, app icons, sfx/ sound bank (mirrored to the root)
 scripts/sync-pages.mjs publishes dist/app.html + the PWA assets to the repo root
 ```
 

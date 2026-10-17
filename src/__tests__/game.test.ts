@@ -20,6 +20,8 @@ import {
   ENEMY_TYPES,
   HP_GROWTH,
   BOSS_HP_MUL,
+  ENEMY_HP_SCALE,
+  shortHp,
   GOLD_GAIN_MUL,
   runGold,
   POINT_DMG_STEP,
@@ -168,6 +170,28 @@ describe("tower data", () => {
     }
     expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.8, 29), 3);
     expect(roundHp(2)).toBeCloseTo(46 * 1.8, 6);
+  });
+
+  it("gives every enemy 18% more health", () => {
+    expect(ENEMY_HP_SCALE).toBeCloseTo(1.18, 10);
+    // the scale is a flat multiplier on spawn, so it lands on the whole horde
+    // at once: slime, runner, knight and every boss alike
+    for (const et of ENEMY_TYPES) {
+      expect(roundHp(7) * et.hpMul * ENEMY_HP_SCALE).toBeGreaterThan(roundHp(7) * et.hpMul);
+    }
+  });
+
+  it("labels battlefield health in a compact form", () => {
+    expect(shortHp(0)).toBe("0");
+    expect(shortHp(987)).toBe("987");
+    expect(shortHp(1000)).toBe("1k");
+    expect(shortHp(1234)).toBe("1.23k");
+    expect(shortHp(12_300)).toBe("12.3k");
+    expect(shortHp(123_000)).toBe("123k");
+    expect(shortHp(4_560_000)).toBe("4.56M");
+    expect(shortHp(7_900_000_000)).toBe("7.9B");
+    // a rounded 999.6k steps up instead of printing "1000k"
+    expect(shortHp(999_600)).toBe("1M");
   });
 
   it("trims 10% off every boss's maximum health", () => {
