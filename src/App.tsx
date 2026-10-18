@@ -227,6 +227,7 @@ export default function App() {
               return;
             }
             const plan = estimateAutoBattle(save, mode, liveSquadDps, deployedCount, currentWave);
+            sfx.autoResolve();
             mutate((s) => {
               deliverAutoBattleReport(s, mode, plan.waves, plan.minutes, walletGold, currentWave, plan.breaksAtWave);
             });

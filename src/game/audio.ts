@@ -474,6 +474,11 @@ const synthSfx = {
     tone(220, 0.14, "square", 0.18, 90, 0, { cutoff: 1400, q: 3 });
     fm(340, 2.01, 1.6, 0.12, 0.12, 0.02);
   },
+  towerDrop: () => {
+    noise(0.16, 0.28, 900, { sweep: 0.25, q: 1.4, noiseType: "pink" });
+    boom(145, 0.22, 0.16);
+    tone(440, 0.12, "triangle", 0.12, 180, 0.04, { verb: 0.45 });
+  },
   summon: () => {
     riser(0.22, 0.16, 300, 1500);
     impact(0.24, 0.7);
@@ -727,6 +732,25 @@ const synthSfx = {
     stab([392, 523], 0.34, 0.18, 0, "square");
     stab([587, 784], 0.42, 0.16, 0.18, "square");
     noise(0.5, 0.1, 1400, { type: "bandpass", q: 1.5, sweep: 0.5, noiseType: "pink" });
+  },
+  battleStart: () => {
+    riser(0.45, 0.12, 160, 900);
+    stab([392, 523, 659], 0.34, 0.16, 0.08, "triangle");
+    noise(0.4, 0.08, 2400, { type: "highpass", sweep: 0.35, verb: 0.55 });
+  },
+  waveClear: () => {
+    stab([523, 659, 784], 0.3, 0.13, 0, "triangle");
+    clang(1046, 0.22, 0.055, 0.12, 0.68);
+    tone(262, 0.2, "sine", 0.12, 140, 0.04, { verb: 0.5 });
+  },
+  autoResolve: () => {
+    noise(0.26, 0.14, 4200, { type: "highpass", sweep: 0.28, verb: 0.5 });
+    stab([660, 880, 1175], 0.24, 0.12, 0.04, "sine");
+    tone(180, 0.24, "sine", 0.1, -60, 0.05, { sub: true });
+  },
+  bossSkip: () => {
+    noise(0.14, 0.15, 3000, { type: "highpass", sweep: 0.5 });
+    tone(880, 0.12, "square", 0.1, -500, 0, { cutoff: 4000 });
   },
   boss: () => {
     impact(0.34, 1.5);

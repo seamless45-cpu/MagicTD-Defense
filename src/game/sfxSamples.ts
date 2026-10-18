@@ -160,6 +160,11 @@ const CUES: Record<string, SampleCue> = {
     L("rpg/book-place.mp3", 0.36, 1.05, 0.035),
     L("impact/wood-heavy.mp3", 0.22, 1.05, 0.01),
   ],
+  towerDrop: [
+    L("impact/plate-medium.mp3", 0.62, 0.9),
+    L("impact/wood-heavy.mp3", 0.48, 0.82, 0.018),
+    L("ui/glass-1.mp3", 0.24, 1.15, 0.06),
+  ],
   summon: [
     L("scifi/force-field-0.mp3", 0.5, 1),
     L("rpg/door-open.mp3", 0.36, 1.1, 0.04),
@@ -278,6 +283,25 @@ const CUES: Record<string, SampleCue> = {
     L("scifi/low-explosion-1.mp3", 0.46, 1.1, 0.025),
   ],
   wave: [L("music/wave.mp3", 0.62, 1)],
+  battleStart: [
+    L("music/hero.mp3", 0.46, 0.9, 0, 0.65),
+    L("ui/confirm-4.mp3", 0.4, 0.92, 0.12),
+    L("scifi/force-field-0.mp3", 0.3, 0.85, 0.04, 0.6),
+  ],
+  waveClear: [
+    L("music/ceremony.mp3", 0.5, 1.08, 0, 0.7),
+    L("ui/glass-4.mp3", 0.42, 1.1, 0.06),
+    L("ui/confirm-1.mp3", 0.28, 1.15, 0.1),
+  ],
+  autoResolve: [
+    L("ui/scroll-2.mp3", 0.42, [0.8, 1.12], 0, 0.3),
+    L("scifi/force-field-3.mp3", 0.38, 1.05, 0.035, 0.45),
+    L("ui/confirm-4.mp3", 0.4, 1.15, 0.12),
+  ],
+  bossSkip: [
+    L("ui/back.mp3", 0.56, 1.18),
+    L("scifi/thruster-2.mp3", 0.3, [1.25, 0.9], 0.01, 0.24),
+  ],
   boss: [
     L("music/boss.mp3", 0.58, 1),
     L("scifi/low-explosion-1.mp3", 0.62, 1, 0.02),

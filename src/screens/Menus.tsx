@@ -2623,7 +2623,7 @@ export function SettingsModal({
         />
       </div>
 
-      {/* FONT VAULT — sixty faces, each tile previews itself. Picking one applies
+      {/* FONT VAULT — eighty faces, each tile previews itself. Picking one applies
           it live (UI + headings) and lazily pulls the Google stylesheet. */}
       <div className="mt-4 flex items-center gap-2">
         <div className="text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">FONT</div>

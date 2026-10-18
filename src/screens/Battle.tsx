@@ -104,23 +104,21 @@ const LIVE_MONTH = monthlyEventForDate();
 const MONTH_BONUS: MonthlyBonus = monthlyEventBonus(LIVE_MONTH.id);
 
 // ---------- board geometry ----------
-const W = 600;
-const H = 1000;
-const C = 80;
-const COLS = 4;
-const ROWS = 7;
+const W = 1000;
+const H = 580;
+const C = 90;
+const COLS = 7;
+const ROWS = 4;
 const OX = (W - COLS * C) / 2;
 const OY = (H - ROWS * C) / 2;
 
 const WPTS: [number, number][] = [
-  [0, -0.7],
-  [0, 1],
-  [3, 1],
-  [3, 3],
+  [-0.7, 0],
+  [0, 0],
   [0, 3],
-  [0, 5],
-  [3, 5],
-  [3, 6.7],
+  [6, 3],
+  [6, 0],
+  [6, -0.7],
 ];
 
 /** Towers used to be limited to a 236px bubble around their cell. They are not
@@ -128,7 +126,7 @@ const WPTS: [number, number][] = [
  *  TARGETING), so the guide draws an arena-wide field instead of a range ring. */
 
 const cellCenter = (c: number, r: number) => ({ x: OX + (c + 0.5) * C, y: OY + (r + 0.5) * C });
-const isPathCell = (c: number, r: number) => c === 0 || c === 3 || r === 1 || r === 3 || r === 5;
+const isPathCell = (c: number, r: number) => c === 0 || c === 6 || r === 3;
 
 /** Client coords -> canvas world coords, safe against a zero-sized layout box. */
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
@@ -1234,7 +1232,8 @@ export default function Battle({
       // bosses walk in first: their cutscene should open the wave, not trail it
       for (const s2 of g.spawnQ) if (isBossType(s2.type)) s2.at = Math.min(s2.at, g.t + 2.4);
       g.spawnQ.sort((a, b) => a.at - b.at);
-      sfx.wave();
+      if (g.round === 1) sfx.battleStart();
+      else sfx.wave();
     };
 
     /**
@@ -1527,7 +1526,7 @@ export default function Battle({
     const onPlaced = (t: BT, c: number, r: number) => {
       t.cell = { c, r };
       const p = cellCenter(c, r);
-      sfx.place();
+      sfx.towerDrop();
       ring(p.x, p.y, RARITY[t.def.rarity].color, 40);
       burst(p.x, p.y, RARITY[t.def.rarity].color, 10);
       const tier = saveRef.current.awn["hellstorm"]?.[0] || 0;
@@ -3502,6 +3501,7 @@ export default function Battle({
           const bonus = 40 + 10 * g.round;
           g.sp += spGain(bonus);
           g.wavesCleared++;
+          sfx.waveClear();
           // gold + gem payouts were buffed 40% (REWARD_MUL) in the balance patch
           g.gold += runGold(reward(bonus / 2) * g.goldMul);
           if (g.mode === "battle" && g.round >= g.maxRounds) {
@@ -8611,7 +8611,7 @@ export default function Battle({
                 <span className="text-[11px] font-bold tracking-[0.25em] text-[var(--dim)]">
                   {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "CUTSCENE"}
                 </span>
-                <button type="button" className="btn btn-cyan px-3 py-1.5 text-xs" aria-label="Skip boss cutscene" onClick={(e) => { e.stopPropagation(); if (g) g.cut = null; }}>SKIP BOSS INTRO</button>
+                <button type="button" className="btn btn-cyan px-3 py-1.5 text-xs" aria-label="Skip boss cutscene" onClick={(e) => { e.stopPropagation(); sfx.bossSkip(); if (g) g.cut = null; }}>SKIP BOSS INTRO</button>
               </div>
             </div>
           </div>

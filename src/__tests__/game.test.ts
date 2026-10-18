@@ -1577,7 +1577,7 @@ describe("boss skills", () => {
 // ---------- the font vault ----------
 describe("font vault", () => {
   it("ships sixty faces with unique ids", () => {
-    expect(FONTS).toHaveLength(60);
+    expect(FONTS).toHaveLength(80);
     const ids = FONTS.map((f) => f.id);
     expect(new Set(ids).size).toBe(ids.length);
     // the three the brief called out by name
