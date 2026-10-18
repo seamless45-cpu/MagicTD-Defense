@@ -49,8 +49,8 @@ published site keeps serving the previous version.
 - **Every enemy shows its health numbers.** The existing bar now carries a `current/max` readout
   (`12.3k/45.6k`), outlined so it stays readable at battle speed; bosses get a larger bar and the
   top boss bar lists exact health alongside its percentage.
-- **Enemies are 18% tougher.** A flat `ENEMY_HP_SCALE` lifts every spawn — normal, elite, boss and
-  Rift Call summon — on top of the existing boss trim and event multipliers.
+- **Enemy health raised again.** Regular and elite enemies receive +90% HP (`ENEMY_HP_SCALE`);
+  bosses receive a dedicated +55% (`BOSS_HP_MUL`). Rift Call summons use the regular-enemy scale.
 - **Rebuilt sound bank.** All 53 cues (and every tower's firing voice) now play layered recordings
   from Kenney's CC0 interface, RPG, impact, sci-fi and music-jingle packs instead of synth
   oscillators, with a compressor, per-cue throttles and a voice cap on top. The old Tone.js engine
@@ -99,9 +99,9 @@ Endless and Gauntlet also offer **Auto Battle** from the Command Center. The off
 
 **Enemies get 120% stronger every wave** (×2.2 per wave, compounding). Both the wave banner and
 the HUD show the current multiplier. Each wave holds two more enemies than it used
-to, and every round-clear payout (gold + gems) was raised 40%. Two counterweights travel with the
-steeper curve: **bosses spawn with 10% less maximum health** (`BOSS_HP_MUL`) and **run gold pays 25%
-more** (`GOLD_GAIN_MUL`) from every kill, bounty and wave clear.
+to, and every round-clear payout (gold + gems) was raised 40%. Regular and elite enemies use
+`ENEMY_HP_SCALE = 1.9` (+90%), while bosses use their dedicated `BOSS_HP_MUL = 1.55` (+55%).
+**Run gold pays 25% more** (`GOLD_GAIN_MUL`) from every kill, bounty and wave clear.
 
 ### Bosses
 
@@ -721,11 +721,10 @@ enemies, with Overpenetration and Rail Burn awakenings).
 
 ## Harder waves, richer runs, a scrollable Towers tab and a boot that plays
 
-- **The wave curve is steeper.** `HP_GROWTH` is now **2.2×** per wave (+120% HP): wave 12 is now
-  ~7,430x wave 1 instead of ~130x, so late rounds demand the crit/point economy rather than raw
-  tower count. Bosses were brought down by 10% (`BOSS_HP_MUL = 0.9`, applied to the boss's own HP
-  multiplier at spawn — the Void Titan walks in on 34 x 0.9 = 30.6, the Warlord on 13.5) so the four
-  boss waves do not spike harder than the ramp around them. Nothing else about a boss changed.
+- **The wave curve is steeper.** `HP_GROWTH` is **2.2×** per wave (+120% HP): wave 12 is ~7,430x
+  wave 1. Regular and elite enemies now get +90% health (`ENEMY_HP_SCALE = 1.9`); bosses instead
+  get +55% (`BOSS_HP_MUL = 1.55`) on their role-specific health multiplier. Rift Call summons use
+  the regular-enemy increase.
 - **Run gold pays 25% more.** `runGold()` wraps the three places gold is earned in a battle: the
   kill payout, the bounty family of awakenings and the wave-clear purse. Whatever is left in the
   wallet is settled when the run ends, so the bonus carries into the results screen. Account gold
@@ -753,5 +752,6 @@ enemies, with Overpenetration and Rail Burn awakenings).
   claimable custom Mailbox attachments. Standard Battle remains manual-only.
 - **Removed Reset Progress from Settings** so the destructive wipe is no longer exposed in-game.
 - **Full font consistency.** The selected face now drives both UI and display text roles, and native controls inherit it rather than rendering in the platform default.
-- **Liquid Glass is an optional Settings skin.** It adds translucent, blurred, specular surfaces without changing the original default theme.
+- **Power Plant network overhaul.** Four, six, eight and twelve plants amplify both adjacent-tower damage and attack-speed buffs by +25%, +50%, +75% and +100%. Plants now reach all eight neighboring cells and buffed towers show orbiting electric filaments.
+- **Liquid Glass is an optional Settings skin.** It switches the palette to aqua/pearl, with deep backdrop blur, prismatic reflections and soft glass borders; interactive controls and screen changes get fluid transitions. The original theme remains the default.
 - **Lightning geometry refreshes at 100 Hz.** Thin segmented channels use a reused typed jitter buffer (10 ms flicker cadence); Demon Execution's blast pools and flashes are centered on each matching lightning impact.

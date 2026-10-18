@@ -12,6 +12,7 @@ import {
   HP_GROWTH,
   BOSS_HP_MUL,
   ENEMY_HP_SCALE,
+  powerPlantNetworkScale,
   shortHp,
   runGold,
   waveComp,
@@ -255,6 +256,8 @@ interface BT {
   flash: number;
   owner: string;
   atkMul: number;
+  /** live visual intensity of a Power Plant aura on this tower */
+  plantGlow?: number;
   /** Null Field: seconds left hexed (fires much slower) */
   hexT: number;
   /** Meteor Fall: seconds left offline (cannot fire at all) */
@@ -3448,11 +3451,9 @@ export default function Battle({
           const boss = isBossType(s.type);
           // elites: tougher variants with a golden sigil, 5x sp and double gold
           const elite = !boss && Math.random() < Math.min(0.35, 0.06 + g.round * 0.015);
-          // BOSS_HP_MUL trims 10% off every boss's maximum health: the wave curve
-          // is steeper now and a boss is 15-34x a normal enemy on top of it.
-          // ENEMY_HP_SCALE then lifts the whole horde by a flat 18%.
+          // Bosses use their dedicated +55% scale; regulars and elites use +90%.
           const hp =
-            roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? 2.2 : 1) * (boss ? BOSS_HP_MUL : 1) * ENEMY_HP_SCALE;
+            roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? 2.2 : 1) * (boss ? BOSS_HP_MUL : ENEMY_HP_SCALE);
           g.enemies.push({
             id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012) * (elite ? 1.08 : 1), type: s.type,
             elite,
@@ -3847,30 +3848,36 @@ export default function Battle({
       const aspdA = new Map<number, number>();
       const atkA = new Map<number, number>();
       const plantCount = g.towers.filter((t) => t.cell && t.def.id === "plant").length;
-      const hpState = plantCount > 0 && [4, 6, 8, 12].includes(plantCount) ? 1.5 : 1;
+      const plantNetwork = powerPlantNetworkScale(plantCount);
+      for (const target of g.towers) target.plantGlow = 0;
       for (const t of g.towers) {
         if (!t.cell || !t.def.aura) continue;
         const upg = t.menuLv - 1;
         const asc = t.bLv - 1;
         let bonus = (t.def.aspd || 0) + (t.def.upAspd || 0) * upg + (t.def.ascAspd || 0) * asc;
         bonus *= 1 + 0.5 * t.points;
-        if (t.def.id === "plant") bonus *= hpState;
-        const atk = ((t.def.atkAura || 0) + (t.def.upAtkAura || 0) * upg + (t.def.ascAtkAura || 0) * asc) * (1 + 0.5 * t.points);
+        let atk = ((t.def.atkAura || 0) + (t.def.upAtkAura || 0) * upg + (t.def.ascAtkAura || 0) * asc) * (1 + 0.5 * t.points);
+        // Power Plants feed both damage and attack speed through the network
+        // tier. Other aura towers retain their own stat mix.
+        if (t.def.id === "plant") {
+          bonus *= plantNetwork;
+          atk *= plantNetwork;
+        }
         // War Anthem / Overclock / Bulwark Field: the aura's own awakenings
         const aw = auraAwk(t);
         bonus *= aw;
         const atkAw = atk * aw;
-        const nbs = [
-          [t.cell.c + 1, t.cell.r],
-          [t.cell.c - 1, t.cell.r],
-          [t.cell.c, t.cell.r + 1],
-          [t.cell.c, t.cell.r - 1],
-        ];
-        for (const [c, r] of nbs) {
+        const isPlant = t.def.id === "plant";
+        for (let dc = -1; dc <= 1; dc++) for (let dr = -1; dr <= 1; dr++) {
+          if (dc === 0 && dr === 0) continue;
+          if (!isPlant && Math.abs(dc) + Math.abs(dr) !== 1) continue;
+          const c = t.cell.c + dc;
+          const r = t.cell.r + dr;
           const nb = g.towers.find((x) => x.cell && x.cell.c === c && x.cell.r === r);
           if (nb && nb.def.target === "front") {
             aspdA.set(nb.uid, (aspdA.get(nb.uid) || 0) + bonus);
             atkA.set(nb.uid, (atkA.get(nb.uid) || 0) + atkAw);
+            if (isPlant) nb.plantGlow = Math.max(nb.plantGlow || 0, plantNetwork);
           }
         }
       }
@@ -4401,7 +4408,7 @@ export default function Battle({
         ctx.stroke();
       }
       if (t.def.aura) {
-        const rr = 60 + Math.sin(now / 300) * 4;
+        const rr = (t.def.id === "plant" ? 72 : 60) + Math.sin(now / (t.def.id === "plant" ? 210 : 300)) * 4;
         ctx.globalAlpha *= 0.9;
         ctx.fillStyle = t.def.id === "plant" ? "rgba(61,255,142,0.10)" : "rgba(53,224,255,0.10)";
         ctx.beginPath();
@@ -4410,13 +4417,39 @@ export default function Battle({
         ctx.globalAlpha = 0.55;
         ctx.strokeStyle = t.def.id === "plant" ? "#3dff8e" : "#35e0ff";
         ctx.lineWidth = 1.5;
-        for (let i = 0; i < 4; i++) {
-          const a = now / 700 + (i * Math.PI) / 2;
+        const auraArcs = t.def.id === "plant" ? 6 : 4;
+        for (let i = 0; i < auraArcs; i++) {
+          const a = now / (t.def.id === "plant" ? 430 : 700) + (i * Math.PI * 2) / auraArcs;
           ctx.beginPath();
-          ctx.arc(x, y, rr, a, a + 0.9);
+          ctx.arc(x, y, rr, a, a + (t.def.id === "plant" ? 0.54 : 0.9));
           ctx.stroke();
         }
         if (ghost) ctx.globalAlpha = 0.65;
+      }
+      if (!ghost && (t.plantGlow || 0) > 0) {
+        const intensity = Math.min(1, 0.4 + (t.plantGlow! - 1) * 0.28);
+        const phase = now / 145;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = intensity;
+        ctx.strokeStyle = "#8effc4";
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(x, y, 38 + Math.sin(phase) * 2, phase * 0.7, phase * 0.7 + 4.6);
+        ctx.stroke();
+        // little live arcs orbit buffed towers so the plant's benefit reads on
+        // the board even before the player inspects their stat panel
+        for (let i = 0; i < 3; i++) {
+          const a = phase + (i * Math.PI * 2) / 3;
+          const sx = x + Math.cos(a) * 36;
+          const sy = y + Math.sin(a) * 36;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(sx + Math.cos(a + 0.7) * 7, sy + Math.sin(a + 0.7) * 7);
+          ctx.lineTo(sx + Math.cos(a - 0.5) * 12, sy + Math.sin(a - 0.5) * 12);
+          ctx.stroke();
+        }
+        ctx.restore();
       }
       ctx.save();
       ctx.translate(x, y);
@@ -8655,7 +8688,7 @@ export default function Battle({
                 <span className="text-[var(--dim)]">
                   HEALTH{" "}
                   <span className="num" style={{ color: "#ff8f9a" }}>
-                    ×{(ENEMY_TYPES[g.cut.type].hpMul * BOSS_HP_MUL * ENEMY_HP_SCALE).toFixed(1)}
+                    ×{(ENEMY_TYPES[g.cut.type].hpMul * BOSS_HP_MUL).toFixed(1)}
                   </span>
                 </span>
                 <span className="text-[var(--dim)]">

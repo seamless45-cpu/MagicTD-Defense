@@ -21,6 +21,7 @@ import {
   HP_GROWTH,
   BOSS_HP_MUL,
   ENEMY_HP_SCALE,
+  powerPlantNetworkScale,
   shortHp,
   GOLD_GAIN_MUL,
   runGold,
@@ -177,12 +178,22 @@ describe("tower data", () => {
     expect(roundHp(2)).toBeCloseTo(46 * 2.2, 6);
   });
 
-  it("gives every enemy 18% more health", () => {
-    expect(ENEMY_HP_SCALE).toBeCloseTo(1.18, 10);
-    // the scale is a flat multiplier on spawn, so it lands on the whole horde
-    // at once: slime, runner, knight and every boss alike
-    for (const et of ENEMY_TYPES) {
-      expect(roundHp(7) * et.hpMul * ENEMY_HP_SCALE).toBeGreaterThan(roundHp(7) * et.hpMul);
+  it("scales Power Plant networks into stronger damage and speed auras", () => {
+    expect(powerPlantNetworkScale(0)).toBe(1);
+    expect(powerPlantNetworkScale(3)).toBe(1);
+    expect(powerPlantNetworkScale(4)).toBe(1.25);
+    expect(powerPlantNetworkScale(6)).toBe(1.5);
+    expect(powerPlantNetworkScale(8)).toBe(1.75);
+    expect(powerPlantNetworkScale(12)).toBe(2);
+  });
+
+  it("gives non-bosses +90% HP and bosses +55% HP", () => {
+    expect(ENEMY_HP_SCALE).toBeCloseTo(1.9, 10);
+    expect(BOSS_HP_MUL).toBeCloseTo(1.55, 10);
+    for (const [i, et] of ENEMY_TYPES.entries()) {
+      const scale = isBossType(i) ? BOSS_HP_MUL : ENEMY_HP_SCALE;
+      expect(scale).toBeGreaterThan(1);
+      expect(roundHp(7) * et.hpMul * scale).toBeGreaterThan(roundHp(7) * et.hpMul);
     }
   });
 
@@ -199,15 +210,15 @@ describe("tower data", () => {
     expect(shortHp(999_600)).toBe("1M");
   });
 
-  it("trims 10% off every boss's maximum health", () => {
-    expect(BOSS_HP_MUL).toBeCloseTo(0.9, 10);
-    // the trim lands on the boss's own HP multiplier, so a Warlord walks in on
-    // 15 x 0.9 = 13.5 and a Void Titan on 34 x 0.9 = 30.6
+  it("applies the dedicated +55% boss health multiplier", () => {
+    expect(BOSS_HP_MUL).toBeCloseTo(1.55, 10);
+    // the multiplier lands on each boss's own type HP; their large role-based
+    // multipliers remain intact on top of the new global boss health bonus.
     const bossMul = ENEMY_TYPES.map((e, i) => ({ e, i })).filter(({ i }) => isBossType(i)).map(({ e }) => e.hpMul * BOSS_HP_MUL);
     const normalMul = ENEMY_TYPES.map((e, i) => ({ e, i })).filter(({ i }) => !isBossType(i)).map(({ e }) => e.hpMul);
     expect(bossMul.length).toBeGreaterThan(0);
     expect(bossMul.every((m) => m > Math.max(...normalMul)), "bosses still dwarf the horde after the trim").toBe(true);
-    // every boss is trimmed, and nothing else is touched
+    // every boss receives the dedicated scale, and boss identity stays distinct
     expect(bossMul.every((m) => m > 10)).toBe(true);
   });
 

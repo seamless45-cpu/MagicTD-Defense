@@ -4619,10 +4619,20 @@ button, input, textarea, select, option {
 /* Optional liquid-glass material. This is intentionally an opt-in skin so the
    original opaque theme remains the low-cost/high-contrast default. */
 [data-ui-glass="on"] {
-  --panel: rgba(15, 20, 48, .48);
-  --panel2: rgba(46, 57, 94, .44);
-  --line: rgba(199, 226, 255, .22);
-  --line2: rgba(191, 230, 255, .38);
+  /* Liquid-glass shifts the entire interface into a cool aqua / pearl palette. */
+  --bg0: #071722;
+  --bg1: #0d2638;
+  --panel: rgba(20, 45, 62, .42);
+  --panel2: rgba(83, 134, 153, .26);
+  --line: rgba(186, 237, 246, .28);
+  --line2: rgba(202, 246, 255, .5);
+  --cyan: #a4f2ff;
+  --magenta: #d3c9ff;
+  --gold: #f4e4b4;
+  --gold2: #dac48a;
+  --green: #a0f5d1;
+  --txt: #effcff;
+  --dim: #b0ccd4;
 }
 [data-ui-glass="on"] .panel,
 [data-ui-glass="on"] .tile,
@@ -4632,17 +4642,18 @@ button, input, textarea, select, option {
 [data-ui-glass="on"] .modal-card,
 [data-ui-glass="on"] [data-testid="hud"],
 [data-ui-glass="on"] [data-testid="ascent-bar"] > .tile {
-  background-color: rgba(24, 33, 66, .38) !important;
+  background-color: rgba(25, 61, 78, .32) !important;
   background-image:
-    linear-gradient(145deg, rgba(255,255,255,.22), rgba(255,255,255,.035) 34%, transparent 58%),
-    linear-gradient(180deg, rgba(125,179,255,.12), rgba(18,24,51,.24)) !important;
-  border-color: rgba(204, 230, 255, .36) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.32), inset 0 -1px 0 rgba(120,180,255,.12), 0 10px 32px rgba(0,0,0,.25) !important;
-  backdrop-filter: blur(18px) saturate(1.55);
-  -webkit-backdrop-filter: blur(18px) saturate(1.55);
+    linear-gradient(132deg, rgba(255,255,255,.34), rgba(210,247,255,.09) 19%, transparent 43%, rgba(105,220,224,.08) 72%, rgba(223,211,255,.12)),
+    linear-gradient(180deg, rgba(116,205,222,.13), rgba(11,31,47,.34)) !important;
+  border-color: rgba(208, 248, 255, .46) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.52), inset 0 -1px 0 rgba(148,232,237,.2), 0 14px 38px rgba(0,0,0,.28), 0 0 22px rgba(125,223,237,.07) !important;
+  backdrop-filter: blur(26px) saturate(1.75) brightness(1.08);
+  -webkit-backdrop-filter: blur(26px) saturate(1.75) brightness(1.08);
 }
-[data-ui-glass="on"] .tile::after {
-  background: linear-gradient(118deg, rgba(255,255,255,.17), transparent 27%, rgba(255,255,255,.025) 66%, transparent) !important;
+[data-ui-glass="on"] .tile::after,
+[data-ui-glass="on"] .panel::after {
+  background: linear-gradient(118deg, rgba(255,255,255,.27), rgba(214,250,255,.06) 18%, transparent 39%, rgba(255,255,255,.035) 72%, transparent) !important;
 }
 [data-ui-glass="on"] .btn {
   border-color: rgba(218, 241, 255, .48) !important;
@@ -4665,12 +4676,49 @@ button, input, textarea, select, option {
 }
 [data-ui-glass="on"] .app-bg {
   background:
-    radial-gradient(ellipse at 14% 12%, rgba(72,178,255,.17), transparent 38%),
-    radial-gradient(ellipse at 88% 70%, rgba(205,112,255,.16), transparent 42%),
-    linear-gradient(145deg, #090d23, #101a39 52%, #080b20) !important;
+    radial-gradient(ellipse at 13% 5%, rgba(114,231,240,.22), transparent 38%),
+    radial-gradient(ellipse at 86% 72%, rgba(184,170,255,.18), transparent 42%),
+    radial-gradient(ellipse at 50% 110%, rgba(105,190,212,.16), transparent 54%),
+    linear-gradient(145deg, #081b28, #12384a 52%, #081722) !important;
+}
+.calm [data-ui-glass="on"] .panel,
+.calm [data-ui-glass="on"] .tile,
+.power-saver [data-ui-glass="on"] .panel,
+.power-saver [data-ui-glass="on"] .tile { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  [data-ui-glass="on"] .panel,
+  [data-ui-glass="on"] .tile { animation: none !important; }
 }
 @supports not (backdrop-filter: blur(1px)) {
   [data-ui-glass="on"] .panel,
   [data-ui-glass="on"] .tile,
   [data-ui-glass="on"] .row-card { background-color: rgba(22,31,61,.94) !important; }
+}
+
+/* Fluid, snappy transitions across the command UI, not just glass surfaces. */
+.tile, .panel, .row-card, .mail-row, .nav-btn, .tab-btn, .chip-btn, .hud-tool {
+  transition: transform .24s cubic-bezier(.2,.8,.2,1),
+    border-color .28s ease, box-shadow .3s ease, background-color .3s ease,
+    filter .22s ease, opacity .22s ease;
+}
+.nav-btn:active, .tab-btn:active, .chip-btn:active, .hud-tool:active {
+  transform: scale(.95);
+}
+.screen-enter > * {
+  animation: uiGlideIn .34s cubic-bezier(.18,.76,.24,1) both;
+}
+@keyframes uiGlideIn {
+  from { opacity: 0; transform: translateY(9px) scale(.992); filter: blur(2px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+[data-ui-glass="on"] .row-card:hover,
+[data-ui-glass="on"] .mail-row:hover,
+[data-ui-glass="on"] .nav-btn:hover {
+  transform: translateY(-2px);
+  border-color: rgba(220,250,255,.62);
+  box-shadow: 0 10px 28px rgba(38,179,205,.14), inset 0 1px rgba(255,255,255,.25);
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen-enter > * { animation: none !important; }
+  .tile, .panel, .row-card, .mail-row, .nav-btn, .tab-btn, .chip-btn, .hud-tool { transition: none !important; }
 }

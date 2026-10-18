@@ -377,7 +377,7 @@ export const TOWERS: TowerDef[] = [
       "Icicles splinter into the enemies packed around the target", [0.25, 0.8], [2, 5]),  },
   {
     id: "plant", name: "Power Plant", rarity: "legendary", kind: "plant", target: "none",
-    desc: "Buffs surrounding towers' attack speed by tower points. 4 / 6 / 8 / 12 placed = High Performance (+50% bonus).",
+    desc: "A living reactor aura boosts adjacent towers' attack speed and damage; 4 / 6 / 8 / 12 Power Plants in the network amplify both buffs by +25 / +50 / +75 / +100%.",
     dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
     aura: true, aspd: 0.03, upAspd: 0.01, ascAspd: 0.02,
     atkAura: 0.03, upAtkAura: 0.01, ascAtkAura: 0.02,
@@ -1057,6 +1057,15 @@ export const reward = (v: number) => Math.round(v * REWARD_MUL);
 /** Enemies get 120% stronger every wave (2.2× HP). */
 export const HP_GROWTH = 2.2;
 
+/** Network bonus applied to both Power Plant damage and attack-speed auras. */
+export function powerPlantNetworkScale(plantCount: number): number {
+  if (plantCount >= 12) return 2;
+  if (plantCount >= 8) return 1.75;
+  if (plantCount >= 6) return 1.5;
+  if (plantCount >= 4) return 1.25;
+  return 1;
+}
+
 /**
  * Damage a tower deals per shot.
  * Menu levels add flat damage, battle levels multiply it, points multiply it again,
@@ -1725,21 +1734,17 @@ export function roundHp(round: number) {
 }
 
 /**
- * Bosses carry 10% less maximum health than their type's raw multiplier.
- * The wave curve got steeper (57% -> 120% a wave), and a boss is worth 15-34x a
- * normal enemy on top of it: without this trim the Warlord, Overlord and Titan
- * spike far harder than the ramp around them. Only maximum health moves — boss
- * speed, armour, lives and gold are untouched.
+ * Boss HP scale replaces the regular-enemy scale: bosses receive +55%, while
+ * ordinary and elite enemies receive +90%. Their type-specific multipliers
+ * remain on top. Speed, armour, lives and gold are untouched.
  */
-export const BOSS_HP_MUL = 0.9;
+export const BOSS_HP_MUL = 1.55;
 
 /**
- * Global enemy health bonus: every enemy walks in with 18% more maximum
- * health. Applied at spawn time (normal waves and Rift Call summons) so it
- * stacks cleanly with the boss trim, elite bonus and event multipliers
- * instead of being baked into any one of them.
+ * Non-boss enemies receive +90% maximum health at spawn time, including
+ * elites, normal waves and Rift Call summons. Bosses use BOSS_HP_MUL instead.
  */
-export const ENEMY_HP_SCALE = 1.18;
+export const ENEMY_HP_SCALE = 1.9;
 
 /**
  * Compact number for the in-battle health readout: 987, 12.3k, 4.56M, 7.9B.
