@@ -2677,7 +2677,8 @@ export default function Battle({
         return;
       }
 
-      const wasHeavenly = a.def.id === "heavenly" || b.def.id === "heavenly";
+      const heavenlySource = a.def.id === "heavenly" ? a : b.def.id === "heavenly" ? b : undefined;
+      const wasHeavenly = !!heavenlySource;
       const wasDemon = a.def.id === "demon" || b.def.id === "demon";
 
       // ---------- Honor Emperor: hands the point over, keeps the tower ----------
@@ -2750,11 +2751,35 @@ export default function Battle({
         let bolts = def.mergeBolts || 2;
         let pts = def.mergePoints || 2;
         let buff = def.mergeBuff || 3;
-        if (t1 > 0 && Math.random() < def.awk1!.chance[t1 - 1]) {
-          bolts += def.awk1!.mult[t1 - 1];
-          pts += 1;
-          buff = def.awk1!.mult2![t1 - 1];
-          addText(p.x, p.y - 70, "POSITIVE LIGHTNING", "#fff6c4", 15, true);
+        if (t1 > 0) {
+          // First awakening unlocks the divine merge strike. Positive Lightning
+          // still adds its extra blessing bolts as a chance-based bonus.
+          if (Math.random() < def.awk1!.chance[t1 - 1]) {
+            bolts += def.awk1!.mult[t1 - 1];
+            pts += 1;
+            buff = def.awk1!.mult2![t1 - 1];
+          }
+          addText(p.x, p.y - 70, "DIVINE AWAKENING", "#fff6c4", 17, true);
+          const god = heavenlySource!;
+          const divineBase = towerDamage(god.def, god.menuLv, god.bLv, god.points, god.atkMul);
+          const victims = g.enemies.filter((e) => !e.dead);
+          victims.forEach((e) => {
+            const ep = enemyPos(e);
+            g.strikes.push({ x: ep.x, y: ep.y, life: 0.55, max: 0.55, width: 26, color: "#fff6c4", seed: Math.random() * 100, forks: 5, top: -180 });
+            g.strikes.push({ x: ep.x, y: ep.y, life: 0.38, max: 0.38, width: 10, color: "#8feaff", seed: Math.random() * 100, forks: 3 });
+            shock(ep.x, ep.y, "#fff6c4", 150, 0.48);
+            glow(ep.x, ep.y, "#8feaff", 180, 0.52);
+            sparkAt(ep.x, ep.y, 30, 360);
+            // 3x a standard crit: 200% more crit damage, before normal
+            // armour/ward handling, and still recorded as a critical hit.
+            dealDamage(e, divineBase * 3, { alwaysCrit: true, tw: god, color: "#fff6c4" });
+            addText(ep.x, ep.y - 72, "DIVINE SUPERCRIT ×3", "#fff6c4", 15, true);
+          });
+          flash("#fff6c4", 0.3);
+          hitStop(0.11);
+          punch(1, 1);
+          g.shake = fxShake(14);
+          sfx.superbolt();
         }
         const dur = def.mergeBuffT || 13;
         const board = [...g.towers];
@@ -3259,16 +3284,16 @@ export default function Battle({
       // every copy of the tower stays in lockstep
       for (const t of family) t.bLv = lv;
       sfx.ascend();
-      // ascent flourish: a light pillar per tower, staggered so a mass ascend
-      // reads as a wave rolling across the board
-      flash("#35e0ff", 0.18);
-      open.forEach((t, i) => {
+      // One simultaneous ascent flash: every copy's lightning lands together.
+      flash("#35e0ff", 0.22);
+      hitStop(0.045);
+      open.forEach((t) => {
         if (!t.cell) return;
         const p = cellCenter(t.cell.c, t.cell.r);
-        schedule(i * 0.07, () => {
-          levelFlourish(p.x, p.y, "#35e0ff", `ASCENT ${ROMAN[lv] || lv}`, lv >= MAX_BATTLE_LEVEL ? 3 : 2);
-          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y - 220, p.x, p.y, "#b9f4ff", 5, 0.4, performance.now()));
-        });
+        levelFlourish(p.x, p.y, "#35e0ff", `ASCENT ${ROMAN[lv] || lv}`, lv >= MAX_BATTLE_LEVEL ? 3 : 2);
+        g.strikes.push({ x: p.x, y: p.y, life: 0.38, max: 0.38, width: 14, color: "#b9f4ff", seed: Math.random() * 100, forks: 3, top: -220 });
+        g.strikes.push({ x: p.x, y: p.y, life: 0.26, max: 0.26, width: 5, color: "#ffffff", seed: Math.random() * 100, top: -220 });
+        sparkAt(p.x, p.y, 18, 220);
       });
       toastRef.current(
         open.length > 1
@@ -8450,7 +8475,7 @@ export default function Battle({
           COMPACT: a 40px strip instead of a three-row card, so the arena keeps
           its height on a phone. The ascent button is the only tall element. */}
       {g && (
-        <div className="flex shrink-0 items-stretch gap-1 px-1.5 pb-1" data-testid="ascent-bar">
+        <div className="ascent-strip flex shrink-0 items-stretch gap-1 overflow-x-auto px-1.5 pb-1" data-testid="ascent-bar">
           {lineupIds.map((id, i) => {
             const def = TOWER_BY_ID[id];
             const copies = g.towers.filter((x) => x.def.id === id);
@@ -8465,7 +8490,7 @@ export default function Battle({
                 key={id}
                 data-slot={i}
                 data-tower={id}
-                className="tile flex min-w-0 flex-1 items-center gap-1 px-1 py-0.5"
+                className="tile ascent-slot flex min-w-0 flex-1 items-center gap-1 px-1 py-0.5"
                 style={{ opacity: lead ? 1 : 0.4, borderColor: lead ? rc.color : undefined }}
               >
                 <TowerIcon def={def} size={16} />

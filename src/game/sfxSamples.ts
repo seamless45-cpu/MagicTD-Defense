@@ -169,15 +169,19 @@ const CUES: Record<string, SampleCue> = {
     L("ui/confirm-1.mp3", 0.55, 1),
     L("scifi/force-field-3.mp3", 0.4, 1.05, 0.035),
     L("rpg/metal-latch.mp3", 0.32, 1.1, 0.09),
+    L("scifi/space-low.mp3", 0.32, [0.72, 0.92], 0.015, 0.8),
+    L("ui/glass-5.mp3", 0.22, 0.88, 0.07),
   ],
   merge2: [
     L("ui/glass-4.mp3", 0.46, 1),
     L("ui/select-5.mp3", 0.3, 1.1, 0.03),
   ],
   ascend: [
-    L("scifi/force-field-0.mp3", 0.46, [0.9, 1.15], 0, 1.0),
-    L("scifi/laser-large.mp3", 0.44, [1.0, 1.35], 0.03, 0.75),
-    L("ui/confirm-4.mp3", 0.5, 1, 0.1),
+    L("scifi/space-low.mp3", 0.42, [0.68, 1.02], 0, 0.85),
+    L("scifi/force-field-0.mp3", 0.5, [0.9, 1.15], 0.015, 1.0),
+    L("scifi/laser-large.mp3", 0.5, [0.82, 1.3], 0.03, 0.75),
+    L("ui/confirm-4.mp3", 0.48, 1, 0.1),
+    L("ui/glass-5.mp3", 0.24, 1.15, 0.16),
   ],
   awaken: [
     L("ui/glass-4.mp3", 0.5, 1),

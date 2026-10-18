@@ -4537,3 +4537,38 @@ body,
   font-weight: 800;
   letter-spacing: 0.14em;
 }
+
+/* The six ascent controls keep readable widths on phones; swipe the strip rather
+   than compressing labels and cost buttons into unusable slivers. */
+.ascent-strip {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(127, 233, 255, .42) transparent;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.ascent-slot {
+  flex: 0 0 clamp(142px, 22vw, 210px) !important;
+  min-height: 42px;
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.ascent-slot:focus-within,
+.ascent-slot:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0 18px -8px rgba(127, 233, 255, .8);
+}
+.ascent-btn-compact.on {
+  background-image: linear-gradient(120deg, rgba(30, 97, 143, .96), rgba(112, 67, 174, .92), rgba(30, 97, 143, .96));
+  background-size: 220% 100%;
+  animation: ascentCharged 2.8s ease-in-out infinite;
+}
+@keyframes ascentCharged {
+  0%, 100% { background-position: 0% 50%; box-shadow: 0 0 8px -4px #7fe9ff; }
+  50% { background-position: 100% 50%; box-shadow: 0 0 16px -3px #c9a7ff; }
+}
+.power-saver .ascent-slot,
+.calm .ascent-slot,
+.power-saver .ascent-btn-compact.on,
+.calm .ascent-btn-compact.on {
+  animation: none !important;
+  transition: none;
+}
