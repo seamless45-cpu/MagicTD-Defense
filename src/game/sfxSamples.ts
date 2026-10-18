@@ -230,6 +230,17 @@ const CUES: Record<string, SampleCue> = {
     L("scifi/force-field-0.mp3", 0.46, 1, 0.02),
     L("impact/plate-heavy.mp3", 0.46, 1, 0.035),
   ],
+  demonExecution: [
+    L("scifi/low-explosion-1.mp3", 0.9, 0.72),
+    L("scifi/force-field-2.mp3", 0.72, 0.78, 0.02),
+    L("impact/plate-heavy.mp3", 0.64, 0.9, 0.045),
+    L("scifi/explosion-3.mp3", 0.4, 0.82, 0.08),
+  ],
+  heavenlyImpact: [
+    L("scifi/force-field-3.mp3", 0.68, 1.15),
+    L("scifi/laser-large.mp3", 0.58, 1.22, 0.015),
+    L("ui/glass-4.mp3", 0.36, 1.3, 0.04),
+  ],
   explosion: [
     L("scifi/explosion-2.mp3", 0.78, 1),
     L("scifi/low-explosion-0.mp3", 0.58, 1, 0.02),

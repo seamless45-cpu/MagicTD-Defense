@@ -237,13 +237,13 @@ describe("tower data", () => {
     expect(bossMul.every((m) => m > 10)).toBe(true);
   });
 
-  it("pays 25% more run gold from kills, bounties and wave clears", () => {
-    expect(GOLD_GAIN_MUL).toBeCloseTo(1.25, 10);
+  it("pays 50% more run gold from kills, bounties and wave clears", () => {
+    expect(GOLD_GAIN_MUL).toBeCloseTo(1.5, 10);
     expect(runGold(2)).toBe(3); // a slime's 2 base gold
-    expect(runGold(30)).toBe(38); // a Warlord
+    expect(runGold(30)).toBe(45); // a Warlord
     expect(runGold(0)).toBe(0);
     // it is a straight multiplier, so ordering never matters
-    for (const v of [4, 9, 17, 55, 140]) expect(runGold(v)).toBe(Math.round(v * 1.25));
+    for (const v of [4, 9, 17, 55, 140]) expect(runGold(v)).toBe(Math.round(v * 1.5));
   });
 
   it("ships the new towers with distinct mechanics", () => {
@@ -1682,6 +1682,26 @@ describe("gauntlet mode", () => {
 
 
 describe("auto-battle expeditions", () => {
+  it("uses wave composition, starts at the requested wave and fails cleanly when the squad is underpowered", () => {
+    const save = defaultSave();
+    const weak = estimateAutoBattle(save, "endless", 0.01, 1, 8);
+    const strong = estimateAutoBattle(save, "endless", 1_000_000, 12, 8);
+    expect(weak.waves).toBe(0);
+    expect(weak.breaksAtWave).toBe(8);
+    expect(weak.minutes).toBeGreaterThan(0);
+    expect(strong.waves).toBeGreaterThan(weak.waves);
+    expect(strong.breaksAtWave).toBe(8 + strong.waves);
+  });
+
+  it("still sends an accurate report when the first active wave cannot be cleared", () => {
+    const save = defaultSave();
+    const id = deliverAutoBattleReport(save, "endless", 0, 1, 75, 9, 9);
+    const report = inbox(save).find((mail) => mail.id === id);
+    expect(report?.body).toContain("cleared 0 simulated waves");
+    expect(report?.body).toContain("overwhelmed at wave 9");
+    expect(report?.reward?.gold).toBe(75);
+  });
+
   it("estimates an endless/gauntlet run from squad power and delivers claimable mail", () => {
     const save = defaultSave();
     const endless = estimateAutoBattle(save, "endless");

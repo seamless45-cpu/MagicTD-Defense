@@ -22,6 +22,7 @@ import {
   MAIL_BY_ID,
   RARITY,
   REWARD_MUL,
+  runGold,
   SEASON_TIERS,
   seasonNumber,
   seasonPoints,
@@ -432,7 +433,7 @@ export function deliverAutoBattleReport(s: SaveData, mode: "endless" | "gauntlet
   let frags = 0;
   for (let i = 0; i < count; i++) {
     const wave = start + i;
-    gold += Math.round((20 + 5 * wave) * REWARD_MUL);
+    gold += runGold(Math.round((20 + 5 * wave) * REWARD_MUL));
     gems += Math.floor((wave / 3) * REWARD_MUL) - Math.floor(((wave - 1) / 3) * REWARD_MUL);
     if (wave % 6 === 0) { tokens++; frags++; }
   }

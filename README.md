@@ -101,7 +101,7 @@ Endless and Gauntlet also offer **Auto Battle** from the Command Center. The off
 the HUD show the current multiplier. Each wave holds two more enemies than it used
 to, and every round-clear payout (gold + gems) was raised 40%. Regular and elite enemies use
 `ENEMY_HP_SCALE = 1.9` (+90%), while bosses use their dedicated `BOSS_HP_MUL = 1.55` (+55%).
-**Run gold pays 25% more** (`GOLD_GAIN_MUL`) from every kill, bounty and wave clear.
+**Run gold pays 50% more** (`GOLD_GAIN_MUL`) from every kill, bounty and wave clear.
 
 ### Bosses
 
@@ -725,7 +725,7 @@ enemies, with Overpenetration and Rail Burn awakenings).
   wave 1. Regular and elite enemies now get +90% health (`ENEMY_HP_SCALE = 1.9`); bosses instead
   get +55% (`BOSS_HP_MUL = 1.55`) on their role-specific health multiplier. Rift Call summons use
   the regular-enemy increase.
-- **Run gold pays 25% more.** `runGold()` wraps the three places gold is earned in a battle: the
+- **Run gold pays 50% more.** `runGold()` wraps the three places gold is earned in a battle: the
   kill payout, the bounty family of awakenings and the wave-clear purse. Whatever is left in the
   wallet is settled when the run ends, so the bonus carries into the results screen. Account gold
   (chests, tasks, daily rewards) is a separate economy and is untouched.

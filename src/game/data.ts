@@ -1799,12 +1799,12 @@ export function shortHp(v: number): string {
 }
 
 /**
- * Run gold is paid out 25% richer: every kill, every bounty awakening and the
+ * Run gold is paid out 50% richer: every kill, every bounty awakening and the
  * wave-clear purse. Account gold from chests and tasks is a different economy
  * and is not touched by this. Whatever is left in the wallet is settled when the
  * run ends, so the bonus carries into the results screen too.
  */
-export const GOLD_GAIN_MUL = 1.25;
+export const GOLD_GAIN_MUL = 1.5;
 export const runGold = (v: number) => Math.round(v * GOLD_GAIN_MUL);
 
 export function waveComp(round: number): number[] {

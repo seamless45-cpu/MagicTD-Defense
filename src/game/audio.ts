@@ -671,6 +671,16 @@ const synthSfx = {
     boom(120, 0.5, 0.2, 0, 3);
     stab([700, 1050, 1400], 0.3, 0.12, 0.02, "triangle");
   },
+  demonExecution: () => {
+    noise(0.42, 0.32, 1800, { type: "bandpass", q: 1.3, sweep: 0.22, verb: 0.9 });
+    tone(82, 0.62, "sawtooth", 0.26, -38, 0, { sub: true, cutoff: 280 });
+    boom(95, 0.5, 0.28, 0, 4);
+  },
+  heavenlyImpact: () => {
+    noise(0.24, 0.2, 5200, { type: "highpass", q: 1.8, sweep: 0.45, verb: 0.85 });
+    stab([784, 1175, 1568], 0.3, 0.15, 0.01, "triangle");
+    tone(196, 0.36, "sine", 0.18, -92, 0, { sub: true, verb: 0.45 });
+  },
   explosion: () => {
     noise(0.36, 0.32, 2200, { sweep: 0.1, q: 0.8, verb: 0.8, noiseType: "pink" });
     boom(140, 0.42, 0.3);

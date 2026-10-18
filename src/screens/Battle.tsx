@@ -104,21 +104,23 @@ const LIVE_MONTH = monthlyEventForDate();
 const MONTH_BONUS: MonthlyBonus = monthlyEventBonus(LIVE_MONTH.id);
 
 // ---------- board geometry ----------
-const W = 1000;
-const H = 580;
-const C = 90;
-const COLS = 7;
-const ROWS = 4;
+const W = 600;
+const H = 1000;
+const C = 80;
+const COLS = 4;
+const ROWS = 7;
 const OX = (W - COLS * C) / 2;
 const OY = (H - ROWS * C) / 2;
 
 const WPTS: [number, number][] = [
-  [-0.7, 0],
-  [0, 0],
+  [0, -0.7],
+  [0, 1],
+  [3, 1],
+  [3, 3],
   [0, 3],
-  [6, 3],
-  [6, 0],
-  [6, -0.7],
+  [0, 5],
+  [3, 5],
+  [3, 6.7],
 ];
 
 /** Towers used to be limited to a 236px bubble around their cell. They are not
@@ -126,7 +128,7 @@ const WPTS: [number, number][] = [
  *  TARGETING), so the guide draws an arena-wide field instead of a range ring. */
 
 const cellCenter = (c: number, r: number) => ({ x: OX + (c + 0.5) * C, y: OY + (r + 0.5) * C });
-const isPathCell = (c: number, r: number) => c === 0 || c === 6 || r === 3;
+const isPathCell = (c: number, r: number) => c === 0 || c === 3 || r === 1 || r === 3 || r === 5;
 
 /** Client coords -> canvas world coords, safe against a zero-sized layout box. */
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
@@ -1327,14 +1329,16 @@ export default function Battle({
       if (mode === "gauntlet") {
         gauntletPay = collectGauntlet({ ...saveRef.current }, rounds, g.boons.length, saveRef.current.gauntletBest);
       }
-      const baseGold =
-        (gauntletPay
-          ? gauntletPay.gold
-          : mode === "endless"
-            ? endlessGold
-            : won
-              ? reward(150 + 30 * g.maxRounds)
-              : reward(30 + 10 * rounds)) + wallet;
+      const clearRewardGold = gauntletPay
+        ? gauntletPay.gold
+        : mode === "endless"
+          ? endlessGold
+          : won
+            ? reward(150 + 30 * g.maxRounds)
+            : reward(30 + 10 * rounds);
+      // Apply the +50% run-gold bonus to the final clear payout too; the wallet
+      // has already been boosted at each kill and wave-clear as it was earned.
+      const baseGold = runGold(clearRewardGold) + wallet;
       const baseGems = gauntletPay ? gauntletPay.gems : mode === "endless" ? endlessGems : won ? reward(2) : 0;
       // crystal potions are salvaged from the run: deeper runs and wins pay more
       const potions = gauntletPay ? gauntletPay.potions : (won ? 3 : 1) + Math.floor(rounds / 3);
@@ -1368,7 +1372,7 @@ export default function Battle({
       // sp payout: 10 base, elites x5, bosses x10, then the monthly modifier and
       // whatever Mana Conduit share the run has bought
       g.sp += spGain(e.spv);
-      // run gold is 25% richer across the board (kills, bounties, wave clears)
+      // run gold is 50% richer across the board (kills, bounties, wave clears)
       g.gold += runGold(Math.round(e.gold * MONTH_BONUS.goldMul * g.goldMul));
       const p = enemyPos(e);
       const et = ENEMY_TYPES[e.type];
@@ -1653,7 +1657,7 @@ export default function Battle({
       punch(0.6, 0.4);
       hitStop(0.05);
       g.shake = fxShake(9);
-      sfx.superbolt();
+      sfx.demonExecution();
 
       let executed = 0;
       for (const e of list) {
@@ -1842,7 +1846,9 @@ export default function Battle({
           demonStrike(t);
           break;
         case "heavenly": {
-          // a lightning laser: fast, bright, and it burns whatever stands behind
+          // Heavenly God calls down a clear gold-white bolt, distinct from the Demon
+          // Execution crimson strike.
+          sfx.heavenlyImpact();
           push({
             speed: 1400,
             kind: "heavenly",
@@ -8050,7 +8056,7 @@ export default function Battle({
           <span className="wave-strip-hp">HP ×{Math.pow(HP_GROWTH, Math.max(0, g.round - 1)).toFixed(1)}</span>
           {g.round % 4 === 0 && <span className="wave-strip-boss">BOSS</span>}
           {save.powerSaver && <span className="wave-strip-saver" title="Power Saving Mode is on">SAVER</span>}
-          {mode !== "battle" && (() => { const uses = save.mail.autoWeek === weekStr() ? save.mail.autoUses : 0; const deployed = g.towers.filter((t) => !!t.cell && t.downT <= 0 && t.hexT <= 0); const dps = deployed.reduce((sum, t) => sum + towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) / Math.max(0.08, t.def.rate), 0); const cd = Math.max(0, save.mail.autoReadyAt - Date.now()); return <button type="button" disabled={!!g.final} className="ml-auto rounded-md border border-[#ff4fd8]/50 bg-black/70 px-2 py-1 text-[10px] font-bold text-[#ff9be9] disabled:opacity-40" data-testid="auto-resolve" onClick={() => onAutoBattle?.(mode, dps, deployed.length, g.round, g.gold)}>{cd ? `AUTO · ${Math.ceil(cd / 60000)}m` : `AUTO-RESOLVE · ${Math.max(0, 3 - uses)}/3`}</button>; })()}
+          {mode !== "battle" && (() => { const uses = save.mail.autoWeek === weekStr() ? save.mail.autoUses : 0; const deployed = g.towers.filter((t) => !!t.cell && t.downT <= 0 && t.hexT <= 0); const dps = deployed.reduce((sum, t) => sum + towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) / Math.max(0.08, t.def.rate), 0); const cd = Math.max(0, save.mail.autoReadyAt - Date.now()); return <button type="button" disabled={!!g.final} className="ml-auto rounded-md border border-[#ff4fd8]/50 bg-black/70 px-2 py-1 text-[10px] font-bold text-[#ff9be9] disabled:opacity-40" data-testid="auto-resolve" onClick={() => onAutoBattle?.(mode, dps, deployed.length, g.phase === "inter" ? g.round + 1 : g.round, g.gold)}>{cd ? `AUTO · ${Math.ceil(cd / 60000)}m` : `AUTO-RESOLVE · ${Math.max(0, 3 - uses)}/3`}</button>; })()}
         </div>
       )}
 
