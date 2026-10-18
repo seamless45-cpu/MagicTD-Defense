@@ -493,8 +493,6 @@ interface G {
   strikes: Strike[];
   /** summons bought this run — drives the summon price */
   spSpend: number;
-  /** ascents bought this run — drives the ascent price */
-  ascSpend: number;
   enemies: Enemy[];
   towers: BT[];
   projs: Proj[];
@@ -625,7 +623,6 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     // never placed for free any more
     sp: spawnBudget(),
     spSpend: 0,
-    ascSpend: 0,
     odT: 0,
     enemies: [],
     towers,
@@ -1051,6 +1048,18 @@ export default function Battle({
       }
     };
 
+    /** Layered detonation: hot core, two readable rings, and outward debris. */
+    const impactBlast = (x: number, y: number, color: string, radius: number, heavy = false) => {
+      const r = Math.max(18, radius);
+      ring(x, y, color, r * 0.28);
+      glow(x, y, "#fff4d6", r * (heavy ? 0.58 : 0.36), heavy ? 0.22 : 0.14);
+      glow(x, y, color, r * 0.95, heavy ? 0.42 : 0.3);
+      shock(x, y, color, r * 0.78, heavy ? 0.62 : 0.44);
+      shock(x, y, "#fff8e8", r * 0.38, heavy ? 0.34 : 0.26);
+      burst(x, y, color, heavy ? 16 : 8, heavy ? 300 : 210);
+      shards(x, y, heavy ? "#fff4d6" : color, heavy ? 12 : 5, heavy ? 280 : 190);
+    };
+
     /** four-point sparkle stars that drift upward — the "magic" layer */
     const stars = (x: number, y: number, color: string, n: number, spread = 40) => {
       if (!fxOn()) n = Math.min(n, 3);
@@ -1210,8 +1219,9 @@ export default function Battle({
     };
 
     const summonCost = () => spCost(g.spSpend);
-    /** ascent has its own price ladder so summoning never price-gouges upgrades */
-    const ascCost = () => ascSpCost(g.ascSpend);
+    /** Each tower family has its own ascent ladder, so upgrading one family
+     * never raises the price of the others. */
+    const ascCost = (battleLevel: number) => ascSpCost(Math.max(0, battleLevel - 1));
 
     const startWave = () => {
       g.phase = "wave";
@@ -1366,11 +1376,8 @@ export default function Battle({
         addText(p.x, p.y - 30, "ELITE KILL", "#ffd23f", 13, true);
         ring(p.x, p.y, "#ffd23f", 40);
       }
-      // death now pops: a shock ring, hot core glow and spinning debris
-      burst(p.x, p.y, et.color, e.elite ? 12 : 7, 200);
-      shock(p.x, p.y, et.color, isBossType(e.type) ? 44 : 20, isBossType(e.type) ? 0.8 : 0.45);
-      glow(p.x, p.y, et.accent, isBossType(e.type) ? 110 : 34, 0.4);
-      shards(p.x, p.y, et.color, isBossType(e.type) ? 24 : 7, isBossType(e.type) ? 360 : 200);
+      // Deaths now share a layered detonation profile; bosses get a heavier core.
+      impactBlast(p.x, p.y, et.color, isBossType(e.type) ? 54 : e.elite ? 34 : 24, isBossType(e.type));
       if (isBossType(e.type)) {
         flash(et.color, 0.22);
         punch(0.7, 0.5);
@@ -2561,7 +2568,7 @@ export default function Battle({
             ? pr.dmg * pr.blastDmg
             : (pr.splash || 0) * (pr.tw ? towerPower(pr.tw) : 1);
         if (blastBase > 0) {
-          ring(pos.x, pos.y, "#ff9d4d", Math.min(280, blastR));
+          impactBlast(pos.x, pos.y, "#ff9d4d", Math.min(130, blastR), blastR >= 100);
           sfx.explosion();
           g.shake = fxShake(2);
           g.enemies.forEach((e) => {
@@ -3292,10 +3299,9 @@ export default function Battle({
       const family = g.towers.filter((x) => x.def.id === src.def.id);
       const open = family.filter((x) => x.bLv < MAX_BATTLE_LEVEL);
       if (!open.length) return;
-      const cost = ascCost();
+      const cost = ascCost(src.bLv);
       if (g.sp < cost) { sfx.error(); toastRef.current("Not enough SP", "#ff4d5e"); return; }
       g.sp -= cost;
-      g.ascSpend++;
       const lv = Math.min(MAX_BATTLE_LEVEL, src.bLv + 1);
       // every copy of the tower stays in lockstep
       for (const t of family) t.bLv = lv;
@@ -4969,45 +4975,6 @@ export default function Battle({
           ctx.fill();
           break;
         // ---------- 12-tower arsenal ----------
-        case "sling":
-          ctx.rotate(a);
-          ctx.strokeStyle = acc;
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.moveTo(-4, 14);
-          ctx.lineTo(-4 - rec * 0.4, -12);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(-16, -8);
-          ctx.lineTo(-4, 2);
-          ctx.lineTo(8, -8);
-          ctx.stroke();
-          ctx.fillStyle = acc;
-          ctx.beginPath();
-          ctx.arc(-4 - rec * 0.4, -14, 5, 0, Math.PI * 2);
-          ctx.fill();
-          break;
-        case "flame":
-          ctx.rotate(a);
-          ctx.fillStyle = "#2b1f66";
-          ctx.strokeStyle = acc;
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.roundRect(-14, -10, 24, 20, 6);
-          ctx.fill();
-          ctx.stroke();
-          ctx.fillStyle = acc;
-          ctx.beginPath();
-          ctx.moveTo(10 - rec * 0.3, -8);
-          ctx.lineTo(30 + rec, 0);
-          ctx.lineTo(10 - rec * 0.3, 8);
-          ctx.closePath();
-          ctx.fill();
-          ctx.globalAlpha *= 0.55;
-          ctx.beginPath();
-          ctx.arc(14 + rec * 0.6, 0, 9 + Math.sin(now / 90) * 2, 0, Math.PI * 2);
-          ctx.fill();
-          break;
         case "spike":
           ctx.fillStyle = "#2b1f66";
           ctx.strokeStyle = acc;
@@ -5059,63 +5026,6 @@ export default function Battle({
           ctx.arc(24 - rec * 0.5, 0, 5, 0, Math.PI * 2);
           ctx.fill();
           break;
-        case "beam":
-          ctx.fillStyle = "#2b1f66";
-          ctx.strokeStyle = acc;
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.roundRect(-18, 6, 36, 16, 6);
-          ctx.fill();
-          ctx.stroke();
-          ctx.save();
-          ctx.rotate(now / 700);
-          ctx.strokeStyle = acc;
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(0, 0, 15, 0.3, 2.4);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(0, 0, 15, 3.4, 5.6);
-          ctx.stroke();
-          ctx.restore();
-          ctx.fillStyle = t.flash > 0 ? "#ffffff" : acc;
-          ctx.beginPath();
-          ctx.arc(0, 0, 7 + rec * 0.5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha *= 0.5;
-          ctx.beginPath();
-          ctx.arc(0, 0, 12 + rec, 0, Math.PI * 2);
-          ctx.fill();
-          break;
-        case "scythe": {
-          // Reaper's Toll: a hooked blade on a shaft, spinning slowly
-          const spin = now / 900;
-          ctx.fillStyle = "#5b4a86";
-          ctx.strokeStyle = "#2a1a4a";
-          ctx.lineWidth = 1.6;
-          ctx.beginPath();
-          ctx.roundRect(-4, -6, 8, 30, 3);
-          ctx.fill();
-          ctx.stroke();
-          ctx.save();
-          ctx.rotate(spin);
-          ctx.fillStyle = rc.color;
-          ctx.beginPath();
-          ctx.moveTo(0, -34);
-          ctx.quadraticCurveTo(30, -26, 24, -2);
-          ctx.quadraticCurveTo(12, -18, 0, -18);
-          ctx.closePath();
-          ctx.fill();
-          ctx.strokeStyle = "#fff";
-          ctx.lineWidth = 1.4;
-          ctx.stroke();
-          ctx.restore();
-          ctx.fillStyle = "#e6dcff";
-          ctx.beginPath();
-          ctx.arc(0, -6, 5, 0, Math.PI * 2);
-          ctx.fill();
-          break;
-        }
         case "prism": {
           // Prism Array: a faceted crystal that spins and throws split beams
           ctx.save();
@@ -5189,38 +5099,6 @@ export default function Battle({
           ctx.restore();
           break;
         }
-        case "gate": {
-          // Hellgate: a torn portal with fire licking out of the arch
-          const gfl = Math.sin(now / 130) * 3;
-          ctx.fillStyle = "#2b1206";
-          ctx.strokeStyle = rc.color;
-          ctx.lineWidth = 2.6;
-          ctx.beginPath();
-          ctx.moveTo(-22, 22);
-          ctx.lineTo(-22, -6);
-          ctx.quadraticCurveTo(0, -34, 22, -6);
-          ctx.lineTo(22, 22);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-          const gg = ctx.createRadialGradient(0, 6, 2, 0, 6, 20);
-          gg.addColorStop(0, "#fff2b0");
-          gg.addColorStop(0.4, "#ff8c3d");
-          gg.addColorStop(1, "transparent");
-          ctx.fillStyle = gg;
-          ctx.beginPath();
-          ctx.ellipse(0, 6, 15, 17 + gfl, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = "#ff7a3d";
-          ctx.beginPath();
-          ctx.moveTo(-10, -4 - gfl);
-          ctx.quadraticCurveTo(-2, -18, 0, -26 - gfl);
-          ctx.quadraticCurveTo(2, -18, 10, -4 - gfl);
-          ctx.quadraticCurveTo(0, 2, -10, -4 - gfl);
-          ctx.fill();
-          break;
-        }
-        // ---------- mythic arsenal II ----------
         case "nova": {
           // a three-barrel shell launcher with a starburst core
           const spin = now / 1600;
@@ -7902,7 +7780,6 @@ export default function Battle({
 
   const g = gRef.current;
   const cost = g ? spCost(g.spSpend) : SP_BASE_COST;
-  const ascentCost = g ? ascSpCost(g.ascSpend) : ASC_BASE_COST;
 
   /**
    * ASCENT is a button on the tower itself now — no dragging.
@@ -7919,7 +7796,7 @@ export default function Battle({
       push(`${t.def.name} is already at battle level ${MAX_BATTLE_LEVEL}`, "#ff4d5e");
       return;
     }
-    const cost = ascSpCost(gg.ascSpend);
+    const cost = ascSpCost(Math.max(0, t.bLv - 1));
     if (gg.sp < cost) {
       sfx.error();
       push("Not enough SP", "#ff4d5e");
@@ -8539,6 +8416,7 @@ export default function Battle({
             const bLv = lead ? lead.bLv : 1;
             const pts = lead ? Math.max(...copies.map((x) => x.points)) : 0;
             const maxed = !!lead && bLv >= MAX_BATTLE_LEVEL;
+            const ascentCost = lead ? ascSpCost(Math.max(0, lead.bLv - 1)) : ASC_BASE_COST;
             const canAscend = !!lead && !maxed && g.sp >= ascentCost;
             const rc = RARITY[def.rarity];
             return (
@@ -8577,7 +8455,7 @@ export default function Battle({
                     ascendTower(lead.uid);
                   }}
                   className={`ascend-btn ascend-btn-compact shrink-0 ${canAscend ? "on" : ""}`}
-                  title={lead ? `Ascend ${def.name} for ${ascentCost} SP` : `${def.name} is not deployed`}
+                  title={lead ? `Ascend ${def.name} family for ${ascentCost} SP · cost scales with this family’s battle level` : `${def.name} is not deployed`}
                 >
                   {!lead ? (
                     "NOT DEPLOYED"

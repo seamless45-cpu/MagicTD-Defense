@@ -227,10 +227,10 @@ export default function App() {
               return;
             }
             const plan = estimateAutoBattle(save, mode, liveSquadDps, deployedCount, currentWave);
-            let report = "";
-            mutate((s) => { report = deliverAutoBattleReport(s, mode, plan.waves, plan.minutes, walletGold); });
-            if (!report) { push("AUTO-RESOLVE COOLDOWN OR WEEKLY LIMIT ACTIVE", "#8fb0ff"); return; }
-            push(`RUN ENDED · auto-resolved ${plan.waves} waves · report sent to Mail`, mode === "gauntlet" ? "#3dff8e" : "#ff4fd8");
+            mutate((s) => {
+              deliverAutoBattleReport(s, mode, plan.waves, plan.minutes, walletGold, currentWave, plan.breaksAtWave);
+            });
+            push(`RUN ENDED · ${plan.waves} waves simulated; overwhelmed at wave ${plan.breaksAtWave} · report sent to Mail`, mode === "gauntlet" ? "#3dff8e" : "#ff4fd8");
             setScreen("mail");
           }}
         />

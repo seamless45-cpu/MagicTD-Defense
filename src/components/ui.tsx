@@ -445,23 +445,6 @@ export function TowerIcon({
             <circle cx="33" cy="32" r="3.4" fill={a} />
           </g>
         );
-      case "flame":
-        return (
-          <g>
-            <path d="M24 5c4 9 13 12 13 22a13 13 0 0 1-26 0c0-7 4-9 7-15 2 4 4 5 6-7z" fill={c} />
-            <path d="M24 17c2 5 7 6 7 12a7 7 0 0 1-14 0c0-4 3-5 5-10 1 2 2 3 2-2z" fill="#fff2b0" />
-            <path d="M10 40h28" stroke={c} strokeWidth="3" strokeLinecap="round" opacity="0.5" />
-          </g>
-        );
-      case "gate":
-        return (
-          <g>
-            <path d="M10 42V22a14 14 0 0 1 28 0v20h-7V22a7 7 0 0 0-14 0v20z" fill={c} />
-            <path d="M18 42V24a6 6 0 0 1 12 0v18z" fill="#1a0b0b" />
-            <circle cx="24" cy="30" r="3" fill={a} />
-            <path d="M8 12l4 6M40 12l-4 6" stroke={c} strokeWidth="2.6" strokeLinecap="round" />
-          </g>
-        );
       case "ion":
         return (
           <g>
@@ -476,23 +459,6 @@ export function TowerIcon({
             <path d="M24 8l8 12-8 20-8-20z" fill={c} opacity="0.9" />
             <path d="M24 8l8 12-8 4-8-4z" fill="#fff" opacity="0.85" />
             <path d="M8 24h8M32 24h8M14 14l5 5M34 34l-5-5" stroke={a} strokeWidth="2.6" strokeLinecap="round" />
-          </g>
-        );
-      case "scythe":
-        return (
-          <g>
-            <path d="M34 8c-14 2-24 12-26 26l5 5c2-12 10-20 21-23z" fill={c} />
-            <path d="M12 38l-4 6h8z" fill={a} />
-            <path d="M34 8l4-3 2 6z" fill="#fff" opacity="0.8" />
-          </g>
-        );
-      case "sling":
-        return (
-          <g>
-            <path d="M12 10c8 4 8 12 8 20" stroke={c} strokeWidth="3" strokeLinecap="round" fill="none" />
-            <path d="M36 10c-8 4-8 12-8 20" stroke={c} strokeWidth="3" strokeLinecap="round" fill="none" />
-            <ellipse cx="24" cy="34" rx="8" ry="6" fill={a} />
-            <path d="M6 40c6-2 12-2 18 0s12 2 18 0" stroke={c} strokeWidth="2.4" strokeLinecap="round" fill="none" opacity="0.7" />
           </g>
         );
       case "spire":
@@ -633,17 +599,13 @@ export function TowerIcon({
             <path d="M18 32h12" stroke={a} strokeWidth="3" strokeLinecap="round" />
           </g>
         );
-      case "beam":
+      default:
         return (
           <g>
-            <rect x="14" y="30" width="20" height="12" rx="4" fill="#2b1f66" stroke={a} strokeWidth="2.4" />
-            <circle cx="24" cy="24" r="10" fill="none" stroke={a} strokeWidth="3" />
-            <circle cx="24" cy="24" r="5" fill={a} />
-            <path d="M24 4v8M8 24h6M40 24h-6M12 12l5 5M36 12l-5 5" stroke={a} strokeWidth="2.4" strokeLinecap="round" />
+            <circle cx="24" cy="24" r="16" fill="#11102a" stroke={c} strokeWidth="2.5" />
+            <text x="24" y="31" textAnchor="middle" fontSize="20" fontWeight="900" fill={a}>{id.slice(0, 1).toUpperCase()}</text>
           </g>
         );
-      default:
-        return <circle cx="24" cy="24" r="14" fill={c} />;
     }
   };
   return (

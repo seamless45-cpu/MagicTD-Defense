@@ -417,29 +417,32 @@ export function deleteMail(s: SaveData, id: string) {
 }
 
 /** take a message's attachment. Returns the loot lines for the claim UI. */
-export function deliverAutoBattleReport(s: SaveData, mode: "endless" | "gauntlet", waves: number, minutes: number, walletGold = 0): string {
+export function deliverAutoBattleReport(s: SaveData, mode: "endless" | "gauntlet", waves: number, minutes: number, walletGold = 0, startingWave = 1, breakAtWave = startingWave + waves): string {
   const week = weekStr();
   if (s.mail.autoWeek !== week) { s.mail.autoWeek = week; s.mail.autoUses = 0; }
   if (s.mail.autoUses >= 3 || s.mail.autoReadyAt > Date.now()) return "";
-  const count = Math.max(1, Math.floor(waves));
+  const count = Math.max(0, Math.floor(waves));
+  const start = Math.max(1, Math.floor(startingWave));
   // Sum the normal wave-clear payouts individually instead of applying a flat
   // multiplier to the final wave count. Endless milestone rewards are likewise
   // accumulated at the wave where they would be earned.
   let gold = Math.max(0, Math.floor(walletGold));
   let gems = 0;
-  for (let wave = 1; wave <= count; wave++) {
+  let tokens = 0;
+  let frags = 0;
+  for (let i = 0; i < count; i++) {
+    const wave = start + i;
     gold += Math.round((20 + 5 * wave) * REWARD_MUL);
     gems += Math.floor((wave / 3) * REWARD_MUL) - Math.floor(((wave - 1) / 3) * REWARD_MUL);
+    if (wave % 6 === 0) { tokens++; frags++; }
   }
-  const tokens = Math.floor(count / 6);
-  const frags = Math.floor(count / 6);
   const cooldownMs = Math.min(24 * 60 * 60_000, Math.max(15 * 60_000, count * 2 * 60_000));
   s.mail.autoReadyAt = Date.now() + cooldownMs;
   s.mail.autoUses += 1;
   const id = `auto-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
   s.mail.custom.push({
     id, kind: "reward", from: "Auto-Defense Command", subject: `${mode === "gauntlet" ? "Gauntlet" : "Endless"} expedition report`,
-    body: `Your active run was ended and your squad held for ${count} simulated waves (${minutes} minutes estimated). Their wave-clear rewards have been combined below. Cooldown: ${Math.ceil(cooldownMs / 60000)} minutes. Weekly uses: ${s.mail.autoUses}/3.`,
+    body: `Your active run was ended. Your squad cleared ${count} simulated waves and was overwhelmed at wave ${breakAtWave} (${minutes} minutes estimated). The current run wallet and completed-wave rewards are combined below. Cooldown: ${Math.ceil(cooldownMs / 60000)} minutes. Weekly uses: ${s.mail.autoUses}/3.`,
     color: mode === "gauntlet" ? "#3dff8e" : "#ff4fd8",
     reward: { gold, gems, tokens, frags }, age: "just now",
   });

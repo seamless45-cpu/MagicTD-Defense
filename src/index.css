@@ -4726,3 +4726,65 @@ button, input, textarea, select, option {
   .screen-enter > * { animation: none !important; }
   .tile, .panel, .row-card, .mail-row, .nav-btn, .tab-btn, .chip-btn, .hud-tool { transition: none !important; }
 }
+
+/* Compact in-run controls: keep the arena visible and let the HUD scroll as a
+   single shallow strip on narrow screens instead of wrapping into tall stacks. */
+.hud {
+  gap: 4px;
+  padding: 3px 6px 2px;
+}
+.hud-summon {
+  flex: 0 0 auto;
+  padding: 4px 9px 3px;
+  border-radius: 9px;
+  border-width: 1.5px;
+  box-shadow: 0 2px 0 #5a3400;
+}
+.hud-summon-main { font-size: 12px; }
+.hud-summon-cost { margin-top: 1px; font-size: 9px; }
+.hud-group { gap: 3px; flex-wrap: nowrap; }
+.hud-group + .hud-group { margin-left: auto; }
+.hud-pill { gap: 3px; padding: 2px 5px; border-radius: 7px; font-size: 10px; }
+.hud-pill b { font-size: 11px; }
+.hud-tool { min-width: 29px; min-height: 27px; padding: 2px 5px; }
+.wave-strip { min-height: 22px; gap: 5px; padding: 2px 6px; font-size: 9px; }
+.wave-strip-hp, .wave-strip-saver { font-size: 8px; }
+.ascent-slot { flex-basis: clamp(108px, 16vw, 150px) !important; min-height: 36px; }
+.ascent-slot .tower-icon { flex: 0 0 auto; }
+.ascent-btn-compact { min-height: 28px; padding: 2px 4px; font-size: 8px; }
+@media (max-width: 680px) {
+  .hud { flex-wrap: nowrap; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+  .hud::-webkit-scrollbar { display: none; }
+  .hud-group { flex: 0 0 auto; }
+  .hud-group + .hud-group { margin-left: 0; }
+  .hud .hud-crit em { display: none; }
+  .ascent-strip { gap: 3px !important; padding-left: 4px !important; padding-right: 4px !important; }
+  .ascent-slot { flex-basis: 116px !important; }
+  .event-live-layout {
+    display: grid !important;
+    grid-template-columns: 42px minmax(0, 1fr);
+    align-items: start !important;
+    gap: 8px 10px !important;
+  }
+  .event-live-layout > svg { width: 40px; height: 40px; }
+  .event-live-copy { width: 100%; }
+  .event-live-copy > .font-disp { font-size: clamp(20px, 7vw, 28px); }
+  .event-live-copy p { font-size: 12px; }
+  .event-live-actions { grid-column: 1 / -1; width: 100%; flex-direction: row !important; }
+  .event-live-actions > * { flex: 1 1 0; min-width: 0; }
+  .event-live-actions .cta-banner { padding: 8px 10px; font-size: 11px; }
+  .event-home-layout {
+    display: grid !important;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: center !important;
+    gap: 8px !important;
+  }
+  .event-home-layout > svg { width: 36px; height: 36px; }
+  .event-home-layout > div { min-width: 0 !important; }
+  .event-home-layout > div > .font-disp { font-size: 17px; }
+  .event-home-layout > button { grid-column: 1 / -1; width: 100%; padding: 7px 10px; }
+  .month-card .relative.flex { gap: 8px; }
+  [data-testid="month-live"] { padding: 12px !important; }
+  [data-testid="month-live"] .font-disp { font-size: 20px; }
+  [data-testid="month-track"] .font-disp { font-size: 19px; }
+}

@@ -1437,6 +1437,7 @@ describe("Battle", () => {
 
     click(btn());
     await waitFor(() => (card().textContent || "").includes("Lv 2/6"), "the tower type ascended");
+    expect(btn().textContent).toContain("200");
     expect(spNow()).toBeLessThan(spBefore);
 
     // the bar is byte-for-byte the same set of cards afterwards

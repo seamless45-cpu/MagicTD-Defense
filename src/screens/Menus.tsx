@@ -699,7 +699,7 @@ export function Home({
 
       {/* TODAY'S EVENT */}
       <div className="tile event-card live relative p-3" data-testid="today-event" style={{ borderColor: liveEv.color + "77" }}>
-        <div className="relative flex flex-wrap items-center gap-3">
+        <div className="event-home-layout relative flex flex-wrap items-center gap-3">
           <EventGlyph id={liveEv.id} color={liveEv.color} size={46} />
           <div className="min-w-[200px] flex-1">
             <div className="flex items-center gap-2">
@@ -921,6 +921,9 @@ export function EventGlyph({ id, color, size = 40 }: { id: string; color: string
           <path d="M13 4.5 8 13h3.5L10.5 19.5 16 11h-3.5z" fill={color + "44"} />
           <path d="M4.5 9A3.5 3.5 0 0 1 8 6" />
         </g>
+      )}
+      {!(["luck", "chestbox", "trophy", "items", "mineshaft", "lightning"] as string[]).includes(id) && (
+        <g {...common}><path d="M12 5 14.2 10l5.3 2-5.3 2-2.2 5-2.2-5-5.3-2 5.3-2z" fill={color + "66"} /></g>
       )}
     </svg>
   );
@@ -1236,9 +1239,9 @@ function EventsPanel({
     <>
       <div className="panel event-card live relative overflow-hidden p-5" style={{ borderColor: live.color + "88" }} data-testid="event-live">
         <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(620px 180px at 25% 0%, ${live.color}66, transparent 70%)` }} />
-        <div className="relative flex flex-wrap items-start gap-4">
+        <div className="event-live-layout relative flex flex-wrap items-start gap-4">
           <EventGlyph id={live.id} color={live.color} size={76} />
-          <div className="min-w-[220px] flex-1">
+          <div className="event-live-copy min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="live-dot" style={{ background: live.color }} />
               <span className="text-[10px] font-bold tracking-[0.32em] text-[var(--dim)]">LIVE NOW · {live.tagline.toUpperCase()}</span>
@@ -1251,7 +1254,7 @@ function EventsPanel({
               {live.perk}
             </div>
           </div>
-          <div className="flex shrink-0 flex-col items-stretch gap-1.5">
+          <div className="event-live-actions flex shrink-0 flex-col items-stretch gap-1.5">
             <button className="cta-banner px-5 py-3 text-[14px]" disabled={!eventClaimable(save)} onClick={doClaim}>
               {eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED TODAY"}
             </button>
