@@ -346,32 +346,27 @@ describe("Settings", () => {
     noErrors();
   }, 20000);
 
-  it("persists a reset instead of restoring the old save", async () => {
+  it("does not expose a destructive reset-progress action", async () => {
     persistSave({ ...defaultSave(), gold: 9999, levels: { arrow: 5 }, lineup: ["arrow"] });
     await mountApp();
-    expect(saved().gold).toBe(9999);
-
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
-    await waitFor(() => byText("div", "Reset Progress"), "settings modal");
-    click(byText("button", "Reset")!);
-    await waitFor(() => byText("button", "Confirm?"), "confirm step");
-    click(byText("button", "Confirm?")!);
-
-    await waitFor(() => saved().gold === 100, "default save written back");
-    expect(saved().levels.arrow).toBe(1);
-    expect(saved().lineup).toHaveLength(3);
+    await waitFor(() => byText("div", "Settings"), "settings modal");
+    expect(document.body.textContent).not.toContain("Reset Progress");
+    expect(document.querySelector('[data-testid="reset-progress"]')).toBeNull();
+    expect(saved().gold).toBe(9999);
+    expect(saved().levels.arrow).toBe(5);
     noErrors();
   });
 });
 
 describe("Font vault", () => {
-  it("offers fifty previewable faces and applies the picked one", async () => {
+  it("offers sixty previewable faces and applies the picked one", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
     // every tile carries data-font; the section/grid/count testids do not
-    expect(all("[data-font]").length).toBe(50);
+    expect(all("[data-font]").length).toBe(60);
     expect(document.body.textContent).toContain("Permanent Marker");
     expect(document.body.textContent).toContain("EDO");
 
@@ -401,6 +396,20 @@ describe("Gauntlet mode", () => {
     await waitFor(() => byText("em", "gauntlet"), "gauntlet round chip");
     expect(document.querySelector('[data-testid="gauntlet-boons"]')).toBeTruthy();
     expect(document.body.textContent).toContain("boons");
+    noErrors();
+  });
+  it("runs offline auto-battle only for endless modes and delivers the report by mail", async () => {
+    await mountApp();
+    expect(document.querySelector('[data-testid="auto-battle"]')).toBeNull();
+    const auto = document.querySelector('[data-testid="auto-endless"]') as HTMLButtonElement;
+    expect(auto).toBeTruthy();
+    click(auto);
+    await waitFor(() => document.body.textContent?.includes("Auto-Defense Command"), "auto battle report in mailbox");
+    expect(document.body.textContent).toContain("expedition report");
+    const report = document.querySelector('[data-mail^="auto-"]') as HTMLElement;
+    expect(report).toBeTruthy();
+    click(report);
+    await waitFor(() => document.body.textContent?.includes("simulated waves"), "report opened");
     noErrors();
   });
 });

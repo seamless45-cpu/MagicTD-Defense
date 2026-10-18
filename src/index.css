@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "EDO";
+  src: url("/fonts/edo.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   --bg0: #07051a;
   --bg1: #100a2e;
@@ -4571,4 +4579,33 @@ body,
 .calm .ascent-btn-compact.on {
   animation: none !important;
   transition: none;
+}
+
+/* Cold-open constellation: a subtle animated starfield gives the seal more depth. */
+.boot-stars {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  mask-image: radial-gradient(ellipse at center, #000 15%, transparent 78%);
+}
+.boot-stars i {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 50%;
+  background: #fff6c4;
+  box-shadow: 0 0 8px 2px rgba(53, 224, 255, .58);
+  opacity: .12;
+  animation: bootStar 3s ease-in-out infinite alternate;
+}
+@keyframes bootStar {
+  from { opacity: .08; transform: scale(.65); }
+  to { opacity: .9; transform: scale(1.8); }
+}
+.boot-emblem.on .boot-emblem-ring.r1 { animation-duration: 9s; }
+.boot-emblem.on .boot-emblem-ring.r2 { animation-duration: 4s; }
+.boot-letter.on { text-shadow: 0 0 18px rgba(255,179,36,.75), 0 0 42px rgba(53,224,255,.3); }
+@media (prefers-reduced-motion: reduce) {
+  .boot-stars i { animation: none; opacity: .55; }
 }

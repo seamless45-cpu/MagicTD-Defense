@@ -93,9 +93,12 @@ Pick a mode from the **Command Center**:
 | --- | --- | --- |
 | **Battle** | 12 rounds | Solo gauntlet. Win it to bank gold, gems and fragments. |
 | **Endless** | no limit | Score attack: survive as long as possible. Rewards scale with your depth — gold grows quadratically, gems every 3 waves, a token every 5. |
+| **Gauntlet** | no wave cap | Boon draft after each cleared wave; build your run until the squad falls. |
 
-**Enemies get 80% stronger every wave** (×1.8 per wave, compounding — it was ×1.57), and both the
-wave banner and the HUD show the current multiplier. Each wave holds two more enemies than it used
+Endless and Gauntlet also offer **Auto Battle** from the Command Center. The offline estimator uses unlocked lineup damage, attack rates, upgrades and awakenings to forecast waves survived and expedition duration. It delivers a claimable gold/gem/fragment report to the in-game Mailbox; no auto-battle option is offered for standard Battle.
+
+**Enemies get 120% stronger every wave** (×2.2 per wave, compounding). Both the wave banner and
+the HUD show the current multiplier. Each wave holds two more enemies than it used
 to, and every round-clear payout (gold + gems) was raised 40%. Two counterweights travel with the
 steeper curve: **bosses spawn with 10% less maximum health** (`BOSS_HP_MUL`) and **run gold pays 25%
 more** (`GOLD_GAIN_MUL`) from every kill, bounty and wave clear.
@@ -718,8 +721,8 @@ enemies, with Overpenetration and Rail Burn awakenings).
 
 ## Harder waves, richer runs, a scrollable Towers tab and a boot that plays
 
-- **The wave curve is steeper.** `HP_GROWTH` went from **1.57 to 1.8** per wave: wave 12 is now
-  ~440x wave 1 instead of ~130x, so late rounds demand the crit/point economy rather than raw
+- **The wave curve is steeper.** `HP_GROWTH` is now **2.2×** per wave (+120% HP): wave 12 is now
+  ~7,430x wave 1 instead of ~130x, so late rounds demand the crit/point economy rather than raw
   tower count. Bosses were brought down by 10% (`BOSS_HP_MUL = 0.9`, applied to the boss's own HP
   multiplier at spawn — the Void Titan walks in on 34 x 0.9 = 30.6, the Warlord on 13.5) so the four
   boss waves do not spike harder than the ramp around them. Nothing else about a boss changed.
@@ -739,5 +742,13 @@ enemies, with Overpenetration and Rail Burn awakenings).
   actually begins on the boot screen, and the first 400ms are ignored, so a leftover gesture can
   never cut the animation. A skip now also drives the car to the end of the track (340ms) before the
   launch instead of teleporting it, and the boot waits for the shell and the webfonts (capped at
-  +2.6s) so the arena never opens with a font swap mid-frame. The boot state line reads
-  `LOADING` → `READY` → `ENTERING THE ARENA`.
+  +2.6s) so the arena never opens with a font swap mid-frame. The boot now layers an animated
+  constellation behind the rotating seal. The boot state line reads `LOADING` → `READY` →
+  `ENTERING THE ARENA`.
+- **Sixty font choices.** Ten new families expand the display and reading categories; EDO now uses
+  Vic Fieger's actual bundled freeware font rather than falling through to a generic substitute.
+  Attribution is in `public/fonts/EDO-LICENSE.txt`.
+- **Auto Battle reports.** Endless/Gauntlet can be simulated from the Command Center; estimated
+  endurance and battle duration scale with lineup damage and awakening strength. Rewards arrive as
+  claimable custom Mailbox attachments. Standard Battle remains manual-only.
+- **Removed Reset Progress from Settings** so the destructive wipe is no longer exposed in-game.

@@ -109,8 +109,13 @@ import {
   gauntletChoices,
   takeGauntletBoon,
   collectGauntlet,
+  deliverAutoBattleReport,
+  inbox,
+  unclaimedMail,
+  claimMail,
 } from "../game/save";
 import { FONTS, FONT_BY_ID, DEFAULT_FONT, fontStack, fontDisplayStack, applyFont } from "../game/fonts";
+import { estimateAutoBattle } from "../game/autobattle";
 
 describe("tower data", () => {
   beforeEach(() => {
@@ -162,14 +167,14 @@ describe("tower data", () => {
     expect(roundHp(12)).toBeGreaterThan(roundHp(11));
   });
 
-  it("makes enemies exactly 1.8x stronger every wave", () => {
-    // the curve was 1.57x a wave; it is 1.8x now, so late waves bite much harder
-    expect(HP_GROWTH).toBeCloseTo(1.8, 10);
+  it("makes enemies exactly 2.2x stronger every wave", () => {
+    // 120% added HP per wave compounds strongly into deep runs
+    expect(HP_GROWTH).toBeCloseTo(2.2, 10);
     for (const w of [1, 2, 5, 11, 30, 60]) {
-      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(1.8, 8);
+      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(2.2, 8);
     }
-    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.8, 29), 3);
-    expect(roundHp(2)).toBeCloseTo(46 * 1.8, 6);
+    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(2.2, 29), 3);
+    expect(roundHp(2)).toBeCloseTo(46 * 2.2, 6);
   });
 
   it("gives every enemy 18% more health", () => {
@@ -1545,8 +1550,8 @@ describe("boss skills", () => {
 
 // ---------- the font vault ----------
 describe("font vault", () => {
-  it("ships exactly fifty faces with unique ids", () => {
-    expect(FONTS).toHaveLength(50);
+  it("ships sixty faces with unique ids", () => {
+    expect(FONTS).toHaveLength(60);
     const ids = FONTS.map((f) => f.id);
     expect(new Set(ids).size).toBe(ids.length);
     // the three the brief called out by name
@@ -1647,5 +1652,22 @@ describe("gauntlet mode", () => {
     const junk = importSave(JSON.stringify({ gauntletBest: -9, font: "" }));
     expect(junk.gauntletBest).toBe(0);
     expect(junk.font).toBe(DEFAULT_FONT);
+  });
+});
+
+
+describe("auto-battle expeditions", () => {
+  it("estimates an endless/gauntlet run from squad power and delivers claimable mail", () => {
+    const save = defaultSave();
+    const endless = estimateAutoBattle(save, "endless");
+    const gauntlet = estimateAutoBattle(save, "gauntlet");
+    expect(endless.waves).toBeGreaterThan(0);
+    expect(endless.minutes).toBeGreaterThan(0);
+    expect(gauntlet.mode).toBe("gauntlet");
+    const id = deliverAutoBattleReport(save, "endless", endless.waves, endless.minutes);
+    expect(inbox(save).some((m) => m.id === id)).toBe(true);
+    expect(unclaimedMail(save)).toContain(id);
+    expect(claimMail(save, id)).not.toBeNull();
+    expect(unclaimedMail(save)).not.toContain(id);
   });
 });

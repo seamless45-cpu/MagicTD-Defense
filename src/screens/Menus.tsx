@@ -17,7 +17,6 @@ import {
 } from "../game/save";
 import {
   todayStr,
-  clearSave,
   defaultSave,
   importSave,
   persistSave,
@@ -192,6 +191,9 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
   return (
     <div className="boot-root" data-testid="launch-intro" aria-label="MagicTD Defense boot sequence">
       <div className="boot-vignette" />
+      <div className="boot-stars" aria-hidden="true">
+        {Array.from({ length: 18 }, (_, i) => <i key={i} style={{ left: `${(i * 47 + 11) % 100}%`, top: `${(i * 61 + 7) % 100}%`, animationDelay: `${(i % 7) * -0.43}s`, animationDuration: `${2.2 + (i % 5) * 0.6}s` }} />)}
+      </div>
       <div className={`boot-collapse ${beat >= 1 ? "on" : ""}`} />
       <div className={`boot-shock ${beat >= 2 ? "on" : ""}`} />
       {beat >= 6 && <div className="boot-wipe" />}
@@ -218,7 +220,7 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
 
         <div className={`boot-sub ${beat >= 4 ? "on" : ""}`}>DEFENSE</div>
         <div className={`boot-tagline ${beat >= 5 ? "on" : ""}`}>
-          HOLD THE LINE <span className="boot-dot">◆</span> MASTER THE ARCANE
+          DEFEND THE RIFT <span className="boot-dot">◆</span> COMMAND THE STORM
         </div>
       </div>
 
@@ -229,7 +231,7 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
 
 const LOAD_TIPS = [
   "Gold levels a tower up; fragments push it through ascension.",
-  "Endless waves scale enemy health ×1.8 every single round.",
+  "Endless waves scale enemy health ×2.2 every single round.",
   "Chilled enemies take 25% more damage from every source.",
   "Every tower upgrade adds +8% crit damage to your account.",
   "Bosses start throwing skills at you from round 16.",
@@ -442,6 +444,7 @@ export function Home({
   onBattle,
   onEndless,
   onGauntlet,
+  onAutoBattle,
   push,
 }: {
   save: SaveData;
@@ -449,6 +452,7 @@ export function Home({
   onBattle: () => void;
   onEndless: () => void;
   onGauntlet: () => void;
+  onAutoBattle: (mode: "endless" | "gauntlet") => void;
   push: (m: string, c?: string) => void;
 }) {
   const hero = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
@@ -581,7 +585,7 @@ export function Home({
           Command Center
         </div>
         <div className="mt-0.5 text-[12px] font-semibold tracking-[0.28em] text-[var(--dim)]">
-          ENEMIES GROW +80% STRONGER EVERY WAVE · HOLD THE LINE
+          ENEMIES GROW +120% STRONGER EVERY WAVE · HOLD THE LINE
         </div>
       </div>
 
@@ -683,6 +687,7 @@ export function Home({
           onClick={onEndless}
           delay="60ms"
           badge={`BEST ${save.bestEndless}`}
+          onAuto={() => onAutoBattle("endless")}
         />
         <ModeCard
           accent="#3dff8e"
@@ -692,6 +697,7 @@ export function Home({
           onClick={onGauntlet}
           delay="120ms"
           badge={`BEST ${save.gauntletBest}`}
+          onAuto={() => onAutoBattle("gauntlet")}
         />
       </div>
 
@@ -932,6 +938,7 @@ function ModeCard({
   onClick,
   delay,
   badge,
+  onAuto,
 }: {
   accent: string;
   title: string;
@@ -940,17 +947,15 @@ function ModeCard({
   onClick: () => void;
   delay: string;
   badge?: string;
+  onAuto?: () => void;
 }) {
   return (
-    <button
-      onClick={() => {
-        sfx.click();
-        onClick();
-      }}
+    <div
       className="tile tile-hover anim-pop group relative overflow-hidden p-4 text-left"
       style={{ animationDelay: delay, borderColor: accent }}
       data-mode={title}
     >
+      <button className="relative z-[1] w-full text-left" onClick={() => { sfx.click(); onClick(); }}>
       <div
         className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full opacity-30 transition-opacity group-hover:opacity-60"
         style={{ background: `radial-gradient(circle, ${accent}, transparent 70%)` }}
@@ -966,7 +971,9 @@ function ModeCard({
       <div className="relative mt-1 text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--dim)]">{sub}</div>
       <p className="relative mt-2 text-[12.5px] font-semibold leading-snug text-[var(--txt)]/85">{body}</p>
       <span className="cta-banner relative mt-3 inline-block px-6 py-2 text-[14px]">DEPLOY</span>
-    </button>
+      </button>
+      {onAuto && <button className="btn btn-cyan relative z-[2] mt-2 w-full px-3 py-2 text-[11px] font-black tracking-wider" data-testid={`auto-${title.toLowerCase()}`} onClick={() => { sfx.awaken(); onAuto(); }}>⚡ AUTO BATTLE · MAIL REWARDS</button>}
+    </div>
   );
 }
 
@@ -2407,7 +2414,6 @@ export function SettingsModal({
   mutate: (fn: (s: SaveData) => void) => void;
   onClose: () => void;
 }) {
-  const [confirmReset, setConfirmReset] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -2613,7 +2619,7 @@ export function SettingsModal({
         />
       </div>
 
-      {/* FONT VAULT — fifty faces, each tile previews itself. Picking one applies
+      {/* FONT VAULT — sixty faces, each tile previews itself. Picking one applies
           it live (UI + headings) and lazily pulls the Google stylesheet. */}
       <div className="mt-4 flex items-center gap-2">
         <div className="text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">FONT</div>
@@ -2716,29 +2722,6 @@ export function SettingsModal({
             </button>
           </div>
         )}
-        <div className="flex items-center gap-3 rounded-lg border border-[#ff4d5e55] bg-black/30 px-4 py-3">
-          <SetIcon name="reset" color="#ff4d5e" />
-          <div className="min-w-0 flex-1">
-            <div className="font-bold text-[#ff4d5e]">Reset Progress</div>
-            <div className="text-xs font-semibold text-[var(--dim)]">Wipes gold, gems, tokens, towers and lineup</div>
-          </div>
-          <button
-            className="btn btn-danger px-4 py-1.5 text-sm"
-            onClick={() => {
-              if (!confirmReset) {
-                setConfirmReset(true);
-                sfx.error();
-                return;
-              }
-              clearSave();
-              window.dispatchEvent(new CustomEvent("magictd-reset"));
-              sfx.click();
-              onClose();
-            }}
-          >
-            {confirmReset ? "Confirm?" : "Reset"}
-          </button>
-        </div>
         <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
           <SetIcon name="replay" color="#ff9be9" />
           <div className="min-w-0 flex-1">

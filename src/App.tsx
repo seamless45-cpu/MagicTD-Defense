@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { loadSave, mailReady, persistSave, seasonReady, tasksReady, type SaveData } from "./game/save";
+import { deliverAutoBattleReport, loadSave, mailReady, persistSave, seasonReady, tasksReady, type SaveData } from "./game/save";
+import { estimateAutoBattle } from "./game/autobattle";
 import { applyFont } from "./game/fonts";
 import { sfx, setSfx, setVolume, setVolumeBoost, initAudio } from "./game/audio";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
@@ -253,6 +254,17 @@ export default function App() {
             onBattle={() => setScreen("battle")}
             onEndless={() => setScreen("endless")}
             onGauntlet={() => setScreen("gauntlet")}
+            onAutoBattle={(mode) => {
+              if (save.mail.autoReadyAt > Date.now()) {
+                const mins = Math.ceil((save.mail.autoReadyAt - Date.now()) / 60000);
+                push(`AUTO BATTLE RECHARGING · ready in ${mins} min`, "#8fb0ff");
+                return;
+              }
+              const plan = estimateAutoBattle(save, mode);
+              mutate((s) => { deliverAutoBattleReport(s, mode, plan.waves, plan.minutes); });
+              push(`AUTO BATTLE COMPLETE · ${plan.waves} waves · ${plan.minutes} min estimated · report sent to Mail`, mode === "gauntlet" ? "#3dff8e" : "#ff4fd8");
+              setScreen("mail");
+            }}
           />
         )}
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}

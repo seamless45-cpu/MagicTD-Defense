@@ -1054,14 +1054,14 @@ export function spawnBudget(n = SPAWN_BUDGET_TOWERS) {
 export const REWARD_MUL = 1.4;
 export const reward = (v: number) => Math.round(v * REWARD_MUL);
 
-/** Enemies get 80% stronger every wave - the game's difficulty curve. */
-export const HP_GROWTH = 1.8;
+/** Enemies get 120% stronger every wave (2.2× HP). */
+export const HP_GROWTH = 2.2;
 
 /**
  * Damage a tower deals per shot.
  * Menu levels add flat damage, battle levels multiply it, points multiply it again,
  * and aura buffs come in as `atkMul`. Growth is multiplicative so it can keep up
- * with the 1.8x enemy curve.
+ * with the 2.2x enemy curve.
  */
 // ---------- crit damage ----------------
 /**
@@ -1726,7 +1726,7 @@ export function roundHp(round: number) {
 
 /**
  * Bosses carry 10% less maximum health than their type's raw multiplier.
- * The wave curve got steeper (57% -> 80% a wave), and a boss is worth 15-34x a
+ * The wave curve got steeper (57% -> 120% a wave), and a boss is worth 15-34x a
  * normal enemy on top of it: without this trim the Warlord, Overlord and Titan
  * spike far harder than the ramp around them. Only maximum health moves — boss
  * speed, armour, lives and gold are untouched.

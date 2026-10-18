@@ -21,6 +21,7 @@ import {
   MAIL,
   MAIL_BY_ID,
   RARITY,
+  REWARD_MUL,
   SEASON_TIERS,
   seasonNumber,
   seasonPoints,
@@ -58,6 +59,10 @@ export interface TaskState {
 }
 
 export interface MailState {
+  /** dynamically generated messages such as auto-battle reports */
+  custom: MailItem[];
+  /** unix timestamp when the next automatic expedition may be started */
+  autoReadyAt: number;
   /** message ids already opened */
   read: string[];
   /** message ids whose attachment has been taken */
@@ -140,7 +145,7 @@ export interface SaveData {
   volBoost: boolean;
   /** power saving: 30fps cap, minimal effects, no interpolation */
   powerSaver: boolean;
-  /** selected UI font id from the 50-font catalog in game/fonts.ts */
+  /** selected UI font id from the 60-font catalog in game/fonts.ts */
   font: string;
   /** crystal potions, spent on the crystal vault in the Towers tab */
   potions: number;
@@ -196,7 +201,7 @@ export function emptyTasks(day = ""): TaskState {
 }
 
 export function emptyMail(): MailState {
-  return { read: [], claimed: [], deleted: [] };
+  return { custom: [], autoReadyAt: 0, read: [], claimed: [], deleted: [] };
 }
 
 export function emptySeason(number = seasonNumber()): SeasonState {
@@ -309,6 +314,8 @@ function normalise(s: SaveData): SaveData {
   s.tasks.claimed = Array.isArray(s.tasks.claimed) ? (s.tasks.claimed as TaskId[]) : [];
   s.tasks.milestones = Array.isArray(s.tasks.milestones) ? s.tasks.milestones.map(Number) : [];
   s.mail = { ...emptyMail(), ...(s.mail && typeof s.mail === "object" ? s.mail : {}) };
+  s.mail.custom = Array.isArray(s.mail.custom) ? s.mail.custom : [];
+  s.mail.autoReadyAt = Math.max(0, Number(s.mail.autoReadyAt) || 0);
   s.mail.read = Array.isArray(s.mail.read) ? s.mail.read.map(String) : [];
   s.mail.claimed = Array.isArray(s.mail.claimed) ? s.mail.claimed.map(String) : [];
   s.mail.deleted = Array.isArray(s.mail.deleted) ? s.mail.deleted.map(String) : [];
@@ -363,25 +370,29 @@ export function clearSave() {
 // ---------- mail ----------
 /** every message still sitting in the inbox, newest last */
 export function inbox(s: SaveData): MailItem[] {
-  return MAIL.filter((m) => !s.mail.deleted.includes(m.id));
+  return [...MAIL, ...s.mail.custom].filter((m) => !s.mail.deleted.includes(m.id));
+}
+
+export function mailItem(s: SaveData, id: string): MailItem | undefined {
+  return MAIL_BY_ID[id] || s.mail.custom.find((m) => m.id === id);
 }
 
 /** ids whose attachment is still waiting to be collected */
 export function unclaimedMail(s: SaveData): string[] {
-  return MAIL.filter(
+  return [...MAIL, ...s.mail.custom].filter(
     (m) => m.reward && !s.mail.claimed.includes(m.id) && !s.mail.deleted.includes(m.id)
   ).map((m) => m.id);
 }
 
 /** how many messages are unopened or unclaimed — drives the badge */
 export function mailReady(s: SaveData): number {
-  return MAIL.filter(
+  return [...MAIL, ...s.mail.custom].filter(
     (m) => !s.mail.deleted.includes(m.id) && (!s.mail.read.includes(m.id) || (m.reward && !s.mail.claimed.includes(m.id)))
   ).length;
 }
 
 export function openMail(s: SaveData, id: string) {
-  if (!MAIL_BY_ID[id]) return;
+  if (!mailItem(s, id)) return;
   if (!s.mail.read.includes(id)) s.mail.read = [...s.mail.read, id];
 }
 
@@ -390,8 +401,23 @@ export function deleteMail(s: SaveData, id: string) {
 }
 
 /** take a message's attachment. Returns the loot lines for the claim UI. */
+export function deliverAutoBattleReport(s: SaveData, mode: "endless" | "gauntlet", waves: number, minutes: number): string {
+  const id = `auto-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const gold = Math.max(0, Math.round(waves * (mode === "gauntlet" ? 260 : 190) * REWARD_MUL));
+  const gems = Math.floor(waves / 4);
+  const frags = Math.floor(waves / 6);
+  s.mail.autoReadyAt = Date.now() + 30 * 60 * 1000;
+  s.mail.custom.push({
+    id, kind: "reward", from: "Auto-Defense Command", subject: `${mode === "gauntlet" ? "Gauntlet" : "Endless"} expedition report`,
+    body: `Your towers held for ${waves} simulated waves. Expedition duration was calculated as ${minutes} minutes from the estimated battle tempo and squad strength. Collect the campaign payout below.`,
+    color: mode === "gauntlet" ? "#3dff8e" : "#ff4fd8",
+    reward: { gold, gems, frags }, age: "just now",
+  });
+  return id;
+}
+
 export function claimMail(s: SaveData, id: string): ChestLoot | null {
-  const m = MAIL_BY_ID[id];
+  const m = mailItem(s, id);
   if (!m || !m.reward || s.mail.claimed.includes(id) || s.mail.deleted.includes(id)) return null;
   const loot: ChestLoot = { ...emptyLoot(), gold: m.reward.gold || 0, gems: m.reward.gems || 0, tokens: m.reward.tokens || 0 };
   if (m.reward.chips) loot.chips = { basic: m.reward.chips, advanced: 0, elite: 0 };

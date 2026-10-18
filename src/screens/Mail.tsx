@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { MAIL_KIND, MAIL_BY_ID } from "../game/data";
+import { MAIL_KIND } from "../game/data";
 import {
   claimAllMail,
   claimMail,
@@ -7,6 +7,7 @@ import {
   deleteMail,
   inbox,
   lootLines,
+  mailItem,
   openMail,
   unclaimedMail,
   type SaveData,
@@ -44,7 +45,7 @@ export default function Mail({
   };
 
   const doClaim = (id: string) => {
-    const m = MAIL_BY_ID[id];
+    const m = mailItem(save, id);
     if (!m || !ready.includes(id)) return;
     // roll on a draft so the loot is ready synchronously for the reward card,
     // then commit through mutate — the claimed-guard does the real work
@@ -99,7 +100,7 @@ export default function Mail({
     push("Message deleted", "#8fb0ff");
   };
 
-  const cur = open ? MAIL_BY_ID[open] : null;
+  const cur = open ? mailItem(save, open) : null;
   const curReady = cur ? ready.includes(cur.id) : false;
 
   return (
