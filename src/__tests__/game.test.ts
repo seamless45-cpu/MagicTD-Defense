@@ -1571,9 +1571,8 @@ describe("font vault", () => {
     expect(fontStack("rajdhani")).toContain("Rajdhani");
     expect(fontStack("not-a-font")).toBe(fontStack(DEFAULT_FONT));
     expect(fontDisplayStack("marker")).toContain("Permanent Marker");
-    // a face without its own display stack uses the UI stack
-    const f = FONTS.find((x) => !x.display)!;
-    expect(fontDisplayStack(f.id)).toBe(f.stack);
+    // every role follows the selected face, rather than silently retaining a display fallback
+    for (const f of FONTS) expect(fontDisplayStack(f.id)).toBe(f.stack);
   });
 
   it("applies a face to the document root and reports it on the dataset", () => {

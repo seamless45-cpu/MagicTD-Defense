@@ -327,6 +327,12 @@ describe("Settings", () => {
     expect(dmg.getAttribute("aria-checked")).toBe("true");
     click(dmg);
     await waitFor(() => saved().dmgNums === false, "toggled through the knob");
+    const glass = document.querySelector('[data-testid="toggle-liquidGlass"]') as HTMLElement;
+    expect(glass).toBeTruthy();
+    expect(document.documentElement.dataset.uiGlass).toBe("off");
+    click(glass);
+    await waitFor(() => saved().liquidGlass === true, "liquid-glass preference saved");
+    await waitFor(() => document.documentElement.dataset.uiGlass === "on", "liquid-glass theme applied");
     noErrors();
   }, 20000);
 

@@ -145,6 +145,10 @@ export default function App() {
     applyFont(save.font);
   }, [save.font]);
 
+  useEffect(() => {
+    document.documentElement.dataset.uiGlass = save.liquidGlass ? "on" : "off";
+  }, [save.liquidGlass]);
+
   // the static splash in index.html is only there until the app has painted
   useEffect(() => {
     document.getElementById("boot-splash")?.remove();

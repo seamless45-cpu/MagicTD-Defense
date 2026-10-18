@@ -145,6 +145,8 @@ export interface SaveData {
   volBoost: boolean;
   /** power saving: 30fps cap, minimal effects, no interpolation */
   powerSaver: boolean;
+  /** enable optional translucent liquid-glass UI styling */
+  liquidGlass: boolean;
   /** selected UI font id from the 60-font catalog in game/fonts.ts */
   font: string;
   /** crystal potions, spent on the crystal vault in the Towers tab */
@@ -246,6 +248,7 @@ export function defaultSave(): SaveData {
     vol: 0.7,
     volBoost: false,
     powerSaver: false,
+    liquidGlass: false,
     font: "rajdhani",
     // a new account can immediately ignite one crystal
     potions: 6,

@@ -116,7 +116,9 @@ export function fontStack(id: string | undefined): string {
 /** the heading stack for a font id */
 export function fontDisplayStack(id: string | undefined): string {
   const f = FONT_BY_ID[id || ""] || FONT_BY_ID[DEFAULT_FONT];
-  return f.display || f.stack;
+  // The selected face is used for every text role; no silent Bungee/header
+  // substitution when the player explicitly picked another font.
+  return f.stack;
 }
 
 /** ids of fonts that have already had their stylesheet injected */

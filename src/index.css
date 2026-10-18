@@ -4609,3 +4609,68 @@ body,
 @media (prefers-reduced-motion: reduce) {
   .boot-stars i { animation: none; opacity: .55; }
 }
+
+/* Inherit the chosen face on native controls too (browsers otherwise replace
+   it with their platform UI font, leaving isolated labels looking mismatched). */
+button, input, textarea, select, option {
+  font-family: var(--font-ui, "Rajdhani", system-ui, sans-serif);
+}
+
+/* Optional liquid-glass material. This is intentionally an opt-in skin so the
+   original opaque theme remains the low-cost/high-contrast default. */
+[data-ui-glass="on"] {
+  --panel: rgba(15, 20, 48, .48);
+  --panel2: rgba(46, 57, 94, .44);
+  --line: rgba(199, 226, 255, .22);
+  --line2: rgba(191, 230, 255, .38);
+}
+[data-ui-glass="on"] .panel,
+[data-ui-glass="on"] .tile,
+[data-ui-glass="on"] .row-card,
+[data-ui-glass="on"] .hud-pill,
+[data-ui-glass="on"] .mail-row,
+[data-ui-glass="on"] .modal-card,
+[data-ui-glass="on"] [data-testid="hud"],
+[data-ui-glass="on"] [data-testid="ascent-bar"] > .tile {
+  background-color: rgba(24, 33, 66, .38) !important;
+  background-image:
+    linear-gradient(145deg, rgba(255,255,255,.22), rgba(255,255,255,.035) 34%, transparent 58%),
+    linear-gradient(180deg, rgba(125,179,255,.12), rgba(18,24,51,.24)) !important;
+  border-color: rgba(204, 230, 255, .36) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.32), inset 0 -1px 0 rgba(120,180,255,.12), 0 10px 32px rgba(0,0,0,.25) !important;
+  backdrop-filter: blur(18px) saturate(1.55);
+  -webkit-backdrop-filter: blur(18px) saturate(1.55);
+}
+[data-ui-glass="on"] .tile::after {
+  background: linear-gradient(118deg, rgba(255,255,255,.17), transparent 27%, rgba(255,255,255,.025) 66%, transparent) !important;
+}
+[data-ui-glass="on"] .btn {
+  border-color: rgba(218, 241, 255, .48) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.42), 0 8px 22px rgba(0,0,0,.22) !important;
+  backdrop-filter: blur(14px) saturate(1.5);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5);
+}
+[data-ui-glass="on"] .btn::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(145deg, rgba(255,255,255,.32), transparent 24%, transparent 68%, rgba(183,220,255,.09));
+}
+[data-ui-glass="on"] .btn:hover,
+[data-ui-glass="on"] .tile-hover:hover {
+  filter: brightness(1.16) saturate(1.18);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.46), 0 0 24px rgba(117,203,255,.18) !important;
+}
+[data-ui-glass="on"] .app-bg {
+  background:
+    radial-gradient(ellipse at 14% 12%, rgba(72,178,255,.17), transparent 38%),
+    radial-gradient(ellipse at 88% 70%, rgba(205,112,255,.16), transparent 42%),
+    linear-gradient(145deg, #090d23, #101a39 52%, #080b20) !important;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  [data-ui-glass="on"] .panel,
+  [data-ui-glass="on"] .tile,
+  [data-ui-glass="on"] .row-card { background-color: rgba(22,31,61,.94) !important; }
+}

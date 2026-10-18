@@ -274,9 +274,9 @@ interface BT {
 }
 /**
  * ONE SKY BOLT. A strike is no longer a straight pillar: it is a segmented
- * polyline from above the arena down to the impact point, with seeded lateral
- * jitter and two forked branches, so it reads like real lightning. All the
- * geometry is derived from `seed`, which means zero per-frame allocation.
+ * polyline from above the arena down to the impact point, with a 100 Hz
+ * changing lateral channel and forked branches. Offsets are reused in a typed
+ * buffer so the 10ms flicker adds no geometry allocations.
  */
 interface Strike {
   x: number;
@@ -290,6 +290,10 @@ interface Strike {
   top?: number;
   /** forks drawn off the main channel */
   forks?: number;
+  /** preallocated lateral offsets, refreshed at 100 Hz (10 ms) */
+  jitter?: Float32Array;
+  lastJit?: number;
+  points?: { x: number; y: number }[];
 }
 
 /** a falling rock telegraphed by a boss — the shadow grows, then it lands */
@@ -668,8 +672,8 @@ function ptColor(p: number) {
 // optimized tall jagged bolts: offsets live in a Float32Array, re-jittered only on the 5ms tick
 function randBolt(x0: number, y0: number, x1: number, y1: number, color: string, w: number, max: number, now: number): Bolt {
   const b: Bolt = {
-    x0, y0, x1, y1, n: 8,
-    off: new Float32Array(8),
+    x0, y0, x1, y1, n: 12,
+    off: new Float32Array(12),
     lastJit: 0,
     life: max,
     max,
@@ -680,12 +684,12 @@ function randBolt(x0: number, y0: number, x1: number, y1: number, color: string,
   return b;
 }
 function jitBolt(b: Bolt, now: number) {
-  if (now - b.lastJit < 5) return;
+  if (now - b.lastJit < 10) return;
   b.lastJit = now;
   const dx = b.x1 - b.x0;
   const dy = b.y1 - b.y0;
   const L = Math.max(1, Math.hypot(dx, dy));
-  const amp = Math.min(34, L * 0.14);
+  const amp = Math.min(24, L * 0.1);
   for (let i = 0; i < b.n; i++) {
     if (i === 0 || i === b.n - 1) b.off[i] = 0;
     else b.off[i] = (Math.random() - 0.5) * 2 * amp * Math.sin((Math.PI * i) / (b.n - 1));
@@ -1618,14 +1622,20 @@ export default function Battle({
       const bossShare = tier1 > 0 ? t.def.awk1!.mult[tier1 - 1] : t.def.execBossHp || 0.5;
       const list = g.enemies.filter((e) => !e.dead);
       const shown = list.slice(0, 12);
-      // every column lands on the same frame: a single crimson storm front
+      // Every bolt, flash and impact pool is anchored to the same enemy point.
+      // Keep explosions per target; one screen-center rift used to drift away
+      // from the execution bolts and made the blast look spatially disconnected.
       shown.forEach((e) => {
         const ep = enemyPos(e);
         const boss = isBossType(e.type);
-        g.strikes.push({ x: ep.x, y: ep.y, life: 0.46, max: 0.46, width: boss ? 22 : 12, color: "#ff2b3d", seed: Math.random() * 100, forks: boss ? 3 : 2 });
-        g.strikes.push({ x: ep.x, y: ep.y, life: 0.32, max: 0.32, width: boss ? 9 : 4, color: "#ffffff", seed: Math.random() * 100 });
+        g.strikes.push({ x: ep.x, y: ep.y, life: 0.46, max: 0.46, width: boss ? 19 : 10, color: "#ff2b3d", seed: Math.random() * 100, forks: boss ? 4 : 3 });
+        g.strikes.push({ x: ep.x, y: ep.y, life: 0.32, max: 0.32, width: boss ? 8 : 3.5, color: "#ffffff", seed: Math.random() * 100 });
+        addZone({ kind: "rift", x: ep.x, y: ep.y, r: boss ? 92 : 58, life: 0.42, max: 0.42, dps: 0, slow: 0, color: "#ff2b3d" });
+        shock(ep.x, ep.y, "#ff2b3d", boss ? 148 : 88, 0.42);
+        glow(ep.x, ep.y, "#ff394e", boss ? 150 : 96, 0.38);
+        burst(ep.x, ep.y, "#ff2b3d", boss ? 20 : 12, boss ? 300 : 220);
+        sparkAt(ep.x, ep.y, boss ? 24 : 14, boss ? 320 : 240);
       });
-      addZone({ kind: "rift", x: shown[0] ? enemyPos(shown[0]).x : W / 2, y: H * 0.55, r: 150, life: 0.4, max: 0.4, dps: 0, slow: 0, color: "#ff2b3d" });
       flash("#ff2b3d", 0.2);
       punch(0.6, 0.4);
       hitStop(0.05);
@@ -7270,19 +7280,28 @@ export default function Battle({
       for (const st of g.strikes) {
         const k = Math.max(0, Math.min(1, st.life / st.max)); // 1 -> 0
         const top = st.top ?? -70;
-        const w = st.width * (0.72 + k * 0.5);
+        const w = st.width * (0.34 + k * 0.18);
         const detailed = pillarIdx++ < 10 && fxQ() >= 0.7;
-        const segs = 12;
+        const segs = 16;
         const span = Math.max(40, st.y - top);
-        const sway = w * 1.25;
+        const sway = w * 1.9;
+        // Reuse a compact typed offset buffer and the point list. The bolt changes
+        // shape at 100 Hz (10ms) rather than burning RNG and allocating per frame.
+        if (!st.jitter || st.jitter.length !== segs + 1) st.jitter = new Float32Array(segs + 1);
+        if (!st.points || st.points.length !== segs + 1) st.points = Array.from({ length: segs + 1 }, () => ({ x: 0, y: 0 }));
+        if (now - (st.lastJit || 0) >= 10 || !st.lastJit) {
+          for (let i = 0; i <= segs; i++) st.jitter[i] = i === 0 || i === segs ? 0 : Math.random() * 2 - 1;
+          st.lastJit = now;
+        }
         const channel = (salt: number, spread: number, from: number, to: number) => {
-          const out: { x: number; y: number }[] = [];
+          const out = st.points!;
           for (let i = 0; i <= segs; i++) {
             const t = i / segs;
             // taper the wobble at both ends so the bolt is anchored
-            const env = Math.sin(Math.PI * t) * 0.9 + 0.1;
-            const jx = (hash(st.seed * 3.7 + i * 1.93 + salt) - 0.5) * 2 * spread * env;
-            out.push({ x: st.x + jx, y: top + span * (from + (to - from) * t) });
+            const env = Math.sin(Math.PI * t) * 0.92;
+            const jx = (st.jitter![i] + (salt ? hash(st.seed * 3.7 + i * 1.93 + salt) - 0.5 : 0)) * spread * env;
+            out[i].x = st.x + jx;
+            out[i].y = top + span * (from + (to - from) * t);
           }
           return out;
         };

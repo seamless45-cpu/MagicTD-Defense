@@ -752,3 +752,6 @@ enemies, with Overpenetration and Rail Burn awakenings).
   endurance and battle duration scale with lineup damage and awakening strength. Rewards arrive as
   claimable custom Mailbox attachments. Standard Battle remains manual-only.
 - **Removed Reset Progress from Settings** so the destructive wipe is no longer exposed in-game.
+- **Full font consistency.** The selected face now drives both UI and display text roles, and native controls inherit it rather than rendering in the platform default.
+- **Liquid Glass is an optional Settings skin.** It adds translucent, blurred, specular surfaces without changing the original default theme.
+- **Lightning geometry refreshes at 100 Hz.** Thin segmented channels use a reused typed jitter buffer (10 ms flicker cadence); Demon Execution's blast pools and flashes are centered on each matching lightning impact.

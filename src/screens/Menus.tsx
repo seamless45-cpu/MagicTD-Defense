@@ -2445,6 +2445,7 @@ export function SettingsModal({
     ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
     ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffcf4d"],
+    ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
   ];
   return (
     <Modal onClose={onClose} w={470}>
