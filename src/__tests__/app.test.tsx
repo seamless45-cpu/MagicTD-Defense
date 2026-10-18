@@ -404,12 +404,14 @@ describe("Gauntlet mode", () => {
     expect(document.body.textContent).toContain("boons");
     noErrors();
   });
-  it("runs offline auto-battle only for endless modes and delivers the report by mail", async () => {
+  it("auto-resolves from an active endless run and delivers the aggregate report by mail", async () => {
     await mountApp();
-    expect(document.querySelector('[data-testid="auto-battle"]')).toBeNull();
-    const auto = document.querySelector('[data-testid="auto-endless"]') as HTMLButtonElement;
+    startMode("Endless");
+    await waitFor(() => document.querySelector('[data-testid="summon-btn"]'), "active battle HUD");
+    click(document.querySelector('[data-testid="summon-btn"]') as HTMLElement);
+    const auto = await waitFor(() => document.querySelector('[data-testid="auto-resolve"]'), "in-game auto resolve");
     expect(auto).toBeTruthy();
-    click(auto);
+    click(auto as HTMLElement);
     await waitFor(() => document.body.textContent?.includes("Auto-Defense Command"), "auto battle report in mailbox");
     expect(document.body.textContent).toContain("expedition report");
     const report = document.querySelector('[data-mail^="auto-"]') as HTMLElement;
@@ -593,6 +595,19 @@ describe("Shop", () => {
     expect(pack, "5-token pack").toBeTruthy();
     click(pack);
     await waitFor(() => saved().tokens === 5, "tokens banked");
+    expect(saved().gems).toBe(0);
+    noErrors();
+  });
+
+  it("offers the 200-token exchange for exactly 2000 gems", async () => {
+    persistSave({ ...defaultSave(), gems: 2000 });
+    await mountApp();
+    click(byText("button", "Shop")!);
+    await waitFor(() => byText("div", "MAGIC TOKEN EXCHANGE"), "token exchange");
+    const bulk = all("button").find((b) => (b.textContent || "").replace(/\s/g, "") === "2000")!;
+    expect(bulk).toBeTruthy();
+    click(bulk);
+    await waitFor(() => saved().tokens === 200, "200 tokens banked");
     expect(saved().gems).toBe(0);
     noErrors();
   });
@@ -1204,7 +1219,7 @@ describe("Battle", () => {
     // the boss that leads an early round is the Warlord
     expect(text).toContain("WARLORD");
     expect(text).toContain("ROUND 4");
-    expect(text).toContain("TAP TO SKIP");
+    expect(text).toContain("SKIP BOSS INTRO");
     // the reworked card carries the boss title and a live stat block
     expect(text).toContain("CRIMSON WARLORD");
     expect(text).toContain("HEALTH");
@@ -1218,8 +1233,8 @@ describe("Battle", () => {
       expect(text, skill).toContain(skill);
     }
 
-    // tapping dismisses the card and the run resumes
-    click(cut);
+    // the visible skip control dismisses the card and the run resumes
+    click(cut.querySelector('[aria-label="Skip boss cutscene"]') as HTMLElement);
     await waitFor(() => !document.querySelector('[data-testid="boss-cutscene"]'), "cutscene dismissed", 8000);
 
     // the boss then walks onto the path and the bar appears

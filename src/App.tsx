@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { deliverAutoBattleReport, loadSave, mailReady, persistSave, seasonReady, tasksReady, type SaveData } from "./game/save";
+import { deliverAutoBattleReport, loadSave, mailReady, persistSave, seasonReady, tasksReady, weekStr, type SaveData } from "./game/save";
 import { estimateAutoBattle } from "./game/autobattle";
 import { applyFont } from "./game/fonts";
 import { sfx, setSfx, setVolume, setVolumeBoost, initAudio } from "./game/audio";
@@ -216,6 +216,23 @@ export default function App() {
           save={save}
           mutate={mutate}
           onExit={() => setScreen("home")}
+          onAutoBattle={(mode, liveSquadDps, deployedCount, currentWave, walletGold) => {
+            const weeklyUses = save.mail.autoWeek === weekStr() ? save.mail.autoUses : 0;
+            if (weeklyUses >= 3) {
+              push("AUTO-RESOLVE LIMIT REACHED · 3 uses per week", "#8fb0ff");
+              return;
+            }
+            if (save.mail.autoReadyAt > Date.now()) {
+              push(`AUTO BATTLE RECHARGING · ready in ${Math.ceil((save.mail.autoReadyAt - Date.now()) / 60000)} min`, "#8fb0ff");
+              return;
+            }
+            const plan = estimateAutoBattle(save, mode, liveSquadDps, deployedCount, currentWave);
+            let report = "";
+            mutate((s) => { report = deliverAutoBattleReport(s, mode, plan.waves, plan.minutes, walletGold); });
+            if (!report) { push("AUTO-RESOLVE COOLDOWN OR WEEKLY LIMIT ACTIVE", "#8fb0ff"); return; }
+            push(`RUN ENDED · auto-resolved ${plan.waves} waves · report sent to Mail`, mode === "gauntlet" ? "#3dff8e" : "#ff4fd8");
+            setScreen("mail");
+          }}
         />
       </div>
     );
@@ -258,17 +275,6 @@ export default function App() {
             onBattle={() => setScreen("battle")}
             onEndless={() => setScreen("endless")}
             onGauntlet={() => setScreen("gauntlet")}
-            onAutoBattle={(mode) => {
-              if (save.mail.autoReadyAt > Date.now()) {
-                const mins = Math.ceil((save.mail.autoReadyAt - Date.now()) / 60000);
-                push(`AUTO BATTLE RECHARGING · ready in ${mins} min`, "#8fb0ff");
-                return;
-              }
-              const plan = estimateAutoBattle(save, mode);
-              mutate((s) => { deliverAutoBattleReport(s, mode, plan.waves, plan.minutes); });
-              push(`AUTO BATTLE COMPLETE · ${plan.waves} waves · ${plan.minutes} min estimated · report sent to Mail`, mode === "gauntlet" ? "#3dff8e" : "#ff4fd8");
-              setScreen("mail");
-            }}
           />
         )}
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}

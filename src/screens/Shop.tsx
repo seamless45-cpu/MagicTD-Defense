@@ -13,6 +13,7 @@ const TOKEN_PACKS = [
   { tokens: 1, gems: 32 },
   { tokens: 5, gems: 128 },
   { tokens: 12, gems: 272 },
+  { tokens: 200, gems: 2000 },
 ];
 
 export default function Shop({

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, heroLevel } from "../game/save";
+import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, heroLevel, weekStr } from "../game/save";
 import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import {
@@ -769,6 +769,7 @@ export default function Battle({
   save,
   mutate,
   onExit,
+  onAutoBattle,
   debugRound,
   debugBoon,
 }: {
@@ -776,6 +777,7 @@ export default function Battle({
   save: SaveData;
   mutate: (fn: (s: SaveData) => void) => void;
   onExit: () => void;
+  onAutoBattle?: (mode: "endless" | "gauntlet", liveSquadDps: number, deployedCount: number, currentWave: number, walletGold: number) => void;
   /** start the run on a later round — used by tests to reach boss waves quickly */
   debugRound?: number;
   /** open the gauntlet boon card immediately — used by tests */
@@ -884,10 +886,11 @@ export default function Battle({
     bgCache.height = H;
     {
       const bg = bgCache.getContext("2d") as CanvasRenderingContext2D;
+      const starfall = saveRef.current.scenes?.includes("starfall") === true;
       const grd = bg.createLinearGradient(0, 0, 0, H);
-      grd.addColorStop(0, "#120a33");
-      grd.addColorStop(0.45, "#0b0726");
-      grd.addColorStop(1, "#05040f");
+      grd.addColorStop(0, starfall ? "#08243a" : "#120a33");
+      grd.addColorStop(0.45, starfall ? "#091b36" : "#0b0726");
+      grd.addColorStop(1, starfall ? "#06101f" : "#05040f");
       bg.fillStyle = grd;
       bg.fillRect(0, 0, W, H);
       // two nebula blooms, baked in place
@@ -896,8 +899,8 @@ export default function Battle({
         const ny = H * (0.3 + i * 0.35);
         const nr = Math.min(W, H) * (0.5 + i * 0.12);
         const ng = bg.createRadialGradient(nx, ny, 0, nx, ny, nr);
-        ng.addColorStop(0, i ? "rgba(53,110,255,0.16)" : "rgba(160,60,255,0.17)");
-        ng.addColorStop(0.5, i ? "rgba(53,110,255,0.05)" : "rgba(160,60,255,0.05)");
+        ng.addColorStop(0, starfall ? (i ? "rgba(53,224,255,0.20)" : "rgba(255,207,77,0.12)") : i ? "rgba(53,110,255,0.16)" : "rgba(160,60,255,0.17)");
+        ng.addColorStop(0.5, starfall ? (i ? "rgba(53,224,255,0.07)" : "rgba(255,207,77,0.04)") : i ? "rgba(53,110,255,0.05)" : "rgba(160,60,255,0.05)");
         ng.addColorStop(1, "transparent");
         bg.fillStyle = ng;
         bg.fillRect(nx - nr, ny - nr, nr * 2, nr * 2);
@@ -975,7 +978,7 @@ export default function Battle({
     const fxOn = () => saveRef.current.fx;
     /** the merged crit multiplier: base + 8% for every upgrade on the account.
      *  Tower levels can't change mid-run, so this is resolved once. */
-    const runCritMul = critMultiplierFrom(saveRef.current.levels);
+    const runCritMul = critMultiplierFrom(saveRef.current.levels) * (saveRef.current.scenes?.length ? 1.2 : 1);
     /** Mana Conduit turns every SP payout up by the share bought this run */
     const spGain = (n: number) => Math.round(n * (1 + g.spGainMul));
     /** screen shake that honours the Screen Shake setting */
@@ -4482,7 +4485,7 @@ export default function Battle({
           ctx.arc(x, y, 20, 0, Math.PI * 2);
           ctx.fill();
           ctx.fillStyle = col;
-          ctx.font = "bold 20px system-ui";
+          ctx.font = `bold 20px ${canvasUiFont}`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText("✕", x, y + 1);
@@ -7774,12 +7777,12 @@ export default function Battle({
       // fell too far behind: drop the backlog and draw the true state
       const dropped = acc >= STEP;
       if (dropped) acc = 0;
-      renderAlpha =
-        saveRef.current.frameInterp && !ps
-          ? dropped
-            ? 1
-            : Math.max(0, Math.min(1, acc / STEP))
-          : 1;
+      const rawAlpha = dropped ? 1 : Math.max(0, Math.min(1, acc / STEP));
+      renderAlpha = saveRef.current.frameInterp && !ps
+        ? saveRef.current.interpolationMethod === "linear"
+          ? rawAlpha
+          : rawAlpha * rawAlpha * (3 - 2 * rawAlpha)
+        : 1;
       fxUserLevel = ps ? 2 : saveRef.current.fxq || 0;
       const drawStart = performance.now();
       draw();
@@ -8170,6 +8173,7 @@ export default function Battle({
           <span className="wave-strip-hp">HP ×{Math.pow(HP_GROWTH, Math.max(0, g.round - 1)).toFixed(1)}</span>
           {g.round % 4 === 0 && <span className="wave-strip-boss">BOSS</span>}
           {save.powerSaver && <span className="wave-strip-saver" title="Power Saving Mode is on">SAVER</span>}
+          {mode !== "battle" && (() => { const uses = save.mail.autoWeek === weekStr() ? save.mail.autoUses : 0; const deployed = g.towers.filter((t) => !!t.cell && t.downT <= 0 && t.hexT <= 0); const dps = deployed.reduce((sum, t) => sum + towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) / Math.max(0.08, t.def.rate), 0); const cd = Math.max(0, save.mail.autoReadyAt - Date.now()); return <button type="button" disabled={!!g.final} className="ml-auto rounded-md border border-[#ff4fd8]/50 bg-black/70 px-2 py-1 text-[10px] font-bold text-[#ff9be9] disabled:opacity-40" data-testid="auto-resolve" onClick={() => onAutoBattle?.(mode, dps, deployed.length, g.round, g.gold)}>{cd ? `AUTO · ${Math.ceil(cd / 60000)}m` : `AUTO-RESOLVE · ${Math.max(0, 3 - uses)}/3`}</button>; })()}
         </div>
       )}
 
@@ -8721,8 +8725,9 @@ export default function Battle({
                   <span className="num">{g.cut.locked ? "!" : Math.max(1, Math.ceil(g.cut.t))}</span>
                 </div>
                 <span className="text-[11px] font-bold tracking-[0.25em] text-[var(--dim)]">
-                  {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "TAP TO SKIP"}
+                  {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "CUTSCENE"}
                 </span>
+                <button type="button" className="btn btn-cyan px-3 py-1.5 text-xs" aria-label="Skip boss cutscene" onClick={(e) => { e.stopPropagation(); if (g) g.cut = null; }}>SKIP BOSS INTRO</button>
               </div>
             </div>
           </div>

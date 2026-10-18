@@ -9,7 +9,7 @@ export interface AutoBattlePlan {
 }
 
 /** Estimate an offline expedition from the unlocked, equipped squad's actual damage curve. */
-export function estimateAutoBattle(save: SaveData, mode: AutoBattlePlan["mode"]): AutoBattlePlan {
+export function estimateAutoBattle(save: SaveData, mode: AutoBattlePlan["mode"], liveSquadDps?: number, deployedCount?: number, currentWave = 1): AutoBattlePlan {
   const ids = [...new Set(save.lineup)].filter((id) => (save.levels[id] || 0) > 0 && TOWER_BY_ID[id]);
   const roster = ids.length ? ids : ["arrow", "cannon", "ice"];
   let dps = 0;
@@ -24,11 +24,13 @@ export function estimateAutoBattle(save: SaveData, mode: AutoBattlePlan["mode"])
     dps += towerDamage(def, level, 1, 0) * hitsPerSecond * awakenBonus * 2.5;
   }
   dps *= 1 + Math.max(0, save.heroLv[save.hero] || 1) * 0.035;
+  if (Number.isFinite(liveSquadDps) && (liveSquadDps || 0) > 0) dps = liveSquadDps as number;
+  const activeTowers = Math.max(1, deployedCount || roster.length);
   let waves = 0;
   let totalSeconds = 0;
   // Model each wave as a health budget against the full squad's sustained DPS.
   // We cap the report at 40 waves to bound rewards and keep estimates readable.
-  for (let wave = 1; wave <= 40; wave++) {
+  for (let wave = Math.max(1, Math.floor(currentWave)); wave < Math.max(1, Math.floor(currentWave)) + 40; wave++) {
     const count = Math.min(46, 8 + wave * 2);
     const avgEnemyMul = wave >= 16 ? 3.2 : wave >= 7 ? 1.8 : 1.25;
     const enemyHp = 46 * Math.pow(HP_GROWTH, wave - 1) * ENEMY_HP_SCALE * avgEnemyMul;
@@ -36,7 +38,7 @@ export function estimateAutoBattle(save: SaveData, mode: AutoBattlePlan["mode"])
     const healthBudget = enemyHp * count + bossHp;
     // The live game continually fires while enemies traverse the lane; allow a
     // wave's defense window to grow modestly with the number of deployed towers.
-    const clearWindow = 24 + roster.length * 4;
+    const clearWindow = 24 + activeTowers * 4;
     if (healthBudget > dps * clearWindow) break;
     waves = wave;
     const battleSeconds = Math.min(150, 18 + healthBudget / Math.max(1, dps));
@@ -45,6 +47,6 @@ export function estimateAutoBattle(save: SaveData, mode: AutoBattlePlan["mode"])
   }
   // A basic squad is still allowed a short expedition, but never reports zero.
   waves = Math.max(1, waves);
-  if (!totalSeconds) totalSeconds = 24 + roster.length * 4;
+  if (!totalSeconds) totalSeconds = 24 + activeTowers * 4;
   return { mode, waves, minutes: Math.max(1, Math.ceil(totalSeconds / 60)), squadDps: Math.round(dps) };
 }

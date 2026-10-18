@@ -131,24 +131,39 @@ describe("tower data", () => {
     }
   });
 
-  it("gives every tower two awakenings with 5 tiers", () => {
+  it("gives every tower two awakenings with 6 tiers", () => {
     // every tower is awakenable now, not just the exotics: the preview panel
     // shows both paths for the whole roster
     for (const t of TOWERS) {
       expect(t.awk1, t.id).toBeDefined();
       expect(t.awk2, t.id).toBeDefined();
-      expect(t.awk1!.chance).toHaveLength(5);
-      expect(t.awk1!.mult).toHaveLength(5);
-      expect(t.awk2!.chance).toHaveLength(5);
-      expect(t.awk2!.mult).toHaveLength(5);
-      if (t.awk1!.mult2) expect(t.awk1!.mult2).toHaveLength(5);
-      if (t.awk2!.mult2) expect(t.awk2!.mult2).toHaveLength(5);
+      expect(t.awk1!.chance).toHaveLength(6);
+      expect(t.awk1!.mult).toHaveLength(6);
+      expect(t.awk2!.chance).toHaveLength(6);
+      expect(t.awk2!.mult).toHaveLength(6);
+      if (t.awk1!.mult2) expect(t.awk1!.mult2).toHaveLength(6);
+      if (t.awk2!.mult2) expect(t.awk2!.mult2).toHaveLength(6);
       expect(t.awk1!.name.length, t.id).toBeGreaterThan(0);
       expect(t.awk2!.name.length, t.id).toBeGreaterThan(0);
       expect(t.awk1!.desc.length, t.id).toBeGreaterThan(0);
       expect(t.awk2!.desc.length, t.id).toBeGreaterThan(0);
       expect(awakenCost(1), t.id).toBeGreaterThan(0);
       expect(awakenCost(2), t.id).toBeGreaterThan(awakenCost(1));
+    }
+  });
+
+  it("extends both awakening paths through Tier VI", () => {
+    for (const tower of TOWERS) {
+      if (tower.awk1) {
+        expect(tower.awk1.chance).toHaveLength(6);
+        expect(tower.awk1.mult).toHaveLength(6);
+        expect(tower.awk1.chance[5]).toBeLessThanOrEqual(1);
+      }
+      if (tower.awk2) {
+        expect(tower.awk2.chance).toHaveLength(6);
+        expect(tower.awk2.mult).toHaveLength(6);
+        expect(tower.awk2.chance[5]).toBeLessThanOrEqual(1);
+      }
     }
   });
 
@@ -168,14 +183,14 @@ describe("tower data", () => {
     expect(roundHp(12)).toBeGreaterThan(roundHp(11));
   });
 
-  it("makes enemies exactly 2.2x stronger every wave", () => {
-    // 120% added HP per wave compounds strongly into deep runs
-    expect(HP_GROWTH).toBeCloseTo(2.2, 10);
+  it("uses steadier 1.5x enemy HP growth each wave", () => {
+    // Lower per-wave growth smooths late-game spikes while preserving the role multipliers.
+    expect(HP_GROWTH).toBeCloseTo(1.5, 10);
     for (const w of [1, 2, 5, 11, 30, 60]) {
-      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(2.2, 8);
+      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(1.5, 8);
     }
-    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(2.2, 29), 3);
-    expect(roundHp(2)).toBeCloseTo(46 * 2.2, 6);
+    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.5, 29), 3);
+    expect(roundHp(2)).toBeCloseTo(46 * 1.5, 6);
   });
 
   it("scales Power Plant networks into stronger damage and speed auras", () => {
@@ -187,9 +202,9 @@ describe("tower data", () => {
     expect(powerPlantNetworkScale(12)).toBe(2);
   });
 
-  it("gives non-bosses +90% HP and bosses +55% HP", () => {
+  it("applies a dedicated HP modifier to regular enemies and bosses", () => {
     expect(ENEMY_HP_SCALE).toBeCloseTo(1.9, 10);
-    expect(BOSS_HP_MUL).toBeCloseTo(1.55, 10);
+    expect(BOSS_HP_MUL).toBeCloseTo(1.8, 10);
     for (const [i, et] of ENEMY_TYPES.entries()) {
       const scale = isBossType(i) ? BOSS_HP_MUL : ENEMY_HP_SCALE;
       expect(scale).toBeGreaterThan(1);
@@ -210,8 +225,8 @@ describe("tower data", () => {
     expect(shortHp(999_600)).toBe("1M");
   });
 
-  it("applies the dedicated +55% boss health multiplier", () => {
-    expect(BOSS_HP_MUL).toBeCloseTo(1.55, 10);
+  it("applies the dedicated +80% boss health multiplier", () => {
+    expect(BOSS_HP_MUL).toBeCloseTo(1.8, 10);
     // the multiplier lands on each boss's own type HP; their large role-based
     // multipliers remain intact on top of the new global boss health bonus.
     const bossMul = ENEMY_TYPES.map((e, i) => ({ e, i })).filter(({ i }) => isBossType(i)).map(({ e }) => e.hpMul * BOSS_HP_MUL);
@@ -262,7 +277,7 @@ describe("tower data", () => {
       expect(def.art, `${id} art family`).toBeTruthy();
     }
     const byRarity = (r: string) => newIds.filter((id) => TOWER_BY_ID[id].rarity === r);
-    expect(byRarity("normal")).toHaveLength(5);
+    expect(byRarity("normal")).toHaveLength(6);
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
@@ -299,7 +314,7 @@ describe("tower data", () => {
       expect(sk.hits, id).toBeGreaterThan(0);
       expect(def.awk1, id).toBeDefined();
       expect(def.awk2, id).toBeDefined();
-      expect(def.awk1!.chance, id).toHaveLength(5);
+      expect(def.awk1!.chance, id).toHaveLength(6);
       expect(def.art, id + " art family").toBeTruthy();
     }
     // every skill name is its own effect
@@ -348,8 +363,8 @@ describe("tower data", () => {
       expect(def.art, `${id} art family`).toBeTruthy();
       expect(def.awk1, id).toBeDefined();
       expect(def.awk2, id).toBeDefined();
-      expect(def.awk1!.chance, id).toHaveLength(5);
-      expect(def.awk2!.mult, id).toHaveLength(5);
+      expect(def.awk1!.chance, id).toHaveLength(6);
+      expect(def.awk2!.mult, id).toHaveLength(6);
     }
     // mechanics that actually differ between them
     expect(TOWER_BY_ID.nova.multi).toBeGreaterThan(1);
@@ -409,9 +424,9 @@ describe("tower data", () => {
       expect(def.art, `${id} art family`).toBeTruthy();
       for (const slot of [def.awk1, def.awk2]) {
         expect(slot, id).toBeDefined();
-        expect(slot!.chance, id).toHaveLength(5);
-        expect(slot!.mult, id).toHaveLength(5);
-        if (slot!.mult2) expect(slot!.mult2, id).toHaveLength(5);
+        expect(slot!.chance, id).toHaveLength(6);
+        expect(slot!.mult, id).toHaveLength(6);
+        if (slot!.mult2) expect(slot!.mult2, id).toHaveLength(6);
       }
     }
     // Demon Execution: a red bolt on a cadence that eats half a boss's max HP
@@ -1679,5 +1694,16 @@ describe("auto-battle expeditions", () => {
     expect(unclaimedMail(save)).toContain(id);
     expect(claimMail(save, id)).not.toBeNull();
     expect(unclaimedMail(save)).not.toContain(id);
+    expect(save.mail.autoUses).toBe(1);
+    expect(save.mail.autoReadyAt).toBeGreaterThan(Date.now());
+    // Once cooldowns are cleared, two further runs are allowed in this week;
+    // the fourth attempt is rejected at the weekly cap.
+    save.mail.autoReadyAt = 0;
+    expect(deliverAutoBattleReport(save, "endless", 1, 1)).not.toBe("");
+    save.mail.autoReadyAt = 0;
+    expect(deliverAutoBattleReport(save, "endless", 1, 1)).not.toBe("");
+    save.mail.autoReadyAt = 0;
+    expect(deliverAutoBattleReport(save, "endless", 1, 1)).toBe("");
+    expect(save.mail.autoUses).toBe(3);
   });
 });

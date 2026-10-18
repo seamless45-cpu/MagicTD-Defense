@@ -444,7 +444,6 @@ export function Home({
   onBattle,
   onEndless,
   onGauntlet,
-  onAutoBattle,
   push,
 }: {
   save: SaveData;
@@ -452,7 +451,6 @@ export function Home({
   onBattle: () => void;
   onEndless: () => void;
   onGauntlet: () => void;
-  onAutoBattle: (mode: "endless" | "gauntlet") => void;
   push: (m: string, c?: string) => void;
 }) {
   const hero = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
@@ -687,7 +685,6 @@ export function Home({
           onClick={onEndless}
           delay="60ms"
           badge={`BEST ${save.bestEndless}`}
-          onAuto={() => onAutoBattle("endless")}
         />
         <ModeCard
           accent="#3dff8e"
@@ -697,7 +694,6 @@ export function Home({
           onClick={onGauntlet}
           delay="120ms"
           badge={`BEST ${save.gauntletBest}`}
-          onAuto={() => onAutoBattle("gauntlet")}
         />
       </div>
 
@@ -2568,6 +2564,10 @@ export function SettingsModal({
             />
           </div>
         ))}
+        <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+          <div className="min-w-0 flex-1"><div className="font-bold">Interpolation Method</div><div className="text-xs font-semibold text-[var(--dim)]">Linear is responsive; Smoothstep eases motion near each simulation step.</div></div>
+          <select aria-label="Interpolation Method" className="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-xs" value={save.interpolationMethod} onChange={(e) => mutate((s) => { s.interpolationMethod = e.target.value === "linear" ? "linear" : "smoothstep"; })}><option value="linear">Linear</option><option value="smoothstep">Smoothstep</option></select>
+        </div>
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">APP</div>

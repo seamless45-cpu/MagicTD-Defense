@@ -63,6 +63,9 @@ export interface MailState {
   custom: MailItem[];
   /** unix timestamp when the next automatic expedition may be started */
   autoReadyAt: number;
+  /** weekly Auto Battle usage stamp and count */
+  autoWeek: string;
+  autoUses: number;
   /** message ids already opened */
   read: string[];
   /** message ids whose attachment has been taken */
@@ -106,6 +109,8 @@ export interface SaveData {
   levels: Record<string, number>; // tower id -> menu level (1..15); absent = locked
   frags: Record<string, number>;
   lineup: string[]; // max 6 tower ids
+  /** owned visual scenes; ownership grants the scene crit-damage bonus */
+  scenes: string[];
   awn: Record<string, [number, number]>; // tower id -> [awk1Tier, awk2Tier] 0..5
   hero: string; // selected hero id
   heroLv: Record<string, number>; // hero id -> level (1..HERO_MAX_LEVEL)
@@ -167,6 +172,8 @@ export interface SaveData {
   maxFps: number;
   /** draw between sim steps for smoother motion */
   frameInterp: boolean;
+  /** interpolation curve used between fixed-step updates */
+  interpolationMethod: "linear" | "smoothstep";
   /** effects budget: 0 = everything, 1 = reduced, 2 = minimal */
   fxq: number;
   /** camera shake on explosions */
@@ -203,7 +210,7 @@ export function emptyTasks(day = ""): TaskState {
 }
 
 export function emptyMail(): MailState {
-  return { custom: [], autoReadyAt: 0, read: [], claimed: [], deleted: [] };
+  return { custom: [], autoReadyAt: 0, autoWeek: "", autoUses: 0, read: [], claimed: [], deleted: [] };
 }
 
 export function emptySeason(number = seasonNumber()): SeasonState {
@@ -224,6 +231,7 @@ export function defaultSave(): SaveData {
     levels: { arrow: 1, cannon: 1, ice: 1 },
     frags: { arrow: 2, cannon: 1, ice: 0 },
     lineup: ["arrow", "cannon", "ice"],
+    scenes: [],
     awn: {},
     hero: "nova",
     heroLv: {},
@@ -260,6 +268,7 @@ export function defaultSave(): SaveData {
     dmgNums: true,
     maxFps: 0,
     frameInterp: true,
+    interpolationMethod: "smoothstep",
     fxq: 0,
     shakeFx: true,
     guides: true,
@@ -278,11 +287,13 @@ function normalise(s: SaveData): SaveData {
   if (!s.levels || Object.keys(s.levels).length === 0) s.levels = { arrow: 1 };
   if (!Array.isArray(s.lineup)) s.lineup = [];
   s.lineup = s.lineup.filter((id) => s.levels[id]);
+  s.scenes = Array.isArray(s.scenes) ? [...new Set(s.scenes.filter((id) => typeof id === "string"))] : [];
   if (!HERO_BY_ID[s.hero]) s.hero = "nova";
   s.vol = Math.min(1, Math.max(0, Number.isFinite(s.vol) ? s.vol : 0.7));
   s.volBoost = !!s.volBoost;
   s.powerSaver = !!s.powerSaver;
   s.font = typeof s.font === "string" && s.font ? s.font : "rajdhani";
+  s.interpolationMethod = s.interpolationMethod === "linear" ? "linear" : "smoothstep";
   s.potions = Math.max(0, Number.isFinite(s.potions) ? Math.round(s.potions) : 0);
   s.crystals = s.crystals && typeof s.crystals === "object" ? s.crystals : {};
   for (const def of CRYSTALS) {
@@ -319,6 +330,8 @@ function normalise(s: SaveData): SaveData {
   s.mail = { ...emptyMail(), ...(s.mail && typeof s.mail === "object" ? s.mail : {}) };
   s.mail.custom = Array.isArray(s.mail.custom) ? s.mail.custom : [];
   s.mail.autoReadyAt = Math.max(0, Number(s.mail.autoReadyAt) || 0);
+  s.mail.autoWeek = typeof s.mail.autoWeek === "string" ? s.mail.autoWeek : "";
+  s.mail.autoUses = Math.max(0, Math.min(3, Math.floor(Number(s.mail.autoUses) || 0)));
   s.mail.read = Array.isArray(s.mail.read) ? s.mail.read.map(String) : [];
   s.mail.claimed = Array.isArray(s.mail.claimed) ? s.mail.claimed.map(String) : [];
   s.mail.deleted = Array.isArray(s.mail.deleted) ? s.mail.deleted.map(String) : [];
@@ -404,17 +417,31 @@ export function deleteMail(s: SaveData, id: string) {
 }
 
 /** take a message's attachment. Returns the loot lines for the claim UI. */
-export function deliverAutoBattleReport(s: SaveData, mode: "endless" | "gauntlet", waves: number, minutes: number): string {
+export function deliverAutoBattleReport(s: SaveData, mode: "endless" | "gauntlet", waves: number, minutes: number, walletGold = 0): string {
+  const week = weekStr();
+  if (s.mail.autoWeek !== week) { s.mail.autoWeek = week; s.mail.autoUses = 0; }
+  if (s.mail.autoUses >= 3 || s.mail.autoReadyAt > Date.now()) return "";
+  const count = Math.max(1, Math.floor(waves));
+  // Sum the normal wave-clear payouts individually instead of applying a flat
+  // multiplier to the final wave count. Endless milestone rewards are likewise
+  // accumulated at the wave where they would be earned.
+  let gold = Math.max(0, Math.floor(walletGold));
+  let gems = 0;
+  for (let wave = 1; wave <= count; wave++) {
+    gold += Math.round((20 + 5 * wave) * REWARD_MUL);
+    gems += Math.floor((wave / 3) * REWARD_MUL) - Math.floor(((wave - 1) / 3) * REWARD_MUL);
+  }
+  const tokens = Math.floor(count / 6);
+  const frags = Math.floor(count / 6);
+  const cooldownMs = Math.min(24 * 60 * 60_000, Math.max(15 * 60_000, count * 2 * 60_000));
+  s.mail.autoReadyAt = Date.now() + cooldownMs;
+  s.mail.autoUses += 1;
   const id = `auto-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-  const gold = Math.max(0, Math.round(waves * (mode === "gauntlet" ? 260 : 190) * REWARD_MUL));
-  const gems = Math.floor(waves / 4);
-  const frags = Math.floor(waves / 6);
-  s.mail.autoReadyAt = Date.now() + 30 * 60 * 1000;
   s.mail.custom.push({
     id, kind: "reward", from: "Auto-Defense Command", subject: `${mode === "gauntlet" ? "Gauntlet" : "Endless"} expedition report`,
-    body: `Your towers held for ${waves} simulated waves. Expedition duration was calculated as ${minutes} minutes from the estimated battle tempo and squad strength. Collect the campaign payout below.`,
+    body: `Your active run was ended and your squad held for ${count} simulated waves (${minutes} minutes estimated). Their wave-clear rewards have been combined below. Cooldown: ${Math.ceil(cooldownMs / 60000)} minutes. Weekly uses: ${s.mail.autoUses}/3.`,
     color: mode === "gauntlet" ? "#3dff8e" : "#ff4fd8",
-    reward: { gold, gems, frags }, age: "just now",
+    reward: { gold, gems, tokens, frags }, age: "just now",
   });
   return id;
 }

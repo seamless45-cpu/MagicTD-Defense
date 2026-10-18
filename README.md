@@ -565,7 +565,7 @@ enemies, with Overpenetration and Rail Burn awakenings).
   **Sovereign Strike** use the same pillars, as does the ascent flourish.
 - **Void Titan** — a new boss (shape `titan`) that steps in from round 32 with all nine skills, a
   slab-plated siege body with orbiting shards and a void core, plus the reworked cutscene above.
-- **Awakenings for every tower** — 37 towers, two paths each, five tiers each. `AwkFx`
+- **Awakenings for every tower** — 37 towers, two paths each, six tiers each. Tier VI extends Tier V's effect magnitude.
   (`heavy`, `critup`, `volley`, `freeze`, `burn`, `chain`, `slow`, `splash`, `sp`, `bounty`, `aura`,
   `execute`, `quake`) is implemented in the battle engine, and the Towers screen lists the live tier
   effect for each path.

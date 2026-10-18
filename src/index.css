@@ -3075,6 +3075,10 @@ body,
    the roster was a fight. The tab is a single scroll surface now, so the grid can
    be as tall as it needs and the filter row / crit band stays pinned to the top. */
 .tower-page {
+  min-height: 0;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   scroll-padding-top: 46px;

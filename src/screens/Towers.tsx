@@ -17,6 +17,7 @@ import {
   ROMAN,
   MAX_MENU_LEVEL,
   MAX_BATTLE_LEVEL,
+  AWAKENING_MAX_TIER,
   upgradeGoldCost,
   upgradeFragCost,
   ascentAllCost,
@@ -307,7 +308,7 @@ export default function Towers({
     const spec = slot === 0 ? def.awk1! : def.awk2!;
     if (lv < needLv) return deny(`Awakening ${slot === 0 ? "1" : "2"} unlocks at Lv ${needLv}`);
     const cur = save.awn[def.id]?.[slot] || 0;
-    if (cur >= 5) return deny("Awakening maxed (V)");
+    if (cur >= AWAKENING_MAX_TIER) return deny(`Awakening maxed (${ROMAN[AWAKENING_MAX_TIER]})`);
     const cost = awakenCost(cur + 1);
     if (save.tokens < cost) return deny(`Need ${cost} Magic Tokens`);
     mutate((s) => {
@@ -572,6 +573,13 @@ export default function Towers({
         </div>
       )}
       </div>
+
+      <section className="tile p-3" data-testid="tower-scenes">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><div className="font-disp text-lg text-[#ff9be9]">SCENES</div><div className="text-xs font-semibold text-[var(--dim)]">Starfall Sanctum · +20% crit damage while owned</div></div>
+          {save.scenes.includes("starfall") ? <span className="chip text-[#8effc4]">OWNED · +20% CRIT DMG</span> : <button className="btn btn-cyan flex items-center gap-1.5 px-3 py-2 text-xs" disabled={save.gems < 1500} onClick={() => { mutate((s) => { if (!s.scenes.includes("starfall") && s.gems >= 1500) { s.gems -= 1500; s.scenes.push("starfall"); } }); push("STARFALL SANCTUM UNLOCKED · +20% CRIT DAMAGE", "#ff9be9"); }}><GemIcon size={14}/> 1,500</button>}
+        </div>
+      </section>
 
       {/* ASCENT ALL — a compact one-line bar rather than a second panel */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#35e0ff66] bg-[#0d1330]/70 px-2.5 py-1.5" data-testid="ascent-all">
@@ -913,19 +921,20 @@ function TowerPreview({
                     </div>
                     <p className="mt-0.5 text-[11px] font-semibold leading-snug text-[var(--dim)]">{spec.desc}</p>
                     <div className="mt-1.5 flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold text-[var(--dim)]">{awkText(def, slot, tier)}</span>
+                      <span className="text-[11px] font-bold text-[var(--dim)]">{tier > 0 ? awkText(def, slot, tier) : "Not awakened yet"}</span>
                       {avail ? (
-                        tier < 5 ? (
+                        tier < AWAKENING_MAX_TIER ? (
                           <button className="btn flex shrink-0 items-center gap-1 px-2.5 py-1 text-[11px]" onClick={() => onAwaken(slot)}>
                             <TokenIcon size={12} /> {cost} · Tier {ROMAN[tier + 1]}
                           </button>
                         ) : (
-                          <span className="text-[11px] font-bold text-[#ff4fd8]">MAX TIER</span>
+                          <span className="text-[11px] font-bold text-[#ff4fd8]">MAX TIER {ROMAN[AWAKENING_MAX_TIER]}</span>
                         )
                       ) : (
                         <span className="shrink-0 text-[11px] font-bold text-[var(--line2)]">Lv {needLv} needed</span>
                       )}
                     </div>
+                    {tier < AWAKENING_MAX_TIER && avail && <div className="mt-1 text-[10px] font-semibold text-[#ffd5f5]">Next · Tier {ROMAN[tier + 1]}: {awkText(def, slot, tier + 1)}</div>}
                   </div>
                 );
             })}

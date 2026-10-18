@@ -101,7 +101,7 @@ export type AwkFx =
 export interface AwkSpec {
   name: string;
   desc: string;
-  chance: number[]; // per tier I..V
+  chance: number[]; // per tier I..VI
   mult: number[]; // effect magnitude per tier
   mult2?: number[]; // secondary magnitude per tier
   /** engine hook — absent means the tower has bespoke handling in Battle.tsx */
@@ -112,7 +112,7 @@ export interface AwkSpec {
 
 /**
  * Awakening factory. `chance` and `mult` are given as [tier I, tier V] pairs and
- * interpolated across the five tiers, so the data stays readable.
+ * interpolated across the original five tiers, then extended to Tier VI for every tower.
  */
 export function awking(
   name: string,
@@ -993,6 +993,30 @@ export const TOWERS: TowerDef[] = [
   },
 ];
 
+/** Tier VI extends every tower's two awakening paths beyond the original five tiers.
+ * It adds half of the Tier IV→V increase (or +25% when the old tiers were flat),
+ * while probability values remain capped at 100%. */
+export const AWAKENING_MAX_TIER = 6;
+function extendAwakeningToTierSix(spec: AwkSpec | undefined) {
+  if (!spec) return;
+  const extend = (values: number[], cap = Number.POSITIVE_INFINITY) => {
+    if (values.length >= AWAKENING_MAX_TIER) return;
+    while (values.length < AWAKENING_MAX_TIER) {
+      const prev = values[values.length - 2] ?? 0;
+      const last = values[values.length - 1] ?? 0;
+      const bump = last > prev ? (last - prev) * 0.5 : last > 0 ? last * 0.25 : 0;
+      values.push(Math.round(Math.min(cap, last + bump) * 1000) / 1000);
+    }
+  };
+  extend(spec.chance, 1);
+  extend(spec.mult);
+  if (spec.mult2) extend(spec.mult2);
+}
+for (const tower of TOWERS) {
+  extendAwakeningToTierSix(tower.awk1);
+  extendAwakeningToTierSix(tower.awk2);
+}
+
 /** tower id -> art family used by the canvas + the menu icon */
 export function towerArt(def: TowerDef): string {
   return def.art || def.id;
@@ -1002,7 +1026,7 @@ export const TOWER_BY_ID: Record<string, TowerDef> = Object.fromEntries(
   TOWERS.map((t) => [t.id, t])
 );
 
-export const ROMAN = ["", "I", "II", "III", "IV", "V"];
+export const ROMAN = ["", "I", "II", "III", "IV", "V", "VI"];
 
 export const MAX_MENU_LEVEL = 15;
 export const MAX_BATTLE_LEVEL = 6;
@@ -1054,8 +1078,8 @@ export function spawnBudget(n = SPAWN_BUDGET_TOWERS) {
 export const REWARD_MUL = 1.4;
 export const reward = (v: number) => Math.round(v * REWARD_MUL);
 
-/** Enemies get 120% stronger every wave (2.2× HP). */
-export const HP_GROWTH = 2.2;
+/** Enemy durability grows by 50% per wave for steadier late-run pressure. */
+export const HP_GROWTH = 1.5;
 
 /** Network bonus applied to both Power Plant damage and attack-speed auras. */
 export function powerPlantNetworkScale(plantCount: number): number {
@@ -1738,7 +1762,7 @@ export function roundHp(round: number) {
  * ordinary and elite enemies receive +90%. Their type-specific multipliers
  * remain on top. Speed, armour, lives and gold are untouched.
  */
-export const BOSS_HP_MUL = 1.55;
+export const BOSS_HP_MUL = 1.8;
 
 /**
  * Non-boss enemies receive +90% maximum health at spawn time, including
@@ -1970,7 +1994,7 @@ export const HERO_BY_ID: Record<string, HeroDef> = Object.fromEntries(
 );
 
 // ---------- hero levelling ----------
-export const HERO_MAX_LEVEL = 10;
+export const HERO_MAX_LEVEL = 15;
 /** gold needed to take a hero from `lv` to `lv + 1` */
 export const heroUpgradeCost = (lv: number) => Math.round(120 * Math.pow(1.45, Math.max(0, lv - 1)));
 /** every level adds 30% ability power (damage, burn, freeze/overdrive duration) */
@@ -2853,7 +2877,7 @@ export const MAIL: MailItem[] = [
     kind: "system",
     from: "Awakened Council",
     subject: "Every tower can awaken",
-    body: "Two awakenings per tower, five tiers each. Spend Magic Tokens at the Towers screen and watch your damage ceiling move.",
+    body: "Two awakenings per tower, six tiers each. Tier VI pushes each effect beyond its former limit. Spend Magic Tokens at the Towers screen to grow stronger.",
     color: "#ffcf4d",
     reward: { tokens: 8 },
     age: "day 3",
