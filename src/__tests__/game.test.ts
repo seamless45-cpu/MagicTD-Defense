@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { GEM_RAIN_MIN, GOLD_RAIN_MIN } from "../components/ui";
 import {
   DAILY_TASKS,
@@ -9,6 +9,9 @@ import {
   TOWER_BY_ID,
   roundHp,
   waveComp,
+  enemySpawnInterval,
+  SPAWN_INTERVAL_STEP,
+  WAVE_ENEMY_COUNT,
   upgradeGoldCost,
   upgradeFragCost,
   ascentAllCost,
@@ -38,6 +41,10 @@ import {
   heroPower,
   heroUpgradeCost,
   type GameMode,
+  CRYSTALS,
+  crystalBonus,
+  crystalBuffText,
+  mysticalUpgradeCost,
   HEROES,
   HERO_BY_ID,
   MAX_POINTS,
@@ -278,13 +285,14 @@ describe("tower data", () => {
       expect(def.art, `${id} art family`).toBeTruthy();
     }
     const byRarity = (r: string) => newIds.filter((id) => TOWER_BY_ID[id].rarity === r);
-    expect(byRarity("normal")).toHaveLength(6);
+    expect(byRarity("normal")).toHaveLength(5);
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
-    // the roster grew 15 -> 27 -> 33 -> 37 -> 47 -> 48, then 58 with the casters,
-    // then 61 with Demon Execution, Heavenly God and Honor Emperor
-    expect(TOWERS).toHaveLength(61);
+    // the roster includes the 61 established towers plus the new Mystical Supervisor
+    expect(TOWERS).toHaveLength(62);
+    expect(TOWER_BY_ID.supervisor.rarity).toBe("mystical");
+    expect(TOWER_BY_ID.supervisor.unlockFrags).toBe(1);
     // mechanics actually differ between them
     expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
     expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
@@ -342,8 +350,8 @@ describe("tower data", () => {
     expect(def.art).toBe("clone");
     // Super Clone: 20% proc at every tier, +200% attack speed (mult 2)
     expect(def.awk1!.fx).toBe("clonesuper");
-    expect(def.awk1!.chance).toEqual([0.2, 0.2, 0.2, 0.2, 0.2]);
-    expect(def.awk1!.mult).toEqual([2, 2, 2, 2, 2]);
+    expect(def.awk1!.chance.slice(0, 5)).toEqual([0.2, 0.2, 0.2, 0.2, 0.2]);
+    expect(def.awk1!.mult.slice(0, 5)).toEqual([2, 2, 2, 2, 2]);
     // Perfect Replica: chance to grow the copy +1..2 points
     expect(def.awk2!.fx).toBe("cloneperfect");
     expect(def.awk2!.chance[0]).toBeGreaterThan(0);
@@ -569,19 +577,30 @@ describe("tower data", () => {
     expect(maxed).toBeGreaterThan(def.dmg * 20);
   });
 
-  it("builds waves that only use known enemy types and grow", () => {
-    for (let round = 1; round <= BATTLE_ROUNDS + 8; round++) {
+  it("builds fixed ten-enemy waves with known types and scheduled bosses", () => {
+    for (let round = 1; round <= BATTLE_ROUNDS + 40; round++) {
       const w = waveComp(round);
-      expect(w.length).toBeGreaterThan(6);
+      expect(w).toHaveLength(10);
       for (const t of w) {
         expect(t).toBeGreaterThanOrEqual(0);
         expect(t).toBeLessThan(ENEMY_TYPES.length);
       }
-      if (round > 1) expect(w.length).toBeGreaterThanOrEqual(waveComp(round - 1).length);
     }
-    // every 4th round includes a Warlord boss
     expect(waveComp(4)).toContain(4);
     expect(waveComp(8)).toContain(4);
+  });
+
+  it("scales the Super Crystals to their stated caps and prices Mystical levels in gems", () => {
+    expect(CRYSTALS).toHaveLength(9);
+    const max = crystalBonus({ magicianKing: 11, superbolt: 10, superCrit: 31 });
+    expect(max.magicianKing).toBeCloseTo(0.75);
+    expect(max.lightning).toBeCloseTo(1);
+    expect(max.critDamage).toBeCloseTo(8.5);
+    expect(max.superCritChance).toBeCloseTo(0.225);
+    expect(crystalBuffText(CRYSTALS.find((c) => c.id === "superCrit")!, 31)).toContain("850% crit damage");
+    expect(crystalBuffText(CRYSTALS.find((c) => c.id === "superCrit")!, 31)).toContain("22.5% crit chance");
+    expect(mysticalUpgradeCost(1)).toBe(500);
+    expect(mysticalUpgradeCost(2)).toBe(875);
   });
 
   it("keeps the battle gauntlet at 12 rounds", () => {
@@ -638,6 +657,13 @@ describe("save file", () => {
       const id = randFrag(Math.random());
       expect(TOWER_BY_ID[id], id).toBeDefined();
     }
+  });
+
+  it("can award a 1% Supervisor bonus on a random legendary-fragment roll", () => {
+    const roll = vi.spyOn(Math, "random");
+    roll.mockReturnValueOnce(0.75).mockReturnValueOnce(0.999).mockReturnValueOnce(0.009);
+    expect(randFrag(1)).toBe("supervisor");
+    roll.mockRestore();
   });
 
   it("addFrag ignores unknown ids", () => {
@@ -747,12 +773,13 @@ describe("balance patch", () => {
     expect(BASE_MONTHLY_BONUS).toEqual({ goldMul: 1, gemMul: 1, spMul: 1, hpMul: 1, upgradeCostMul: 1, fragBias: 0, chestFragBonus: 0 });
   });
 
-  it("gives each wave two more enemies than before", () => {
-    // was min(44, 6 + round * 2); wave 1 must now hold 10 bodies
-    const wave1 = waveComp(1);
-    expect(wave1.length).toBe(10);
-    expect(waveComp(3).length).toBe(14);
-    expect(waveComp(40).length).toBeGreaterThanOrEqual(46);
+  it("spawns exactly ten enemies on every wave, with bosses using wave slots", () => {
+    expect(WAVE_ENEMY_COUNT).toBe(10);
+    for (let wave = 1; wave <= 64; wave++) expect(waveComp(wave)).toHaveLength(WAVE_ENEMY_COUNT);
+    expect(waveComp(32).filter(isBossType).length).toBeGreaterThan(0);
+    expect(enemySpawnInterval(1)).toBe(0.72);
+    expect(enemySpawnInterval(2)).toBeCloseTo(0.72 - SPAWN_INTERVAL_STEP, 10);
+    expect(enemySpawnInterval(25)).toBeCloseTo(0.72 - 24 * 0.00002, 10);
   });
 
   it("pays 40% more gold and gems for clearing rounds", () => {

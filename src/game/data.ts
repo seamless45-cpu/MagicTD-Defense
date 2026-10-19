@@ -1,13 +1,14 @@
-export type Rarity = "normal" | "decent" | "epic" | "legendary";
+export type Rarity = "normal" | "decent" | "epic" | "legendary" | "mystical";
 
 export const RARITY: Record<Rarity, { name: string; color: string; glow: string }> = {
   normal: { name: "Normal", color: "#9fb4c7", glow: "rgba(159,180,199,0.4)" },
   decent: { name: "Decent", color: "#3fb6ff", glow: "rgba(63,182,255,0.5)" },
   epic: { name: "Epic", color: "#c44dff", glow: "rgba(196,77,255,0.55)" },
   legendary: { name: "Legendary", color: "#ffb324", glow: "rgba(255,179,36,0.6)" },
+  mystical: { name: "Mystical", color: "#ff315c", glow: "rgba(255,49,92,0.72)" },
 };
 
-export const RARITY_ORDER: Rarity[] = ["normal", "decent", "epic", "legendary"];
+export const RARITY_ORDER: Rarity[] = ["normal", "decent", "epic", "legendary", "mystical"];
 
 export type TowerKind =
   | "arrow"
@@ -61,6 +62,7 @@ export type TowerKind =
   | "demon"
   | "heavenly"
   | "honor"
+  | "supervisor"
   | "gale"
   | "bombardment"
   | "wildfire"
@@ -991,6 +993,24 @@ export const TOWERS: TowerDef[] = [
       fmt: (m) => `+${Math.round(m * 100)}% attack & attack speed, permanent`,
     },
   },
+  {
+    id: "supervisor", name: "Supervisor", rarity: "mystical", kind: "supervisor", art: "supervisor", accent: "#ff315c",
+    target: "none", exotic: true, unlockFrags: 1,
+    desc: "A deep-red sovereign that permanently speeds every tower by 0.1% per kill, up to +200%. Each kill has a 20% chance to amplify that buff by 600%. Merging unleashes ten red lightning executions along the path.",
+    dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
+    awk1: {
+      name: "Hypervisor",
+      desc: "The Superbuff amplification rises by 10% each wave, up to 1,200%.",
+      chance: [1, 1, 1, 1, 1], mult: [0.1, 0.1, 0.1, 0.1, 0.1],
+      fmt: () => "+10% amplification per wave · capped at +1,200%",
+    },
+    awk2: {
+      name: "Doomsday",
+      desc: "Every merge has a 19% chance to drop a nuclear bomb, instantly destroying enemies within 900m and violently shaking the arena.",
+      chance: [0.19, 0.19, 0.19, 0.19, 0.19, 0.19], mult: [900, 900, 900, 900, 900, 900],
+      fmt: (m) => `19% merge chance · instant kill within ${m}m`,
+    },
+  },
 ];
 
 /** Tier VI extends every tower's two awakening paths beyond the original five tiers.
@@ -1004,7 +1024,10 @@ function extendAwakeningToTierSix(spec: AwkSpec | undefined) {
     while (values.length < AWAKENING_MAX_TIER) {
       const prev = values[values.length - 2] ?? 0;
       const last = values[values.length - 1] ?? 0;
-      const bump = last > prev ? (last - prev) * 0.5 : last > 0 ? last * 0.25 : 0;
+      const delta = last - prev;
+      // Preserve direction for descending stats such as cooldowns; flat stats
+      // continue gaining a small 25% step at Tier VI.
+      const bump = delta > 0 ? delta * 0.5 : delta < 0 ? delta * 0.5 : last > 0 ? last * 0.25 : 0;
       values.push(Math.round(Math.min(cap, last + bump) * 1000) / 1000);
     }
   };
@@ -1155,6 +1178,10 @@ export function upgradeGoldCost(level: number) {
 export function upgradeFragCost(level: number) {
   return 1 + Math.floor(level / 3);
 }
+/** Mystical tower levels use gems only; the next level costs 500, then +75% each time. */
+export function mysticalUpgradeCost(level: number) {
+  return Math.round(500 * Math.pow(1.75, Math.max(0, level - 1)));
+}
 export function ascentAllCost(avgLevel: number) {
   return Math.round(300 + 120 * avgLevel);
 }
@@ -1229,6 +1256,11 @@ export function towerStatRows(def: TowerDef, menuLv: number, battleLv = 1): Stat
     });
   } else {
     rows.push({ label: "Attacks", value: "Support tower", better: "up" });
+  }
+  if (def.id === "supervisor") {
+    rows.push({ label: "Kill Buff", value: "+0.1% ATK speed per kill · +200% cap", better: "up" });
+    rows.push({ label: "Superbuff", value: "20% chance · +600% amplified", better: "up" });
+    rows.push({ label: "Merge Strike", value: "Executes up to 10 path enemies", better: "up" });
   }
 
   const special: [string, number, number, (v: number) => string][] = [];
@@ -1342,11 +1374,10 @@ export function runShopCost(item: RunShopItem, bought: number) {
 /**
  * The crystal vault lives inside the Towers tab. Every crystal is a permanent,
  * account-wide buff paid for with **crystal potions** — a currency that only
- * drops from runs, events and monthly crates. Levels are deliberately small
- * (a few percent a level) so six crystals together feel like a slow burn
- * rather than a second tower ladder.
+ * drops from runs, events and monthly crates. The three Super Crystals have
+ * stronger but explicitly capped account-wide effects.
  */
-export type CrystalId = "ruby" | "sapphire" | "emerald" | "topaz" | "amethyst" | "diamond";
+export type CrystalId = "ruby" | "sapphire" | "emerald" | "topaz" | "amethyst" | "diamond" | "magicianKing" | "superbolt" | "superCrit";
 
 export interface CrystalDef {
   id: CrystalId;
@@ -1359,6 +1390,14 @@ export interface CrystalDef {
   perLevel: number;
   max: number;
   color: string;
+  /** starting amount at level one; later levels add `perLevel` */
+  base?: number;
+  /** optional second stat bundled into a crystal */
+  secondaryBase?: number;
+  secondaryPerLevel?: number;
+  secondaryMax?: number;
+  /** cap the primary amount when the curve reaches its ceiling */
+  maxValue?: number;
   /** true when the buff is flat lives rather than a percentage */
   flat?: boolean;
 }
@@ -1374,6 +1413,9 @@ export const CRYSTALS: CrystalDef[] = [
   { id: "topaz", name: "Topaz", desc: "Sun-baked amber that draws extra gold out of the wreck.", stat: "Run Gold", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#ffcf4d" },
   { id: "amethyst", name: "Amethyst", desc: "A humming shard that speeds up every firing mechanism.", stat: "ATK Speed", perLevel: 0.02, max: CRYSTAL_MAX_LEVEL, color: "#c44dff" },
   { id: "diamond", name: "Diamond", desc: "A flawless ward crystal. Each level adds a starting life.", stat: "Start Lives", perLevel: 1, max: 10, color: "#9fe8ff", flat: true },
+  { id: "magicianKing", name: "Magician King", desc: "A royal super crystal: +25% tower ATK and ATK speed at level 1, then +5% each level, capped at +75%.", stat: "ATK + Speed", base: 0.25, perLevel: 0.05, max: 11, maxValue: 0.75, color: "#ffd76a" },
+  { id: "superbolt", name: "Superbolt", desc: "Raises the damage of lightning-type towers by +10% per level, up to +100%; lightning strikes chain behind their targets.", stat: "Lightning ATK", base: 0.1, perLevel: 0.1, max: 10, maxValue: 1, color: "#ffef77" },
+  { id: "superCrit", name: "Super Crit", desc: "At level 1: +150% crit damage and +7.5% crit chance. Each later level adds +50% damage and +0.5% chance, capped at +850% and +22.5%.", stat: "Crit DMG + Chance", base: 1.5, perLevel: 0.5, max: 31, maxValue: 8.5, secondaryBase: 0.075, secondaryPerLevel: 0.005, secondaryMax: 0.225, color: "#ff4fd8" },
 ];
 
 export const CRYSTAL_BY_ID: Record<CrystalId, CrystalDef> = Object.fromEntries(
@@ -1398,9 +1440,16 @@ export interface CrystalBonus {
   aspd: number;
   /** extra starting lives */
   lives: number;
+  /** Magician King: matching global damage and attack-speed buff */
+  magicianKing: number;
+  /** Superbolt: damage bonus for lightning-family towers */
+  lightning: number;
+  /** Super Crit: bonus crit damage and chance */
+  critDamage: number;
+  superCritChance: number;
 }
 
-export const NO_CRYSTAL_BONUS: CrystalBonus = { atk: 0, crit: 0, sp: 0, gold: 0, aspd: 0, lives: 0 };
+export const NO_CRYSTAL_BONUS: CrystalBonus = { atk: 0, crit: 0, sp: 0, gold: 0, aspd: 0, lives: 0, magicianKing: 0, lightning: 0, critDamage: 0, superCritChance: 0 };
 
 /** fold every crystal level into one set of run modifiers */
 export function crystalBonus(levels: Partial<Record<CrystalId, number>>): CrystalBonus {
@@ -1408,13 +1457,19 @@ export function crystalBonus(levels: Partial<Record<CrystalId, number>>): Crysta
   for (const def of CRYSTALS) {
     const lv = Math.max(0, Math.min(def.max, Math.floor(levels[def.id] || 0)));
     if (lv <= 0) continue;
-    const v = def.perLevel * lv;
+    const v = Math.min(def.maxValue ?? Number.POSITIVE_INFINITY, def.base !== undefined ? def.base + def.perLevel * (lv - 1) : def.perLevel * lv);
     if (def.id === "ruby") out.atk += v;
     else if (def.id === "sapphire") out.crit += v;
     else if (def.id === "emerald") out.sp += v;
     else if (def.id === "topaz") out.gold += v;
     else if (def.id === "amethyst") out.aspd += v;
     else if (def.id === "diamond") out.lives += v;
+    else if (def.id === "magicianKing") out.magicianKing += v;
+    else if (def.id === "superbolt") out.lightning += v;
+    else if (def.id === "superCrit") {
+      out.critDamage += v;
+      out.superCritChance += Math.min(def.secondaryMax ?? Number.POSITIVE_INFINITY, (def.secondaryBase ?? 0) + (def.secondaryPerLevel ?? 0) * (lv - 1));
+    }
   }
   return out;
 }
@@ -1422,7 +1477,11 @@ export function crystalBonus(levels: Partial<Record<CrystalId, number>>): Crysta
 /** "Ruby Lv 4 · +8% Tower ATK" — the line under a crystal card */
 export function crystalBuffText(def: CrystalDef, level: number): string {
   if (level <= 0) return "Not awakened — spend crystal potions to ignite it";
-  const v = def.perLevel * level;
+  const v = Math.min(def.maxValue ?? Number.POSITIVE_INFINITY, def.base !== undefined ? def.base + def.perLevel * (level - 1) : def.perLevel * level);
+  if (def.id === "superCrit") {
+    const chance = Math.min(def.secondaryMax ?? Number.POSITIVE_INFINITY, (def.secondaryBase ?? 0) + (def.secondaryPerLevel ?? 0) * (level - 1));
+    return `+${Math.round(v * 100)}% crit damage · +${(chance * 100).toFixed(1)}% crit chance`;
+  }
   if (def.flat) return `+${Math.round(v)} starting ${v === 1 ? "life" : "lives"}`;
   return `+${(Math.round(v * 1000) / 10).toFixed(1).replace(/\.0$/, "")}% ${def.stat}`;
 }
@@ -1810,11 +1869,24 @@ export function shortHp(v: number): string {
 export const GOLD_GAIN_MUL = 1.5;
 export const runGold = (v: number) => Math.round(v * GOLD_GAIN_MUL);
 
+export const WAVE_ENEMY_COUNT = 10;
+export const SPAWN_INTERVAL_SECONDS = 0.72;
+export const SPAWN_INTERVAL_STEP = 0.00002;
+export function enemySpawnInterval(wave: number): number {
+  return Math.max(0.08, SPAWN_INTERVAL_SECONDS - Math.max(0, wave - 1) * SPAWN_INTERVAL_STEP);
+}
+
 export function waveComp(round: number): number[] {
+  const bosses: number[] = [];
+  // Bosses take slots in the fixed ten-enemy wave rather than adding extra kills.
+  if (round % 4 === 0) bosses.push(round >= 32 ? 6 : round >= 16 ? 5 : 4);
+  if (round >= 16 && round % 4 === 0) bosses.push(round >= 32 ? 5 : 4);
+  if (round >= 32 && round % 8 === 0) bosses.push(6);
+  if (round >= 20 && round % 8 === 0) bosses.push(LEVIATHAN_TYPE);
+
+  const regularCount = Math.max(0, WAVE_ENEMY_COUNT - bosses.length);
   const out: number[] = [];
-  // balance patch: two more enemies every wave, capped at 46
-  const n = Math.min(46, 8 + round * 2);
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < regularCount; i++) {
     let t = 0;
     const roll = Math.random();
     if (round >= 7 && roll < 0.16) t = 3;
@@ -1825,13 +1897,7 @@ export function waveComp(round: number): number[] {
     else if (round >= 9 && roll < 0.9) t = HOUND_TYPE;
     out.push(t);
   }
-  // boss every 4th wave; the roster escalates with the round count
-  if (round % 4 === 0) out.push(round >= 32 ? 6 : round >= 16 ? 5 : 4);
-  if (round >= 16 && round % 4 === 0) out.push(round >= 32 ? 5 : 4);
-  if (round >= 32 && round % 8 === 0) out.push(6);
-  // the Leviathan only surfaces in the deep waves
-  if (round >= 20 && round % 8 === 0) out.push(LEVIATHAN_TYPE);
-  return out;
+  return [...out, ...bosses];
 }
 
 export const BATTLE_ROUNDS = 12;

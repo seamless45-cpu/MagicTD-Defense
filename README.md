@@ -687,7 +687,7 @@ enemies, with Overpenetration and Rail Burn awakenings).
 
 - **Every tower is awakenable.** The preview panel used to render its two awakening tracks only for
   exotic towers, which left 27 towers showing a dead "no awakening paths yet" panel even though they
-  had full five-tier specs. The gate is gone: all **61** towers show both tracks, their tier lines and
+  had full five-tier specs. The gate is gone: all **62** towers show both tracks, their tier lines and
   their Magic Token prices, and the effects behind them were already wired into the engine (generic
   on-hit tags like burn/volley/freeze/chain plus the bespoke kits).
 - **Three new legendaries** — **Demon Execution**, **Heavenly God** and **Honor Emperor** — with
@@ -728,7 +728,7 @@ enemies, with Overpenetration and Rail Burn awakenings).
   kill payout, the bounty family of awakenings and the wave-clear purse. Whatever is left in the
   wallet is settled when the run ends, so the bonus carries into the results screen. Account gold
   (chests, tasks, daily rewards) is a separate economy and is untouched.
-- **The Towers tab scrolls as one page.** The 61-cell grid used to live in its own nested scroll box
+- **The Towers tab scrolls as one page.** The 62-cell grid used to live in its own nested scroll box
   inside a fixed-height flex column, with the rotation strip above it and the `ASCENT ALL` panel
   pinned below: on a phone the box was barely three rows tall and the last rarities took real work to
   reach. The tab is now a single scroll surface — the grid is allowed to be as tall as it needs, the
@@ -743,7 +743,7 @@ enemies, with Overpenetration and Rail Burn awakenings).
   +2.6s) so the arena never opens with a font swap mid-frame. The boot now layers an animated
   constellation behind the rotating seal. The boot state line reads `LOADING` → `READY` →
   `ENTERING THE ARENA`.
-- **Sixty font choices.** Ten new families expand the display and reading categories; EDO now uses
+- **Eighty font choices.** Twenty new families expand the display and reading categories; EDO now uses
   Vic Fieger's actual bundled freeware font rather than falling through to a generic substitute.
   Attribution is in `public/fonts/EDO-LICENSE.txt`.
 - **Auto Battle reports.** Endless/Gauntlet can be simulated from the Command Center; estimated
@@ -754,3 +754,12 @@ enemies, with Overpenetration and Rail Burn awakenings).
 - **Power Plant network overhaul.** Four, six, eight and twelve plants amplify both adjacent-tower damage and attack-speed buffs by +25%, +50%, +75% and +100%. Plants now reach all eight neighboring cells and buffed towers show orbiting electric filaments.
 - **Liquid Glass is an optional Settings skin.** It switches the palette to aqua/pearl, with deep backdrop blur, prismatic reflections and soft glass borders; interactive controls and screen changes get fluid transitions. The original theme remains the default.
 - **Lightning geometry refreshes at 100 Hz.** Thin segmented channels use a reused typed jitter buffer (10 ms flicker cadence); Demon Execution's blast pools and flashes are centered on each matching lightning impact.
+
+## Fixed-count waves, Super Crystals and the Mystical Supervisor
+
+- Every wave now schedules exactly **10 enemies total**, with bosses occupying slots rather than adding extra bodies. Enemy spawn spacing tightens by **0.00002 seconds per wave**.
+- Restored the original **7×4 arena route** and shifted the board lower in the viewport.
+- Added three Super Crystals: **Magician King** (ATK and speed up to +75%), **Superbolt** (lightning-family damage up to +100%, with lane chaining), and **Super Crit** (crit damage up to +850% and chance up to +22.5%).
+- Added the **Mystical Supervisor**. Its kills build permanent +0.1% attack-speed buffs across deployed towers, capped at +200%; each tick has a 20% chance to become a 7× Superbuff. Merging fires red execution bolts at up to ten living enemies, including elites and bosses. Its **Hypervisor** awakening scales Superbuff amplification to +1,200% over waves; **Doomsday** has a 19% merge chance to nuke enemies within 900m.
+- Supervisor fragments can appear on **1% of random legendary-fragment rolls** and are excluded from direct fragment purchases. After unlocking, its levels cost gems only, starting at 500 and rising 75% per level.
+- Reworked the shared sound processing chain and added bespoke Supervisor-merging and Doomsday cues. Tower awakening/unlock ceremonies now run outside scrolling panels, use lighter finite animation layers, and the settings toggle has a clearer state indicator and improved focus/touch feedback.

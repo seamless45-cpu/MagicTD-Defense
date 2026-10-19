@@ -241,6 +241,18 @@ const CUES: Record<string, SampleCue> = {
     L("impact/plate-heavy.mp3", 0.64, 0.9, 0.045),
     L("scifi/explosion-3.mp3", 0.4, 0.82, 0.08),
   ],
+  supervisorMerge: [
+    L("scifi/force-field-2.mp3", 0.82, [0.8, 0.62], 0, 0.72),
+    L("scifi/low-explosion-1.mp3", 0.92, 0.68, 0.035, 0.9),
+    L("scifi/laser-large.mp3", 0.65, [0.65, 0.42], 0.06, 0.56),
+    L("impact/plate-heavy.mp3", 0.48, 0.72, 0.12),
+  ],
+  doomsday: [
+    L("scifi/low-explosion-0.mp3", 1, 0.52, 0, 1.2),
+    L("scifi/explosion-3.mp3", 0.78, 0.65, 0.06, 0.95),
+    L("scifi/force-field-1.mp3", 0.64, [0.58, 0.36], 0.11, 1.15),
+    L("impact/plate-heavy.mp3", 0.66, 0.66, 0.17),
+  ],
   heavenlyImpact: [
     L("scifi/force-field-3.mp3", 0.68, 1.15),
     L("scifi/laser-large.mp3", 0.58, 1.22, 0.015),
@@ -664,13 +676,23 @@ export function initSamples(fallback?: () => void): boolean {
     const ctx = new Ctor();
     const master = ctx.createGain();
     master.gain.value = masterGain();
+    const lowCut = ctx.createBiquadFilter();
+    lowCut.type = "highpass";
+    lowCut.frequency.value = 34;
+    lowCut.Q.value = 0.65;
+    const presence = ctx.createBiquadFilter();
+    presence.type = "highshelf";
+    presence.frequency.value = 4800;
+    presence.gain.value = 1.5;
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -12;
-    comp.knee.value = 24;
-    comp.ratio.value = 4;
-    comp.attack.value = 0.003;
-    comp.release.value = 0.16;
-    master.connect(comp);
+    comp.threshold.value = -15;
+    comp.knee.value = 22;
+    comp.ratio.value = 4.5;
+    comp.attack.value = 0.004;
+    comp.release.value = 0.2;
+    master.connect(lowCut);
+    lowCut.connect(presence);
+    presence.connect(comp);
     comp.connect(ctx.destination);
     rack = {
       ctx,
@@ -678,7 +700,7 @@ export function initSamples(fallback?: () => void): boolean {
       buffers: new Map(),
       loading: new Map(),
       voices: 0,
-      maxVoices: 28,
+      maxVoices: 36,
       ready: false,
     };
     try {
@@ -723,12 +745,13 @@ function playLayer(layer: SampleLayer): boolean {
   const src = ctx.createBufferSource();
   src.buffer = buffer;
   if (Array.isArray(layer.rate)) {
-    const from = Math.max(0.25, layer.rate[0]);
-    const to = Math.max(0.25, layer.rate[1]);
+    const variation = 0.97 + Math.random() * 0.06;
+    const from = Math.max(0.25, layer.rate[0] * variation);
+    const to = Math.max(0.25, layer.rate[1] * variation);
     src.playbackRate.setValueAtTime(from, t0);
     src.playbackRate.linearRampToValueAtTime(to, t0 + duration);
   } else {
-    src.playbackRate.value = rate * (0.985 + Math.random() * 0.03);
+    src.playbackRate.value = rate * (0.96 + Math.random() * 0.08);
   }
 
   const g = ctx.createGain();

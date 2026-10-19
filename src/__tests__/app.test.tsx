@@ -303,11 +303,10 @@ describe("Settings", () => {
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
-    // old style buttons are gone (nothing renders a bare ON / OFF label)
-    const bare = all("button").filter((b) => ["ON", "OFF"].includes((b.textContent || "").trim()));
-    expect(bare).toHaveLength(0);
-
+    // State text is now embedded inside the switch, rather than being a
+    // separate ON/OFF action button.
     const knobs = all(".knob");
+    expect(knobs.some((k) => /ON|OFF/.test(k.textContent || ""))).toBe(true);
     expect(knobs.length, "one knob per option").toBeGreaterThanOrEqual(8);
     for (const k of knobs) {
       expect(k.getAttribute("role")).toBe("switch");
@@ -371,13 +370,13 @@ describe("Settings", () => {
 });
 
 describe("Font vault", () => {
-  it("offers sixty previewable faces and applies the picked one", async () => {
+  it("offers eighty previewable faces and applies the picked one", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
     // every tile carries data-font; the section/grid/count testids do not
-    expect(all("[data-font]").length).toBe(60);
+    expect(all("[data-font]").length).toBe(80);
     expect(document.body.textContent).toContain("Permanent Marker");
     expect(document.body.textContent).toContain("EDO");
 
@@ -650,9 +649,10 @@ describe("Clone tower", () => {
     startMode("Battle");
     await waitFor(() => byText("button", "SUMMON"), "battle HUD");
     const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
-    click(summon);
+    await sleep(120); // let the battle engine bind the imperative summon callback
+    summon.click();
     await waitFor(() => (document.body.textContent || "").includes("deployed!"), "first clone");
-    click(summon);
+    summon.click();
     await waitFor(() => (document.body.textContent || "").includes("deployed!"), "second clone");
     const towersOnBoard = () =>
       Number((document.querySelector('[data-testid="towers-on-board"]')?.textContent || "").replace(/[^\d]/g, ""));
@@ -664,7 +664,7 @@ describe("Clone tower", () => {
     // a clone destination and points always match).
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
     const cx = (c: number) => 185 + (c + 0.5) * 90;
-    const cy = (r: number) => 110 + (r + 0.5) * 90;
+    const cy = (r: number) => 158 + (r + 0.5) * 90;
     const cells: [number, number][] = [];
     for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([cx(c), cy(r)]);
     for (const [x1, y1] of cells) {
@@ -740,14 +740,14 @@ describe("Towers", () => {
     expect(page, "tower page").toBeTruthy();
     expect(page.className).toContain("overflow-y-auto");
     // ...that is actually bounded by the app shell: the tab is h-full all the way
-    // up into the min-h-0 flex-1 content area, otherwise a 61-cell grid would
+    // up into the min-h-0 flex-1 content area, otherwise a 62-cell grid would
     // just push the nav bar off the bottom of the screen
     const chain: string[] = [];
     for (let el = page.parentElement; el && el !== document.body; el = el.parentElement) chain.push(el.className);
     expect(chain.some((c) => c.includes("min-h-0") && c.includes("flex-1")), `bounded ancestor: ${chain.join(" > ")}`).toBe(true);
     expect(chain.every((c) => !/overflow-(y-)?(auto|scroll|hidden)/.test(c)), "a second scroller between the tab and the shell").toBe(true);
 
-    // the 61-cell grid hangs directly off it: it used to live inside
+    // the 62-cell grid hangs directly off it: it used to live inside
     // `flex min-h-0 flex-1` with a pinned ASCENT ALL footer below, which capped
     // the box at a handful of rows and made the last groups unreachable
     const grid = document.querySelector('[data-testid="tower-grid"]') as HTMLElement;
@@ -761,10 +761,10 @@ describe("Towers", () => {
     );
     expect(nested, "nested scroll boxes inside the tab").toHaveLength(0);
 
-    // every tower is in that one grid: 61 cells + 4 rarity headers
-    expect(grid.children.length).toBe(65);
+    // every tower is in that one grid: 62 cells + 5 rarity headers
+    expect(grid.children.length).toBe(67);
     const towerCells = page.querySelectorAll(".tw-cell[data-tower]").length;
-    expect(towerCells).toBe(61);
+    expect(towerCells).toBe(62);
 
     // the rotation strip and the filters ride along on top of the scroll, so the
     // drag-to-rotation drop target never scrolls out of reach
@@ -891,6 +891,31 @@ describe("Towers", () => {
     click(Array.from(pv.querySelectorAll("button")).find((b) => (b.textContent || "").trim() === "Unlock")!);
     await waitFor(() => /not enough|need/i.test(document.body.textContent || ""), "denial toast");
     expect(saved().levels.hellstorm).toBeUndefined();
+    noErrors();
+  });
+});
+
+describe("Mystical towers", () => {
+  it("unlocks Supervisor from its fragment and upgrades it with gems only", async () => {
+    persistSave({ ...defaultSave(), gold: 0, gems: 1000, frags: { ...defaultSave().frags, supervisor: 1 } });
+    await mountApp();
+    click(byText("button", "Towers")!);
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
+    tapCell("supervisor");
+    let preview = await waitFor(() => document.querySelector('[data-testid="tower-preview"]') as HTMLElement, "Supervisor preview");
+    expect(preview.textContent).toContain("MYSTICAL");
+    click(Array.from(preview.querySelectorAll("button")).find((b) => (b.textContent || "").trim() === "Unlock")!);
+    await waitFor(() => saved().levels.supervisor === 1, "Supervisor unlocked");
+    click(byText("button", "Continue")!);
+    await waitFor(() => !document.querySelector('[data-testid="ceremony"]'), "unlock ceremony closed");
+    tapCell("supervisor");
+    preview = await waitFor(() => document.querySelector('[data-testid="tower-preview"]') as HTMLElement, "Supervisor level-up preview");
+    expect(preview.textContent).toContain("500 gems");
+    click(Array.from(preview.querySelectorAll("button")).find((b) => /Upgrade/.test(b.textContent || ""))!);
+    await waitFor(() => saved().levels.supervisor === 2, "Supervisor upgraded");
+    expect(saved().gems).toBe(500);
+    expect(saved().gold).toBe(0);
+    expect(saved().frags.supervisor).toBe(0);
     noErrors();
   });
 });
@@ -1474,7 +1499,7 @@ describe("Battle", () => {
     // the build cells: c=1..5 x r=0..2 (c=0, c=6 and r=3 are the path). The canvas
     // maps client coordinates 1:1 onto its 1000x580 backing store in jsdom.
     const cells: [number, number][] = [];
-    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 110 + (r + 0.5) * 90]);
+    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 158 + (r + 0.5) * 90]);
 
     // drag every cell onto every other cell: the two towers are somewhere in the
     // grid and both sit on 0 points, so the first real pair merges
@@ -1507,7 +1532,7 @@ describe("Battle", () => {
   }, 40000);
 
   it("never rolls a merge result from outside the summon rotation", async () => {
-    // all 61 towers unlocked, but the rotation holds ONE: a merge can only ever
+    // all 62 towers unlocked, but the rotation holds ONE: a merge can only ever
     // hand back an Arrow. If the roulette drew from the unlocked roster instead,
     // the survivor would be one of the other 60 and the toast would say so.
     const everyTower: Record<string, number> = {};
@@ -1530,7 +1555,7 @@ describe("Battle", () => {
     await waitFor(() => boardCount() === 4, "four arrows deployed");
 
     const cells: [number, number][] = [];
-    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 110 + (r + 0.5) * 90]);
+    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 158 + (r + 0.5) * 90]);
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
     // Drag cell onto cell until the board is down to two towers. The engine is
     // imperative — the HUD count only refreshes on its own tick — so every
@@ -1726,7 +1751,7 @@ describe("Crystal vault UI", () => {
       "crystal vault"
     );
     expect(vault.textContent).toContain("CRYSTAL VAULT");
-    expect(document.querySelectorAll("[data-crystal]")).toHaveLength(6);
+    expect(document.querySelectorAll("[data-crystal]")).toHaveLength(9);
     expect((document.querySelector('[data-testid="potion-balance"]') as HTMLElement).textContent).toContain("40");
 
     const before = saved().potions;

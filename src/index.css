@@ -435,13 +435,16 @@ body,
 }
 
 .cer-ring {
-  animation: cerRing 1.5s ease-out infinite;
+  animation: cerRing 1.35s ease-out 2 both;
+  will-change: transform, opacity;
 }
 .cer-rune {
-  animation: cerRune 2.2s linear infinite;
+  animation: cerRune 1.8s ease-out 1 both;
+  will-change: transform, opacity;
 }
 .cer-tower {
-  animation: cerTower 0.9s cubic-bezier(0.2, 1.4, 0.4, 1) both, cerGlow 2s ease-in-out 0.9s infinite;
+  animation: cerTower 0.9s cubic-bezier(0.2, 1.4, 0.4, 1) both, cerGlow 1.6s ease-in-out 0.9s 2 both;
+  will-change: transform, opacity;
 }
 .cer-banner {
   animation: cerBanner 0.6s 0.35s cubic-bezier(0.2, 1.3, 0.4, 1) both;
@@ -1221,98 +1224,107 @@ body,
    ===================================================================== */
 .knob {
   position: relative;
-  flex-shrink: 0;
-  width: 64px;
-  height: 34px;
+  flex: 0 0 76px;
+  width: 76px;
+  height: 40px;
   padding: 0;
-  border: none;
-  background: none;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
+.knob:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
 .knob-rail {
   position: absolute;
-  inset: 5px 0;
-  border-radius: 999px;
-  border: 2px solid var(--line2);
-  background: linear-gradient(180deg, #0b0724, #1a1140);
-  box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.75);
-  transition: border-color 0.2s ease, box-shadow 0.25s ease;
+  inset: 4px 0;
   overflow: hidden;
-}
-.knob-glow {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, rgba(53, 224, 255, 0.1), rgba(61, 255, 142, 0.1));
-  opacity: 0;
-  transition: opacity 0.25s ease;
+  border: 2px solid var(--line2);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #08071b, #17112d);
+  box-shadow: inset 0 3px 9px rgba(0,0,0,.72), 0 1px 0 rgba(255,255,255,.08);
+  transition: border-color .22s ease, box-shadow .22s ease, background .22s ease;
 }
 .knob-rail::after {
   content: "";
   position: absolute;
   inset: 0;
-  background-image: repeating-linear-gradient(90deg, rgba(234, 230, 255, 0.12) 0 2px, transparent 2px 8px);
-  opacity: 0.5;
+  background: repeating-linear-gradient(90deg, rgba(234,230,255,.14) 0 2px, transparent 2px 9px);
+  opacity: .4;
+}
+.knob-glow {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(53,224,255,.05), rgba(61,255,142,.24));
+  opacity: 0;
+  transition: opacity .24s ease;
+}
+.knob-state {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  z-index: 1;
+  transform: translateY(-50%);
+  color: rgba(234,230,255,.48);
+  font: 800 8px/1 system-ui, sans-serif;
+  letter-spacing: .12em;
+  transition: left .2s ease, right .2s ease, color .2s ease;
 }
 .knob-head {
   position: absolute;
+  z-index: 2;
   top: 2px;
   left: 2px;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  background: linear-gradient(180deg, #5b4aa8, #2a1f63);
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
   border: 2px solid #7b68d8;
-  box-shadow: 0 2px 0 #150d33, 0 4px 10px rgba(0, 0, 0, 0.5);
-  transition: transform 0.26s cubic-bezier(0.34, 1.6, 0.4, 1), background 0.24s ease,
-    border-color 0.24s ease, box-shadow 0.24s ease;
+  border-radius: 50%;
+  background: linear-gradient(150deg, #7767c7, #312663 74%);
+  box-shadow: 0 2px 0 #150d33, 0 5px 12px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.3);
+  transition: transform .3s cubic-bezier(.2,1.6,.35,1), background .22s ease, border-color .22s ease, box-shadow .22s ease;
 }
 .knob-grip {
-  position: absolute;
-  inset: 8px 0 0;
-  margin: 0 auto;
-  width: 3px;
-  height: 9px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 -5px 0 rgba(255, 255, 255, 0.5);
+  width: 4px;
+  height: 13px;
+  border-radius: 4px;
+  background: rgba(255,255,255,.78);
+  box-shadow: 0 -7px 0 rgba(255,255,255,.52), 0 7px 0 rgba(255,255,255,.52);
 }
 .knob-ripple {
   position: absolute;
+  z-index: 3;
   left: 50%;
   top: 50%;
   width: 10px;
   height: 10px;
   margin: -5px 0 0 -5px;
-  border-radius: 999px;
-  background: rgba(61, 255, 142, 0.5);
+  border-radius: 50%;
+  background: rgba(61,255,142,.55);
   opacity: 0;
   pointer-events: none;
 }
-.knob:hover .knob-head {
-  border-color: #a898ff;
-}
-.knob:active .knob-head {
-  transform: scale(0.94);
-}
-.knob:active .knob-ripple {
-  animation: knobRipple 0.5s ease-out both;
-}
-@keyframes knobRipple {
-  0% { opacity: 0.7; transform: scale(0.4); }
-  100% { opacity: 0; transform: scale(9); }
-}
+.knob:hover .knob-head { border-color: #bcb0ff; }
+.knob:active .knob-head { transform: scale(.92); }
+.knob:active .knob-ripple { animation: knobRipple .48s ease-out both; }
+@keyframes knobRipple { 0% { opacity: .7; transform: scale(.4); } 100% { opacity: 0; transform: scale(9); } }
 .knob.on .knob-rail {
   border-color: #12b96a;
-  box-shadow: inset 0 3px 8px rgba(0, 0, 0, 0.6), 0 0 18px rgba(61, 255, 142, 0.35);
+  background: linear-gradient(180deg, #062418, #0d3523);
+  box-shadow: inset 0 3px 9px rgba(0,0,0,.62), 0 0 18px rgba(61,255,142,.25);
 }
-.knob.on .knob-glow {
-  opacity: 1;
-}
+.knob.on .knob-glow { opacity: 1; }
+.knob.on .knob-state { right: auto; left: 9px; color: #a6ffd2; }
 .knob.on .knob-head {
-  transform: translateX(30px);
-  background: linear-gradient(180deg, #6bffc0, #12b96a);
+  transform: translateX(36px);
   border-color: #0a7a46;
-  box-shadow: 0 2px 0 #04301c, 0 0 20px rgba(61, 255, 142, 0.6);
+  background: linear-gradient(145deg, #9affd2, #12b96a 72%);
+  box-shadow: 0 2px 0 #04301c, 0 0 20px rgba(61,255,142,.46), inset 0 1px 0 rgba(255,255,255,.42);
+}
+@media (prefers-reduced-motion: reduce) {
+  .knob-head, .knob-rail, .knob-glow, .knob-state { transition-duration: .01ms !important; }
 }
 
 /* ---------------- fullscreen button ---------------- */
@@ -3094,7 +3106,7 @@ body,
   grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
 }
 /* ---------- the Towers tab scrolls as one page ----------
-   The grid is 61 cells tall. It used to sit in its own nested scroll box inside a
+   The grid is 62 cells tall. It used to sit in its own nested scroll box inside a
    fixed-height flex column (rotation strip above, ASCENT ALL panel pinned below),
    which left a box barely tall enough to show three rows: reaching the bottom of
    the roster was a fight. The tab is a single scroll surface now, so the grid can

@@ -1206,9 +1206,12 @@ export function randFrag(bias: number): string {
     (rar) =>
       weights
         .filter((w) => w === rar)
-        .map(() =>
-          Object.keys(TOWER_BY_ID).filter((id) => TOWER_BY_ID[id].rarity === rar)
-        ).flat()
+        .map(() => Object.keys(TOWER_BY_ID).filter((id) => TOWER_BY_ID[id].rarity === rar))
+        .flat()
   );
-  return pool[Math.floor(Math.random() * pool.length)];
+  const chosen = pool[Math.floor(Math.random() * pool.length)];
+  // A mystical Supervisor fragment is a 1% bonus drop only on a random
+  // legendary-fragment roll; the fragment shop never rolls or sells it.
+  if (chosen && TOWER_BY_ID[chosen].rarity === "legendary" && TOWER_BY_ID.supervisor && Math.random() < 0.01) return "supervisor";
+  return chosen;
 }

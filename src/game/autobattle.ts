@@ -8,6 +8,7 @@ import {
   GOLEM_TYPE,
   HOUND_TYPE,
   HP_GROWTH,
+  WAVE_ENEMY_COUNT,
   LEVIATHAN_TYPE,
   WRAITH_TYPE,
   TOWER_BY_ID,
@@ -63,7 +64,8 @@ function bossTypesForWave(wave: number): number[] {
 }
 
 function waveHealthBudget(wave: number): number {
-  const count = Math.min(46, 8 + wave * 2);
+  const bosses = bossTypesForWave(wave);
+  const count = Math.max(0, WAVE_ENEMY_COUNT - bosses.length);
   const eliteChance = Math.min(0.35, 0.06 + wave * 0.015);
   const averageEliteMultiplier = 1 + eliteChance * (ELITE_HP_MUL - 1);
   const normalHp =
@@ -72,7 +74,7 @@ function waveHealthBudget(wave: number): number {
     RUN_HP_MULTIPLIER *
     averageNormalHpMultiplier(wave) *
     averageEliteMultiplier;
-  const bossHp = bossTypesForWave(wave).reduce(
+  const bossHp = bosses.reduce(
     (sum, type) => sum + 46 * Math.pow(HP_GROWTH, wave - 1) * BOSS_HP_MUL * RUN_HP_MULTIPLIER * (ENEMY_TYPES[type]?.hpMul || 1),
     0,
   );

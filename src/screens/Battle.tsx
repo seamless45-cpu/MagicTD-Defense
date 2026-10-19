@@ -8,6 +8,7 @@ import {
   TOWER_BY_ID,
   RARITY,
   ENEMY_TYPES,
+  enemySpawnInterval,
   roundHp,
   HP_GROWTH,
   BOSS_HP_MUL,
@@ -105,23 +106,23 @@ const LIVE_MONTH = monthlyEventForDate();
 const MONTH_BONUS: MonthlyBonus = monthlyEventBonus(LIVE_MONTH.id);
 
 // ---------- board geometry ----------
-// A portrait-oriented view that keeps the original arena route, rotated into a
-// four-column, seven-row board so the battlefield uses the phone's full height.
-const W = 640;
-const H = 820;
-const C = 110;
-const COLS = 4;
-const ROWS = 7;
+// Restore the original seven-column, four-row arena route and place its board
+// lower in the viewport, as requested.
+const W = 1000;
+const H = 580;
+const C = 90;
+const COLS = 7;
+const ROWS = 4;
 const OX = (W - COLS * C) / 2;
-const OY = (H - ROWS * C) / 2;
+const OY = (H - ROWS * C) / 2 + 48;
 
 const WPTS: [number, number][] = [
-  [0, -0.7],
+  [-0.7, 0],
   [0, 0],
-  [3, 0],
-  [3, 6],
-  [0, 6],
-  [-0.7, 6],
+  [0, 3],
+  [6, 3],
+  [6, 0],
+  [6, -0.7],
 ];
 
 /** Towers used to be limited to a 236px bubble around their cell. They are not
@@ -129,7 +130,8 @@ const WPTS: [number, number][] = [
  *  TARGETING), so the guide draws an arena-wide field instead of a range ring. */
 
 const cellCenter = (c: number, r: number) => ({ x: OX + (c + 0.5) * C, y: OY + (r + 0.5) * C });
-const isPathCell = (c: number, r: number) => c === 3 || r === 0 || r === 6;
+const isPathCell = (c: number, r: number) => c === 0 || c === 6 || r === 3;
+const isLightningTower = (def: TowerDef) => ["lightning", "tesla", "storm", "thundercrown", "ion"].includes(def.kind);
 
 /** Client coords -> canvas world coords, safe against a zero-sized layout box. */
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
@@ -277,6 +279,8 @@ interface BT {
   surgeMul: number;
   /** Honor Emperor: permanent attack/attack-speed share handed over by honors */
   honorMul: number;
+  /** Supervisor's permanent +ATK-speed buff; removed with this tower */
+  superBuff: number;
 }
 /**
  * ONE SKY BOLT. A strike is no longer a straight pillar: it is a segmented
@@ -461,8 +465,10 @@ interface G {
   gold: number;
   /** hero level at the moment the run started (ability power / cooldown) */
   heroLv: number;
-  /** shop-bought damage bonus for this run (+% as a fraction) */
+  /** shop-bought and crystal attack bonus for this run (+% as a fraction) */
   dmgBonus: number;
+  /** Superbolt crystal bonus for lightning-family towers */
+  lightningBonus: number;
   /** Mana Conduit purchases: share of extra SP from kills and wave clears */
   spGainMul: number;
   /** Keen Sight purchases: flat crit chance added for this run */
@@ -599,10 +605,11 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     mode,
     heroId: HERO_BY_ID[save.hero] ? save.hero : "nova",
     heroLv: heroLevel(save, HERO_BY_ID[save.hero] ? save.hero : "nova"),
-    dmgBonus: crystal.atk,
+    dmgBonus: crystal.atk + crystal.magicianKing,
+    lightningBonus: crystal.lightning,
     spGainMul: crystal.sp,
-    critRate: crystal.crit,
-    critDmg: 0,
+    critRate: crystal.crit + crystal.superCritChance,
+    critDmg: crystal.critDamage,
     goldMul: 1 + crystal.gold,
     t: 0,
     phase: "deploy",
@@ -613,7 +620,7 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     lives: (mode === "endless" ? 15 : mode === "gauntlet" ? 12 : 20) + Math.round(crystal.lives),
     // small field-kit budget so the run shop is useful from wave 1
     gold: 120,
-    bonusAspd: crystal.aspd,
+    bonusAspd: crystal.aspd + crystal.magicianKing,
     waveTotal: 0,
     waveSpawned: 0,
     boons: [],
@@ -1245,7 +1252,8 @@ export default function Battle({
     const startWave = () => {
       g.phase = "wave";
       g.phaseT = 999;
-      g.spawnQ = waveComp(g.round).map((type, i) => ({ type, at: g.t + 0.8 + i * 0.72 + Math.random() * 0.25 }));
+      const spawnInterval = enemySpawnInterval(g.round);
+      g.spawnQ = waveComp(g.round).map((type, i) => ({ type, at: g.t + 0.8 + i * spawnInterval }));
       g.waveTotal = g.spawnQ.length;
       g.waveSpawned = 0;
       // bosses walk in first: their cutscene should open the wave, not trail it
@@ -1387,6 +1395,21 @@ export default function Battle({
     const killReward = (e: Enemy) => {
       e.dead = true;
       g.kills++;
+      // Supervisor turns every kill into a permanent speed-buff tick for each tower.
+      if (g.towers.some((tower) => tower.def.id === "supervisor" && tower.cell)) {
+        const hypervisorTier = saveRef.current.awn.supervisor?.[0] || 0;
+        const waveAmplification = hypervisorTier > 0 ? Math.min(6, Math.max(0, g.round - 1) * 0.1) : 0;
+        const superMultiplier = 1 + 6 + waveAmplification; // +600%, scaling to +1,200% with Hypervisor
+        for (const tower of g.towers) {
+          if (!tower.cell || tower.superBuff >= 2) continue;
+          const amplified = Math.random() < 0.2;
+          tower.superBuff = Math.min(2, tower.superBuff + 0.001 * (amplified ? superMultiplier : 1));
+          if (amplified) {
+            const tp = cellCenter(tower.cell.c, tower.cell.r);
+            glow(tp.x, tp.y, "#ff315c", 35, 0.22);
+          }
+        }
+      }
       // sp payout: 10 base, elites x5, bosses x10, then the monthly modifier and
       // whatever Mana Conduit share the run has bought
       g.sp += spGain(e.spv);
@@ -1566,8 +1589,8 @@ export default function Battle({
       const now = performance.now();
       const tier1 = saveRef.current.awn["lightning"]?.[0] || 0;
       const tier2 = saveRef.current.awn["lightning"]?.[1] || 0;
-      const dmgBase = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * 1.12 * (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1);
-      const targets = g.enemies.filter((e) => !e.dead);
+      const dmgBase = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * 1.12 * globalMul(t);
+      const targets = g.enemies.filter((e) => !e.dead).sort((a, b) => a.d - b.d);
       const shown = targets.slice(0, 10);
       const superbolt = tier1 > 0 && Math.random() < t.def.awk1!.chance[tier1 - 1];
       const judgement = tier2 > 0 && Math.random() < t.def.awk2!.chance[tier2 - 1];
@@ -1632,6 +1655,18 @@ export default function Battle({
           dealDamage(e, dmgBase * 0.8, { tw: t, color: "#9ff3ff" });
         }
       }
+      // Superbolt's lane-chain carries past the front ten and deals a hard 45% hit.
+      if ((superbolt || g.lightningBonus > 0) && shown.length) {
+        const tail = shown[shown.length - 1];
+        const origin = enemyPos(tail);
+        for (const enemy of targets.slice(shown.length, shown.length + 3)) {
+          const ep = enemyPos(enemy);
+          if (g.bolts.length < 44) g.bolts.push(randBolt(origin.x, origin.y, ep.x, ep.y, "#fff6c4", 2.6, 0.2, now));
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.28, max: 0.28, width: 8, color: "#fff6c4", seed: Math.random() * 100, forks: 3 });
+          dealDamage(enemy, dmgBase * 0.45, { alwaysCrit: superbolt, tw: t, color: "#fff6c4" });
+        }
+      }
+
       // ---- chain light between whichever targets were struck ----
       if (shown.length > 1) {
         const pts = shown.map((e) => enemyPos(e));
@@ -1732,8 +1767,11 @@ export default function Battle({
       }
     };
 
-    /** every global multiplier a shot picks up (overdrive + shop damage) */
-    const globalMul = () => (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1) * (1 + g.dmgBonus);
+    /** global buffs, with Superbolt's extra multiplier restricted to lightning towers */
+    const globalMul = (t?: BT) =>
+      (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1) *
+      (1 + g.dmgBonus) *
+      (t && isLightningTower(t.def) ? 1 + g.lightningBonus : 1);
 
     /** kill-stack towers (Dragon's Maw) build damage with every kill they land */
     const killStackMul = (t: BT) => {
@@ -1788,12 +1826,12 @@ export default function Battle({
       t.atkMul *
       (1 + t.honorMul) * // Honor Emperor: permanent blessing per honor taken
       (t.surgeT > 0 ? 1 + t.surgeMul : 1) * // Heavenly God: merge surge
-      globalMul() *
+      globalMul(t) *
       killStackMul(t);
 
     /** Solar flare (Sunforge): hits every enemy on the field at once. */
     const solarFlare = (t: BT) => {
-      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * killStackMul(t) * globalMul();
+      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * killStackMul(t) * globalMul(t);
       const p = cellCenter(t.cell!.c, t.cell!.r);
       const tier1 = saveRef.current.awn["sun"]?.[0] || 0;
       const tier2 = saveRef.current.awn["sun"]?.[1] || 0;
@@ -1823,7 +1861,7 @@ export default function Battle({
       const ep = pathPos(target.d);
       t.angle = Math.atan2(ep.y - p.y, ep.x - p.x);
       t.flash = 0.12;
-      const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul() * killStackMul(t);
+      const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul(t) * killStackMul(t);
       const upg = t.menuLv - 1;
       const asc = t.bLv - 1;
       // ---------- awakening rolls that change the shot itself ----------
@@ -2411,6 +2449,15 @@ export default function Battle({
         ring(pos.x, pos.y, "#8a4dff", 46);
       }
       dealDamage(target, pr.dmg, { alwaysCrit: pr.alwaysCrit, tw: pr.tw });
+      if (pr.tw && isLightningTower(pr.tw.def) && g.lightningBonus > 0) {
+        const chained = g.enemies.filter((e) => !e.dead && e.id !== target.id && e.d > target.d).sort((a, b) => a.d - b.d).slice(0, 3);
+        for (const enemy of chained) {
+          const ep = enemyPos(enemy);
+          if (g.bolts.length < 44) g.bolts.push(randBolt(pos.x, pos.y, ep.x, ep.y, "#fff3a0", 2.1, 0.18, performance.now()));
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.22, max: 0.22, width: 6, color: "#fff3a0", seed: Math.random() * 100, forks: 2 });
+          dealDamage(enemy, pr.dmg * 0.45, { alwaysCrit: pr.alwaysCrit, tw: pr.tw, color: "#fff3a0" });
+        }
+      }
 
       // ---------- Heavenly God: the laser punches straight through ----------
       if (pr.behind) {
@@ -2727,6 +2774,54 @@ export default function Battle({
       const heavenlySource = a.def.id === "heavenly" ? a : b.def.id === "heavenly" ? b : undefined;
       const wasHeavenly = !!heavenlySource;
       const wasDemon = a.def.id === "demon" || b.def.id === "demon";
+      const supervisorSource = a.def.id === "supervisor" ? a : b.def.id === "supervisor" ? b : undefined;
+      if (supervisorSource) {
+        const victims = g.enemies.filter((e) => !e.dead).sort((x, y) => x.d - y.d).slice(0, 10);
+        for (const enemy of victims) {
+          const ep = enemyPos(enemy);
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.62, max: 0.62, width: 20, color: "#ff173d", seed: Math.random() * 100, forks: 5, top: -220 });
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.38, max: 0.38, width: 7, color: "#ff9aa9", seed: Math.random() * 100, forks: 3 });
+          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#ff173d", 3.2, 0.42, performance.now()));
+          shock(ep.x, ep.y, "#ff173d", 112, 0.5);
+          glow(ep.x, ep.y, "#ff315c", 150, 0.5);
+          sparkAt(ep.x, ep.y, 20, 340);
+          addText(ep.x, ep.y - 62, "SUPERVISOR EXECUTION", "#ff315c", 13, true);
+        }
+        flash("#5b0013", 0.34);
+        punch(0.8, 0.7);
+        hitStop(0.12);
+        g.shake = fxShake(15);
+        sfx.supervisorMerge();
+
+        const doomsdayTier = saveRef.current.awn.supervisor?.[1] || 0;
+        if (doomsdayTier > 0 && victims.length > 0 && Math.random() < 0.19) {
+          const radius = supervisorSource.def.awk2!.mult[doomsdayTier - 1];
+          ring(p.x, p.y, "#a00024", radius);
+          shock(p.x, p.y, "#ff173d", Math.min(1100, radius * 1.35), 0.9);
+          shock(p.x, p.y, "#ffd8df", Math.min(760, radius * 0.8), 0.7);
+          burst(p.x, p.y, "#ff173d", 48, 620);
+          flash("#b0002b", 0.62);
+          punch(1, 1);
+          hitStop(0.2);
+          g.shake = fxShake(24);
+          addText(p.x, p.y - 100, "DOOMSDAY · 900M", "#ff315c", 24, true);
+          sfx.doomsday();
+          const doomed = g.enemies.filter((e) => !e.dead && Math.hypot(enemyPos(e).x - p.x, enemyPos(e).y - p.y) <= radius);
+          for (const enemy of doomed) {
+            const ep = enemyPos(enemy);
+            g.strikes.push({ x: ep.x, y: ep.y, life: 0.72, max: 0.72, width: 25, color: "#ff173d", seed: Math.random() * 100, forks: 6, top: -260 });
+            enemy.hp = 0;
+            killReward(enemy);
+          }
+        }
+        // Anything still alive after a possible nuclear strike is executed by
+        // the ten pre-called red bolts. Avoid double-paying a kill.
+        for (const enemy of victims) {
+          if (enemy.dead) continue;
+          enemy.hp = 0;
+          killReward(enemy);
+        }
+      }
 
       // ---------- Honor Emperor: hands the point over, keeps the tower ----------
       if (a.def.honor || b.def.honor) {
@@ -3300,7 +3395,7 @@ export default function Battle({
         uid: uidC++, def, menuLv: saveRef.current.levels[id], bLv: 1, points: 0, cell,
         cd: 0.6, shots: 0, angle: 0, rapidT: 0, rapidCool: 5, streak: 0, flash: 0,
         owner: "you", atkMul: 1, hexT: 0, downT: 0, hasteT: 0, hasteMul: 0,
-        surgeT: 0, surgeMul: 0, honorMul: 0,
+        surgeT: 0, surgeMul: 0, honorMul: 0, superBuff: 0,
       });
       const p = cellCenter(cell.c, cell.r);
       levelFlourish(p.x, p.y, RARITY[def.rarity].color, "DEPLOYED", def.rarity === "legendary" ? 3 : 1);
@@ -3988,7 +4083,7 @@ export default function Battle({
         if (!g.enemies.some((e) => !e.dead)) continue;
         t.skillCd = sk.cd;
         const p = cellCenter(t.cell.c, t.cell.r);
-        const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul() * killStackMul(t) * sk.mult;
+        const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul(t) * killStackMul(t) * sk.mult;
         addText(p.x, p.y - 52, sk.name.toUpperCase(), sk.color, 14, true);
         glow(p.x, p.y, sk.color, 60, 0.4);
         const living = g.enemies.filter((e) => !e.dead);
@@ -4187,7 +4282,7 @@ export default function Battle({
         }
         let aspdSelf = (t.def.aspd || 0) + (t.def.upAspd || 0) * (t.menuLv - 1) + (t.def.ascAspd || 0) * (t.bLv - 1);
         if (t.def.id === "lightning") aspdSelf = 0;
-        rate /= 1 + aspdSelf + (aspdA.get(t.uid) || 0);
+        rate /= 1 + aspdSelf + (aspdA.get(t.uid) || 0) + t.superBuff;
         rate /= 1 + POINT_STEP * t.points;
         rate /= 1 + g.bonusAspd; // run-shop attack speed
         if (g.odT > 0) rate /= 1 + OVERDRIVE_ASPD; // Overdrive hero buff
@@ -4483,6 +4578,16 @@ export default function Battle({
           ctx.lineTo(sx + Math.cos(a - 0.5) * 12, sy + Math.sin(a - 0.5) * 12);
           ctx.stroke();
         }
+        ctx.restore();
+      }
+      if (!ghost && t.superBuff > 0) {
+        ctx.save();
+        ctx.globalAlpha = Math.min(0.75, 0.18 + t.superBuff * 0.25);
+        ctx.strokeStyle = "#ff315c";
+        ctx.lineWidth = 2 + Math.min(2, t.superBuff);
+        ctx.beginPath();
+        ctx.arc(x, y, 34 + Math.sin(now / 130 + t.uid) * 2, now / 350, now / 350 + 4.8);
+        ctx.stroke();
         ctx.restore();
       }
       ctx.save();
@@ -5549,6 +5654,36 @@ export default function Battle({
           ctx.fillStyle = "#fff6c4";
           ctx.fillRect(-13, 7, 5, 5);
           ctx.fillRect(8, 7, 5, 5);
+          break;
+        }
+        case "supervisor": {
+          const pulse = 1 + Math.sin(now / 110) * 0.08;
+          ctx.save();
+          ctx.scale(pulse, pulse);
+          ctx.fillStyle = "#260812";
+          ctx.strokeStyle = "#ff315c";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(0, -28);
+          ctx.lineTo(21, -18);
+          ctx.lineTo(19, 7);
+          ctx.quadraticCurveTo(12, 20, 0, 27);
+          ctx.quadraticCurveTo(-12, 20, -19, 7);
+          ctx.lineTo(-21, -18);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = "#ff315c";
+          ctx.beginPath();
+          ctx.moveTo(3, -21);
+          ctx.lineTo(-11, 1);
+          ctx.lineTo(-2, 1);
+          ctx.lineTo(-5, 20);
+          ctx.lineTo(12, -5);
+          ctx.lineTo(3, -5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
           break;
         }
         case "clone": {

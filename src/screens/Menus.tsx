@@ -2356,11 +2356,12 @@ function KnobToggle({
     >
       <span className="knob-rail">
         <span className="knob-glow" />
+        <span className="knob-state">{on ? "ON" : "OFF"}</span>
       </span>
       <span className="knob-head">
         <span className="knob-grip" />
       </span>
-      <span className="knob-ripple" />
+      <span className="knob-ripple" aria-hidden="true" />
     </button>
   );
 }

@@ -88,7 +88,10 @@ function initRack() {
       attack: 0.004,
       release: 0.18,
     }).connect(limiter);
-    const bus = new Tone.Gain(0.9).connect(comp);
+    const bus = new Tone.Gain(0.9);
+    const lowCut = new Tone.Filter({ frequency: 36, type: "highpass", Q: 0.65 });
+    const presence = new Tone.Filter({ frequency: 5200, type: "highshelf", gain: 1.5 });
+    bus.connect(lowCut).connect(presence).connect(comp);
 
     // a small plate-style reverb on a send, plus slap delay in front of it
     const reverb = new Tone.Reverb({ decay: 2.1, preDelay: 0.018, wet: 1 }).connect(master);
@@ -680,6 +683,18 @@ const synthSfx = {
     noise(0.42, 0.32, 1800, { type: "bandpass", q: 1.3, sweep: 0.22, verb: 0.9 });
     tone(82, 0.62, "sawtooth", 0.26, -38, 0, { sub: true, cutoff: 280 });
     boom(95, 0.5, 0.28, 0, 4);
+  },
+  supervisorMerge: () => {
+    noise(0.5, 0.28, 2400, { type: "highpass", sweep: 0.28, verb: 0.65 });
+    tone(96, 0.66, "sawtooth", 0.24, -42, 0, { sub: true, cutoff: 260 });
+    stab([185, 277, 370], 0.42, 0.13, 0.03, "square");
+    boom(78, 0.72, 0.32, 0.04, 5);
+  },
+  doomsday: () => {
+    noise(1.1, 0.4, 1300, { type: "lowpass", sweep: 0.12, q: 0.8, noiseType: "brown" });
+    tone(42, 1.25, "sine", 0.38, -20, 0, { sub: true, cutoff: 170 });
+    boom(64, 1, 0.42, 0.04, 7);
+    stab([65, 98, 147], 0.72, 0.16, 0.08, "sawtooth");
   },
   heavenlyImpact: () => {
     noise(0.24, 0.2, 5200, { type: "highpass", q: 1.8, sweep: 0.45, verb: 0.85 });

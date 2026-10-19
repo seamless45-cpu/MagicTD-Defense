@@ -429,6 +429,14 @@ export function TowerIcon({
             <path d="M10 29h28" stroke={a} strokeWidth="1.6" opacity="0.6" />
           </g>
         );
+      case "supervisor":
+        return (
+          <g>
+            <path d="M24 5 40 12v12c0 10-7 16-16 20C15 40 8 34 8 24V12z" fill="#260812" stroke="#ff315c" strokeWidth="2.5" />
+            <path d="M26 10 15 26h8l-2 12 12-18h-8z" fill="#ff315c" stroke="#ffdbe2" strokeWidth="1.2" />
+            <path d="M11 16h5M32 34h5" stroke="#ff9aaa" strokeWidth="2" strokeLinecap="round" />
+          </g>
+        );
       case "honor":
         return (
           <g>
@@ -771,7 +779,7 @@ export interface CeremonyData {
 export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () => void }) {
   const confetti = useMemo(
     () =>
-      Array.from({ length: 48 }, (_, i) => ({
+      Array.from({ length: 32 }, (_, i) => ({
         id: i,
         left: Math.random() * 100,
         top: 40 + Math.random() * 20,
