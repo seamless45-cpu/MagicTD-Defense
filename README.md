@@ -1,7 +1,8 @@
 # MagicTD Defense
 
 A 2D browser tower defense / merge game built with React 19, TypeScript, Tailwind CSS 4 and Vite.
-Everything — menus, engine, audio, art and particles — is code; there are no image or audio assets.
+Everything — menus, engine, audio, art and particles — is code. The only binary assets are the
+CC0 sound bank in `public/sfx/` and the app icons.
 
 ## Run it
 
@@ -15,7 +16,7 @@ Other scripts:
 ```bash
 npm run build      # bundles the game and updates the committed deploy artifact
 npm run preview    # serve the production build
-npm test           # vitest + jsdom suite (173 tests)
+npm test           # vitest + jsdom suite (188 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -40,6 +41,20 @@ published site keeps serving the previous version.
 
 ## Latest rework
 
+- **Lightning lands as one event.** Every sky effect resolves its whole target list on the same
+  frame: the Lightning Princess volley and restrikes, Superbolt, Demon Execution, Thundercrown,
+  Ion Storm chain rings, the Heavenly God blessing bolts, and Storm Sovereign's lane-wide fracture
+  with its Sovereign Strike follow-up. No strike queues, no per-target delay — chain arcs are the
+  only travelling bolt left.
+- **Every enemy shows its health numbers.** The existing bar now carries a `current/max` readout
+  (`12.3k/45.6k`), outlined so it stays readable at battle speed; bosses get a larger bar and the
+  top boss bar lists exact health alongside its percentage.
+- **Enemy health raised again.** Enemy HP now compounds by +72% per wave; regular mobs use the
+  +90% spawn scale, elites also carry a 2.8× elite multiplier, and bosses use a dedicated +78% scale.
+- **Rebuilt sound bank.** All 53 cues (and every tower's firing voice) now play layered recordings
+  from Kenney's CC0 interface, RPG, impact, sci-fi and music-jingle packs instead of synth
+  oscillators, with a compressor, per-cue throttles and a voice cap on top. The old Tone.js engine
+  stays as an automatic fallback when the bank cannot load, so the game is never silent.
 - **Battle control strip.** The arena HUD now carries a real pause button (the simulation freezes
   but the last frame stays on screen, with Resume / Speed / Abandon in the overlay), a **×1 / ×1.5 /
   ×2** battle-speed cycle, and a thin **wave strip** under the HUD showing round, enemies cleared,
@@ -78,12 +93,14 @@ Pick a mode from the **Command Center**:
 | --- | --- | --- |
 | **Battle** | 12 rounds | Solo gauntlet. Win it to bank gold, gems and fragments. |
 | **Endless** | no limit | Score attack: survive as long as possible. Rewards scale with your depth — gold grows quadratically, gems every 3 waves, a token every 5. |
+| **Gauntlet** | no wave cap | Boon draft after each cleared wave; build your run until the squad falls. |
 
-**Enemies get 80% stronger every wave** (×1.8 per wave, compounding — it was ×1.57), and both the
-wave banner and the HUD show the current multiplier. Each wave holds two more enemies than it used
-to, and every round-clear payout (gold + gems) was raised 40%. Two counterweights travel with the
-steeper curve: **bosses spawn with 10% less maximum health** (`BOSS_HP_MUL`) and **run gold pays 25%
-more** (`GOLD_GAIN_MUL`) from every kill, bounty and wave clear.
+Endless and Gauntlet also offer **Auto Battle** from the Command Center. The offline estimator uses unlocked lineup damage, attack rates, upgrades and awakenings to forecast waves survived and expedition duration. It delivers a claimable gold/gem/fragment report to the in-game Mailbox; no auto-battle option is offered for standard Battle.
+
+**Enemies gain 72% HP each wave** (×1.72 per wave, compounding). Both the wave banner and
+HUD show the current multiplier. Regular mobs use `ENEMY_HP_SCALE = 1.9` (+90%); elites are
+boosted to 2.8× their type HP, and bosses use `BOSS_HP_MUL = 1.78` (+78%).
+**Run gold pays 50% more** (`GOLD_GAIN_MUL`) from every kill, bounty and wave clear.
 
 ### Bosses
 
@@ -356,7 +373,8 @@ src/
   components/ErrorBoundary.tsx  crash panel (never leave a blank page)
   game/data.ts         tower/enemy definitions, wave and cost formulas
   game/save.ts         localStorage save schema
-  game/audio.ts        WebAudio synth SFX (no audio files)
+  game/audio.ts        sample-first mixer, Tone.js synth fallback
+  game/sfxSamples.ts   CC0 cue map, lazy loader and voice mixer for public/sfx/
   screens/Battle.tsx   canvas engine: update/draw loop, input, merging, FX
   screens/Menus.tsx    loading, home, specials, guild, settings
   screens/Shop.tsx     chests and reward rolls
@@ -364,7 +382,7 @@ src/
   __tests__/           vitest suite: data, app integration, deployed artifact
 app.html               Vite entry (edit this)
 index.html             generated build served by GitHub Pages (do not edit)
-public/                manifest, service worker and app icons (mirrored to the root by the build)
+public/                manifest, service worker, app icons, sfx/ sound bank (mirrored to the root)
 scripts/sync-pages.mjs publishes dist/app.html + the PWA assets to the repo root
 ```
 
@@ -546,7 +564,7 @@ enemies, with Overpenetration and Rail Burn awakenings).
   **Sovereign Strike** use the same pillars, as does the ascent flourish.
 - **Void Titan** — a new boss (shape `titan`) that steps in from round 32 with all nine skills, a
   slab-plated siege body with orbiting shards and a void core, plus the reworked cutscene above.
-- **Awakenings for every tower** — 37 towers, two paths each, five tiers each. `AwkFx`
+- **Awakenings for every tower** — 37 towers, two paths each, six tiers each. Tier VI extends Tier V's effect magnitude.
   (`heavy`, `critup`, `volley`, `freeze`, `burn`, `chain`, `slow`, `splash`, `sp`, `bounty`, `aura`,
   `execute`, `quake`) is implemented in the battle engine, and the Towers screen lists the live tier
   effect for each path.
@@ -669,7 +687,7 @@ enemies, with Overpenetration and Rail Burn awakenings).
 
 - **Every tower is awakenable.** The preview panel used to render its two awakening tracks only for
   exotic towers, which left 27 towers showing a dead "no awakening paths yet" panel even though they
-  had full five-tier specs. The gate is gone: all **61** towers show both tracks, their tier lines and
+  had full five-tier specs. The gate is gone: all **62** towers show both tracks, their tier lines and
   their Magic Token prices, and the effects behind them were already wired into the engine (generic
   on-hit tags like burn/volley/freeze/chain plus the bespoke kits).
 - **Three new legendaries** — **Demon Execution**, **Heavenly God** and **Honor Emperor** — with
@@ -702,16 +720,15 @@ enemies, with Overpenetration and Rail Burn awakenings).
 
 ## Harder waves, richer runs, a scrollable Towers tab and a boot that plays
 
-- **The wave curve is steeper.** `HP_GROWTH` went from **1.57 to 1.8** per wave: wave 12 is now
-  ~440x wave 1 instead of ~130x, so late rounds demand the crit/point economy rather than raw
-  tower count. Bosses were brought down by 10% (`BOSS_HP_MUL = 0.9`, applied to the boss's own HP
-  multiplier at spawn — the Void Titan walks in on 34 x 0.9 = 30.6, the Warlord on 13.5) so the four
-  boss waves do not spike harder than the ramp around them. Nothing else about a boss changed.
-- **Run gold pays 25% more.** `runGold()` wraps the three places gold is earned in a battle: the
+- **The wave curve is steeper.** `HP_GROWTH` is **1.72×** per wave (+72% HP): wave 12 is ~390×
+  wave 1. Regular enemies use `ENEMY_HP_SCALE = 1.9`, elites receive an additional 2.8× type-health
+  multiplier, and bosses use `BOSS_HP_MUL = 1.78` (+78%) on their role-specific health multiplier.
+  Rift Call summons use the regular-enemy increase.
+- **Run gold pays 50% more.** `runGold()` wraps the three places gold is earned in a battle: the
   kill payout, the bounty family of awakenings and the wave-clear purse. Whatever is left in the
   wallet is settled when the run ends, so the bonus carries into the results screen. Account gold
   (chests, tasks, daily rewards) is a separate economy and is untouched.
-- **The Towers tab scrolls as one page.** The 61-cell grid used to live in its own nested scroll box
+- **The Towers tab scrolls as one page.** The 62-cell grid used to live in its own nested scroll box
   inside a fixed-height flex column, with the rotation strip above it and the `ASCENT ALL` panel
   pinned below: on a phone the box was barely three rows tall and the last rarities took real work to
   reach. The tab is now a single scroll surface — the grid is allowed to be as tall as it needs, the
@@ -723,5 +740,26 @@ enemies, with Overpenetration and Rail Burn awakenings).
   actually begins on the boot screen, and the first 400ms are ignored, so a leftover gesture can
   never cut the animation. A skip now also drives the car to the end of the track (340ms) before the
   launch instead of teleporting it, and the boot waits for the shell and the webfonts (capped at
-  +2.6s) so the arena never opens with a font swap mid-frame. The boot state line reads
-  `LOADING` → `READY` → `ENTERING THE ARENA`.
+  +2.6s) so the arena never opens with a font swap mid-frame. The boot now layers an animated
+  constellation behind the rotating seal. The boot state line reads `LOADING` → `READY` →
+  `ENTERING THE ARENA`.
+- **Eighty font choices.** Twenty new families expand the display and reading categories; EDO now uses
+  Vic Fieger's actual bundled freeware font rather than falling through to a generic substitute.
+  Attribution is in `public/fonts/EDO-LICENSE.txt`.
+- **Auto Battle reports.** Endless/Gauntlet can be simulated from the Command Center; estimated
+  endurance and battle duration scale with lineup damage and awakening strength. Rewards arrive as
+  claimable custom Mailbox attachments. Standard Battle remains manual-only.
+- **Removed Reset Progress from Settings** so the destructive wipe is no longer exposed in-game.
+- **Full font consistency.** The selected face now drives both UI and display text roles, and native controls inherit it rather than rendering in the platform default.
+- **Power Plant network overhaul.** Four, six, eight and twelve plants amplify both adjacent-tower damage and attack-speed buffs by +25%, +50%, +75% and +100%. Plants now reach all eight neighboring cells and buffed towers show orbiting electric filaments.
+- **Liquid Glass is an optional Settings skin.** It switches the palette to aqua/pearl, with deep backdrop blur, prismatic reflections and soft glass borders; interactive controls and screen changes get fluid transitions. The original theme remains the default.
+- **Lightning geometry refreshes at 100 Hz.** Thin segmented channels use a reused typed jitter buffer (10 ms flicker cadence); Demon Execution's blast pools and flashes are centered on each matching lightning impact.
+
+## Fixed-count waves, Super Crystals and the Mystical Supervisor
+
+- Every wave now schedules exactly **10 enemies total**, with bosses occupying slots rather than adding extra bodies. Enemy spawn spacing tightens by **0.00002 seconds per wave**.
+- Restored the original **7×4 arena route** and shifted the board lower in the viewport.
+- Added three Super Crystals: **Magician King** (ATK and speed up to +75%), **Superbolt** (lightning-family damage up to +100%, with lane chaining), and **Super Crit** (crit damage up to +850% and chance up to +22.5%).
+- Added the **Mystical Supervisor**. Its kills build permanent +0.1% attack-speed buffs across deployed towers, capped at +200%; each tick has a 20% chance to become a 7× Superbuff. Merging fires red execution bolts at up to ten living enemies, including elites and bosses. Its **Hypervisor** awakening scales Superbuff amplification to +1,200% over waves; **Doomsday** has a 19% merge chance to nuke enemies within 900m.
+- Supervisor fragments can appear on **1% of random legendary-fragment rolls** and are excluded from direct fragment purchases. After unlocking, its levels cost gems only, starting at 500 and rising 75% per level.
+- Reworked the shared sound processing chain and added bespoke Supervisor-merging and Doomsday cues. Tower awakening/unlock ceremonies now run outside scrolling panels, use lighter finite animation layers, and the settings toggle has a clearer state indicator and improved focus/touch feedback.

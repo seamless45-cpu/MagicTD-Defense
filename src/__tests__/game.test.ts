@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { GEM_RAIN_MIN, GOLD_RAIN_MIN } from "../components/ui";
 import {
   DAILY_TASKS,
@@ -9,6 +9,9 @@ import {
   TOWER_BY_ID,
   roundHp,
   waveComp,
+  enemySpawnInterval,
+  SPAWN_INTERVAL_STEP,
+  WAVE_ENEMY_COUNT,
   upgradeGoldCost,
   upgradeFragCost,
   ascentAllCost,
@@ -20,6 +23,10 @@ import {
   ENEMY_TYPES,
   HP_GROWTH,
   BOSS_HP_MUL,
+  ENEMY_HP_SCALE,
+  ELITE_HP_MUL,
+  powerPlantNetworkScale,
+  shortHp,
   GOLD_GAIN_MUL,
   runGold,
   POINT_DMG_STEP,
@@ -34,6 +41,10 @@ import {
   heroPower,
   heroUpgradeCost,
   type GameMode,
+  CRYSTALS,
+  crystalBonus,
+  crystalBuffText,
+  mysticalUpgradeCost,
   HEROES,
   HERO_BY_ID,
   MAX_POINTS,
@@ -107,8 +118,13 @@ import {
   gauntletChoices,
   takeGauntletBoon,
   collectGauntlet,
+  deliverAutoBattleReport,
+  inbox,
+  unclaimedMail,
+  claimMail,
 } from "../game/save";
 import { FONTS, FONT_BY_ID, DEFAULT_FONT, fontStack, fontDisplayStack, applyFont } from "../game/fonts";
+import { estimateAutoBattle } from "../game/autobattle";
 
 describe("tower data", () => {
   beforeEach(() => {
@@ -123,24 +139,39 @@ describe("tower data", () => {
     }
   });
 
-  it("gives every tower two awakenings with 5 tiers", () => {
+  it("gives every tower two awakenings with 6 tiers", () => {
     // every tower is awakenable now, not just the exotics: the preview panel
     // shows both paths for the whole roster
     for (const t of TOWERS) {
       expect(t.awk1, t.id).toBeDefined();
       expect(t.awk2, t.id).toBeDefined();
-      expect(t.awk1!.chance).toHaveLength(5);
-      expect(t.awk1!.mult).toHaveLength(5);
-      expect(t.awk2!.chance).toHaveLength(5);
-      expect(t.awk2!.mult).toHaveLength(5);
-      if (t.awk1!.mult2) expect(t.awk1!.mult2).toHaveLength(5);
-      if (t.awk2!.mult2) expect(t.awk2!.mult2).toHaveLength(5);
+      expect(t.awk1!.chance).toHaveLength(6);
+      expect(t.awk1!.mult).toHaveLength(6);
+      expect(t.awk2!.chance).toHaveLength(6);
+      expect(t.awk2!.mult).toHaveLength(6);
+      if (t.awk1!.mult2) expect(t.awk1!.mult2).toHaveLength(6);
+      if (t.awk2!.mult2) expect(t.awk2!.mult2).toHaveLength(6);
       expect(t.awk1!.name.length, t.id).toBeGreaterThan(0);
       expect(t.awk2!.name.length, t.id).toBeGreaterThan(0);
       expect(t.awk1!.desc.length, t.id).toBeGreaterThan(0);
       expect(t.awk2!.desc.length, t.id).toBeGreaterThan(0);
       expect(awakenCost(1), t.id).toBeGreaterThan(0);
       expect(awakenCost(2), t.id).toBeGreaterThan(awakenCost(1));
+    }
+  });
+
+  it("extends both awakening paths through Tier VI", () => {
+    for (const tower of TOWERS) {
+      if (tower.awk1) {
+        expect(tower.awk1.chance).toHaveLength(6);
+        expect(tower.awk1.mult).toHaveLength(6);
+        expect(tower.awk1.chance[5]).toBeLessThanOrEqual(1);
+      }
+      if (tower.awk2) {
+        expect(tower.awk2.chance).toHaveLength(6);
+        expect(tower.awk2.mult).toHaveLength(6);
+        expect(tower.awk2.chance[5]).toBeLessThanOrEqual(1);
+      }
     }
   });
 
@@ -160,35 +191,67 @@ describe("tower data", () => {
     expect(roundHp(12)).toBeGreaterThan(roundHp(11));
   });
 
-  it("makes enemies exactly 1.8x stronger every wave", () => {
-    // the curve was 1.57x a wave; it is 1.8x now, so late waves bite much harder
-    expect(HP_GROWTH).toBeCloseTo(1.8, 10);
+  it("grows enemy HP by 72% each wave", () => {
+    expect(HP_GROWTH).toBeCloseTo(1.72, 10);
     for (const w of [1, 2, 5, 11, 30, 60]) {
-      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(1.8, 8);
+      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(1.72, 8);
     }
-    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.8, 29), 3);
-    expect(roundHp(2)).toBeCloseTo(46 * 1.8, 6);
+    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.72, 29), 3);
+    expect(roundHp(2)).toBeCloseTo(46 * 1.72, 6);
   });
 
-  it("trims 10% off every boss's maximum health", () => {
-    expect(BOSS_HP_MUL).toBeCloseTo(0.9, 10);
-    // the trim lands on the boss's own HP multiplier, so a Warlord walks in on
-    // 15 x 0.9 = 13.5 and a Void Titan on 34 x 0.9 = 30.6
+  it("scales Power Plant networks into stronger damage and speed auras", () => {
+    expect(powerPlantNetworkScale(0)).toBe(1);
+    expect(powerPlantNetworkScale(3)).toBe(1);
+    expect(powerPlantNetworkScale(4)).toBe(1.25);
+    expect(powerPlantNetworkScale(6)).toBe(1.5);
+    expect(powerPlantNetworkScale(8)).toBe(1.75);
+    expect(powerPlantNetworkScale(12)).toBe(2);
+  });
+
+  it("applies a dedicated HP modifier to regular enemies and bosses", () => {
+    expect(ENEMY_HP_SCALE).toBeCloseTo(1.9, 10);
+    expect(BOSS_HP_MUL).toBeCloseTo(1.78, 10);
+    expect(ELITE_HP_MUL).toBeCloseTo(2.8, 10);
+    for (const [i, et] of ENEMY_TYPES.entries()) {
+      const scale = isBossType(i) ? BOSS_HP_MUL : ENEMY_HP_SCALE;
+      expect(scale).toBeGreaterThan(1);
+      expect(roundHp(7) * et.hpMul * scale).toBeGreaterThan(roundHp(7) * et.hpMul);
+    }
+  });
+
+  it("labels battlefield health in a compact form", () => {
+    expect(shortHp(0)).toBe("0");
+    expect(shortHp(987)).toBe("987");
+    expect(shortHp(1000)).toBe("1k");
+    expect(shortHp(1234)).toBe("1.23k");
+    expect(shortHp(12_300)).toBe("12.3k");
+    expect(shortHp(123_000)).toBe("123k");
+    expect(shortHp(4_560_000)).toBe("4.56M");
+    expect(shortHp(7_900_000_000)).toBe("7.9B");
+    // a rounded 999.6k steps up instead of printing "1000k"
+    expect(shortHp(999_600)).toBe("1M");
+  });
+
+  it("applies the dedicated +78% boss health multiplier", () => {
+    expect(BOSS_HP_MUL).toBeCloseTo(1.78, 10);
+    // the multiplier lands on each boss's own type HP; their large role-based
+    // multipliers remain intact on top of the new global boss health bonus.
     const bossMul = ENEMY_TYPES.map((e, i) => ({ e, i })).filter(({ i }) => isBossType(i)).map(({ e }) => e.hpMul * BOSS_HP_MUL);
     const normalMul = ENEMY_TYPES.map((e, i) => ({ e, i })).filter(({ i }) => !isBossType(i)).map(({ e }) => e.hpMul);
     expect(bossMul.length).toBeGreaterThan(0);
     expect(bossMul.every((m) => m > Math.max(...normalMul)), "bosses still dwarf the horde after the trim").toBe(true);
-    // every boss is trimmed, and nothing else is touched
+    // every boss receives the dedicated scale, and boss identity stays distinct
     expect(bossMul.every((m) => m > 10)).toBe(true);
   });
 
-  it("pays 25% more run gold from kills, bounties and wave clears", () => {
-    expect(GOLD_GAIN_MUL).toBeCloseTo(1.25, 10);
+  it("pays 50% more run gold from kills, bounties and wave clears", () => {
+    expect(GOLD_GAIN_MUL).toBeCloseTo(1.5, 10);
     expect(runGold(2)).toBe(3); // a slime's 2 base gold
-    expect(runGold(30)).toBe(38); // a Warlord
+    expect(runGold(30)).toBe(45); // a Warlord
     expect(runGold(0)).toBe(0);
     // it is a straight multiplier, so ordering never matters
-    for (const v of [4, 9, 17, 55, 140]) expect(runGold(v)).toBe(Math.round(v * 1.25));
+    for (const v of [4, 9, 17, 55, 140]) expect(runGold(v)).toBe(Math.round(v * 1.5));
   });
 
   it("ships the new towers with distinct mechanics", () => {
@@ -226,9 +289,10 @@ describe("tower data", () => {
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
-    // the roster grew 15 -> 27 -> 33 -> 37 -> 47 -> 48, then 58 with the casters,
-    // then 61 with Demon Execution, Heavenly God and Honor Emperor
-    expect(TOWERS).toHaveLength(61);
+    // the roster includes the 61 established towers plus the new Mystical Supervisor
+    expect(TOWERS).toHaveLength(62);
+    expect(TOWER_BY_ID.supervisor.rarity).toBe("mystical");
+    expect(TOWER_BY_ID.supervisor.unlockFrags).toBe(1);
     // mechanics actually differ between them
     expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
     expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
@@ -259,7 +323,7 @@ describe("tower data", () => {
       expect(sk.hits, id).toBeGreaterThan(0);
       expect(def.awk1, id).toBeDefined();
       expect(def.awk2, id).toBeDefined();
-      expect(def.awk1!.chance, id).toHaveLength(5);
+      expect(def.awk1!.chance, id).toHaveLength(6);
       expect(def.art, id + " art family").toBeTruthy();
     }
     // every skill name is its own effect
@@ -286,8 +350,8 @@ describe("tower data", () => {
     expect(def.art).toBe("clone");
     // Super Clone: 20% proc at every tier, +200% attack speed (mult 2)
     expect(def.awk1!.fx).toBe("clonesuper");
-    expect(def.awk1!.chance).toEqual([0.2, 0.2, 0.2, 0.2, 0.2]);
-    expect(def.awk1!.mult).toEqual([2, 2, 2, 2, 2]);
+    expect(def.awk1!.chance.slice(0, 5)).toEqual([0.2, 0.2, 0.2, 0.2, 0.2]);
+    expect(def.awk1!.mult.slice(0, 5)).toEqual([2, 2, 2, 2, 2]);
     // Perfect Replica: chance to grow the copy +1..2 points
     expect(def.awk2!.fx).toBe("cloneperfect");
     expect(def.awk2!.chance[0]).toBeGreaterThan(0);
@@ -308,8 +372,8 @@ describe("tower data", () => {
       expect(def.art, `${id} art family`).toBeTruthy();
       expect(def.awk1, id).toBeDefined();
       expect(def.awk2, id).toBeDefined();
-      expect(def.awk1!.chance, id).toHaveLength(5);
-      expect(def.awk2!.mult, id).toHaveLength(5);
+      expect(def.awk1!.chance, id).toHaveLength(6);
+      expect(def.awk2!.mult, id).toHaveLength(6);
     }
     // mechanics that actually differ between them
     expect(TOWER_BY_ID.nova.multi).toBeGreaterThan(1);
@@ -369,9 +433,9 @@ describe("tower data", () => {
       expect(def.art, `${id} art family`).toBeTruthy();
       for (const slot of [def.awk1, def.awk2]) {
         expect(slot, id).toBeDefined();
-        expect(slot!.chance, id).toHaveLength(5);
-        expect(slot!.mult, id).toHaveLength(5);
-        if (slot!.mult2) expect(slot!.mult2, id).toHaveLength(5);
+        expect(slot!.chance, id).toHaveLength(6);
+        expect(slot!.mult, id).toHaveLength(6);
+        if (slot!.mult2) expect(slot!.mult2, id).toHaveLength(6);
       }
     }
     // Demon Execution: a red bolt on a cadence that eats half a boss's max HP
@@ -513,19 +577,30 @@ describe("tower data", () => {
     expect(maxed).toBeGreaterThan(def.dmg * 20);
   });
 
-  it("builds waves that only use known enemy types and grow", () => {
-    for (let round = 1; round <= BATTLE_ROUNDS + 8; round++) {
+  it("builds fixed ten-enemy waves with known types and scheduled bosses", () => {
+    for (let round = 1; round <= BATTLE_ROUNDS + 40; round++) {
       const w = waveComp(round);
-      expect(w.length).toBeGreaterThan(6);
+      expect(w).toHaveLength(10);
       for (const t of w) {
         expect(t).toBeGreaterThanOrEqual(0);
         expect(t).toBeLessThan(ENEMY_TYPES.length);
       }
-      if (round > 1) expect(w.length).toBeGreaterThanOrEqual(waveComp(round - 1).length);
     }
-    // every 4th round includes a Warlord boss
     expect(waveComp(4)).toContain(4);
     expect(waveComp(8)).toContain(4);
+  });
+
+  it("scales the Super Crystals to their stated caps and prices Mystical levels in gems", () => {
+    expect(CRYSTALS).toHaveLength(9);
+    const max = crystalBonus({ magicianKing: 11, superbolt: 10, superCrit: 31 });
+    expect(max.magicianKing).toBeCloseTo(0.75);
+    expect(max.lightning).toBeCloseTo(1);
+    expect(max.critDamage).toBeCloseTo(8.5);
+    expect(max.superCritChance).toBeCloseTo(0.225);
+    expect(crystalBuffText(CRYSTALS.find((c) => c.id === "superCrit")!, 31)).toContain("850% crit damage");
+    expect(crystalBuffText(CRYSTALS.find((c) => c.id === "superCrit")!, 31)).toContain("22.5% crit chance");
+    expect(mysticalUpgradeCost(1)).toBe(500);
+    expect(mysticalUpgradeCost(2)).toBe(875);
   });
 
   it("keeps the battle gauntlet at 12 rounds", () => {
@@ -582,6 +657,13 @@ describe("save file", () => {
       const id = randFrag(Math.random());
       expect(TOWER_BY_ID[id], id).toBeDefined();
     }
+  });
+
+  it("can award a 1% Supervisor bonus on a random legendary-fragment roll", () => {
+    const roll = vi.spyOn(Math, "random");
+    roll.mockReturnValueOnce(0.75).mockReturnValueOnce(0.999).mockReturnValueOnce(0.009);
+    expect(randFrag(1)).toBe("supervisor");
+    roll.mockRestore();
   });
 
   it("addFrag ignores unknown ids", () => {
@@ -691,12 +773,13 @@ describe("balance patch", () => {
     expect(BASE_MONTHLY_BONUS).toEqual({ goldMul: 1, gemMul: 1, spMul: 1, hpMul: 1, upgradeCostMul: 1, fragBias: 0, chestFragBonus: 0 });
   });
 
-  it("gives each wave two more enemies than before", () => {
-    // was min(44, 6 + round * 2); wave 1 must now hold 10 bodies
-    const wave1 = waveComp(1);
-    expect(wave1.length).toBe(10);
-    expect(waveComp(3).length).toBe(14);
-    expect(waveComp(40).length).toBeGreaterThanOrEqual(46);
+  it("spawns exactly ten enemies on every wave, with bosses using wave slots", () => {
+    expect(WAVE_ENEMY_COUNT).toBe(10);
+    for (let wave = 1; wave <= 64; wave++) expect(waveComp(wave)).toHaveLength(WAVE_ENEMY_COUNT);
+    expect(waveComp(32).filter(isBossType).length).toBeGreaterThan(0);
+    expect(enemySpawnInterval(1)).toBe(0.72);
+    expect(enemySpawnInterval(2)).toBeCloseTo(0.72 - SPAWN_INTERVAL_STEP, 10);
+    expect(enemySpawnInterval(25)).toBeCloseTo(0.72 - 24 * 0.00002, 10);
   });
 
   it("pays 40% more gold and gems for clearing rounds", () => {
@@ -1356,13 +1439,34 @@ describe("hero skills", () => {
 // ---------- chest pricing & legendary unlocks ----------
 describe("chest economy", () => {
   it("prices every headline chest in gems at the new rates", () => {
-    const want: Record<string, number> = { common: 80, silver: 200, hero: 500, epic: 800, legendary: 2000 };
+    const want: Record<string, number> = { common: 80, silver: 200, hero: 500, epic: 800, legendary: 2000, mystical: 5000 };
     Object.entries(want).forEach(([id, cost]) => {
       const c = CHEST_BY_ID[id];
       expect(c, id).toBeTruthy();
       expect(c.gem, `${id} currency`).toBe(1);
       expect(c.cost, `${id} price`).toBe(cost);
     });
+  });
+
+  it("rolls the Mystical Chest as exactly five Legendary fragments or one Supervisor fragment", () => {
+    expect(CHEST_BY_ID.mystical.special).toBe("mystical");
+    const random = vi.spyOn(Math, "random");
+    try {
+      random.mockReturnValueOnce(0.70);
+      for (let i = 0; i < 5; i++) random.mockReturnValueOnce(0.1);
+      const legendary = rollChest("mystical");
+      expect(legendary.frags.reduce((sum, f) => sum + f.n, 0)).toBe(5);
+      expect(legendary.frags.every((f) => TOWER_BY_ID[f.id].rarity === "legendary")).toBe(true);
+      expect(legendary.gold).toBe(0);
+
+      random.mockReset();
+      random.mockReturnValueOnce(0.71);
+      const mystical = rollChest("mystical");
+      expect(mystical.frags).toEqual([{ id: "supervisor", n: 1 }]);
+      expect(mystical.gold).toBe(0);
+    } finally {
+      random.mockRestore();
+    }
   });
 
   it("keeps the price ladder strictly increasing by tier", () => {
@@ -1521,8 +1625,8 @@ describe("boss skills", () => {
 
 // ---------- the font vault ----------
 describe("font vault", () => {
-  it("ships exactly fifty faces with unique ids", () => {
-    expect(FONTS).toHaveLength(50);
+  it("ships sixty faces with unique ids", () => {
+    expect(FONTS).toHaveLength(80);
     const ids = FONTS.map((f) => f.id);
     expect(new Set(ids).size).toBe(ids.length);
     // the three the brief called out by name
@@ -1542,9 +1646,8 @@ describe("font vault", () => {
     expect(fontStack("rajdhani")).toContain("Rajdhani");
     expect(fontStack("not-a-font")).toBe(fontStack(DEFAULT_FONT));
     expect(fontDisplayStack("marker")).toContain("Permanent Marker");
-    // a face without its own display stack uses the UI stack
-    const f = FONTS.find((x) => !x.display)!;
-    expect(fontDisplayStack(f.id)).toBe(f.stack);
+    // every role follows the selected face, rather than silently retaining a display fallback
+    for (const f of FONTS) expect(fontDisplayStack(f.id)).toBe(f.stack);
   });
 
   it("applies a face to the document root and reports it on the dataset", () => {
@@ -1608,20 +1711,73 @@ describe("gauntlet mode", () => {
     expect(shallow3.potions).toBeGreaterThan(0);
   });
 
-  it("round-trips the gauntlet record and the chosen font through a save", () => {
+  it("round-trips the gauntlet record, chosen font, and UI theme through a save", () => {
     const s = defaultSave();
     s.gauntletBest = 17;
     s.font = "marker";
+    s.uiTheme = "ocean";
     const back = importSave(JSON.stringify(s));
     expect(back.gauntletBest).toBe(17);
     expect(back.font).toBe("marker");
+    expect(back.uiTheme).toBe("ocean");
     // a legacy blob with no font/gauntlet fields gets the defaults
     const legacy = importSave(JSON.stringify({ gold: 5 }));
     expect(legacy.gauntletBest).toBe(0);
     expect(legacy.font).toBe(DEFAULT_FONT);
+    expect(legacy.uiTheme).toBe("rift");
     // junk normalises instead of crashing
     const junk = importSave(JSON.stringify({ gauntletBest: -9, font: "" }));
     expect(junk.gauntletBest).toBe(0);
     expect(junk.font).toBe(DEFAULT_FONT);
+  });
+});
+
+
+describe("auto-battle expeditions", () => {
+  it("uses wave composition, starts at the requested wave and fails cleanly when the squad is underpowered", () => {
+    const save = defaultSave();
+    const weak = estimateAutoBattle(save, "endless", 0.01, 1, 8);
+    const strong = estimateAutoBattle(save, "endless", 1_000_000, 12, 8);
+    expect(weak.waves).toBe(0);
+    expect(weak.breaksAtWave).toBe(8);
+    expect(weak.minutes).toBeGreaterThan(0);
+    expect(strong.waves).toBeGreaterThan(weak.waves);
+    expect(strong.breaksAtWave).toBe(8 + strong.waves);
+  });
+
+  it("still sends an accurate report when the first active wave cannot be cleared", () => {
+    const save = defaultSave();
+    const id = deliverAutoBattleReport(save, "endless", 0, 1, 75, 9, 9);
+    const report = inbox(save).find((mail) => mail.id === id);
+    expect(report?.body).toContain("cleared 0 simulated waves");
+    expect(report?.body).toContain("overwhelmed at wave 9");
+    expect(report?.reward?.gold).toBeGreaterThan(75);
+    expect(report?.reward?.potions).toBe(3);
+    expect(report?.body).toContain("deterministic expected composition");
+  });
+
+  it("estimates an endless/gauntlet run from squad power and delivers claimable mail", () => {
+    const save = defaultSave();
+    const endless = estimateAutoBattle(save, "endless");
+    const gauntlet = estimateAutoBattle(save, "gauntlet");
+    expect(endless.waves).toBeGreaterThan(0);
+    expect(endless.minutes).toBeGreaterThan(0);
+    expect(gauntlet.mode).toBe("gauntlet");
+    const id = deliverAutoBattleReport(save, "endless", endless.waves, endless.minutes);
+    expect(inbox(save).some((m) => m.id === id)).toBe(true);
+    expect(unclaimedMail(save)).toContain(id);
+    expect(claimMail(save, id)).not.toBeNull();
+    expect(unclaimedMail(save)).not.toContain(id);
+    expect(save.mail.autoUses).toBe(1);
+    expect(save.mail.autoReadyAt).toBeGreaterThan(Date.now());
+    // Once cooldowns are cleared, two further runs are allowed in this week;
+    // the fourth attempt is rejected at the weekly cap.
+    save.mail.autoReadyAt = 0;
+    expect(deliverAutoBattleReport(save, "endless", 1, 1)).not.toBe("");
+    save.mail.autoReadyAt = 0;
+    expect(deliverAutoBattleReport(save, "endless", 1, 1)).not.toBe("");
+    save.mail.autoReadyAt = 0;
+    expect(deliverAutoBattleReport(save, "endless", 1, 1)).toBe("");
+    expect(save.mail.autoUses).toBe(3);
   });
 });

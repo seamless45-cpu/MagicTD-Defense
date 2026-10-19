@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { loadSave, mailReady, persistSave, seasonReady, tasksReady, type SaveData } from "./game/save";
+import { deliverAutoBattleReport, loadSave, mailReady, persistSave, seasonReady, tasksReady, weekStr, type SaveData } from "./game/save";
+import { estimateAutoBattle } from "./game/autobattle";
 import { applyFont } from "./game/fonts";
-import { sfx, setSfx, setVolume, setVolumeBoost, initAudio } from "./game/audio";
+import { sfx, setSfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost, initAudio } from "./game/audio";
+import { loadSavedMusic, setMusicSettings } from "./game/music";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
 import { LaunchIntro, LoadingScreen, Home, Specials, Guild, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
@@ -136,13 +138,29 @@ export default function App() {
     setSfx(save.sfx);
     setVolume(save.vol);
     setVolumeBoost(save.volBoost);
-  }, [save.sfx, save.vol, save.volBoost]);
+    setAudioEQ(save.eqBass, save.eqMid, save.eqTreble);
+    setBassBoost(save.bassBoost);
+    setTrebleBoost(save.trebleBoost);
+  }, [save.sfx, save.vol, save.volBoost, save.eqBass, save.eqMid, save.eqTreble, save.bassBoost, save.trebleBoost]);
+
+  useEffect(() => {
+    setMusicSettings({ volume: save.musicVol, start: save.musicStart, end: save.musicEnd, rate: save.musicRate });
+  }, [save.musicVol, save.musicStart, save.musicEnd, save.musicRate]);
+  useEffect(() => { void loadSavedMusic(); }, []);
 
   // the picked font is applied to the document root (UI + display stacks) and
   // re-applied whenever the player switches faces in Settings
   useEffect(() => {
     applyFont(save.font);
   }, [save.font]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.uiGlass = save.liquidGlass ? "on" : "off";
+    root.dataset.uiTheme = save.uiTheme || "rift";
+    root.dataset.reducedMotion = save.reducedMotion ? "on" : "off";
+    root.dataset.powerSaver = save.powerSaver ? "on" : "off";
+  }, [save.liquidGlass, save.uiTheme, save.reducedMotion, save.powerSaver]);
 
   // the static splash in index.html is only there until the app has painted
   useEffect(() => {
@@ -211,6 +229,24 @@ export default function App() {
           save={save}
           mutate={mutate}
           onExit={() => setScreen("home")}
+          onAutoBattle={(mode, liveSquadDps, deployedCount, currentWave, walletGold, runGoldMul, boons) => {
+            const weeklyUses = save.mail.autoWeek === weekStr() ? save.mail.autoUses : 0;
+            if (weeklyUses >= 3) {
+              push("AUTO-RESOLVE LIMIT REACHED · 3 uses per week", "#8fb0ff");
+              return;
+            }
+            if (save.mail.autoReadyAt > Date.now()) {
+              push(`AUTO BATTLE RECHARGING · ready in ${Math.ceil((save.mail.autoReadyAt - Date.now()) / 60000)} min`, "#8fb0ff");
+              return;
+            }
+            const plan = estimateAutoBattle(save, mode, liveSquadDps, deployedCount, currentWave, boons);
+            sfx.autoResolve();
+            mutate((s) => {
+              deliverAutoBattleReport(s, mode, plan.waves, plan.minutes, walletGold, currentWave, plan.breaksAtWave, runGoldMul, boons);
+            });
+            push(`RUN ENDED · ${plan.waves} waves simulated; overwhelmed at wave ${plan.breaksAtWave} · report sent to Mail`, mode === "gauntlet" ? "#3dff8e" : "#ff4fd8");
+            setScreen("mail");
+          }}
         />
       </div>
     );
