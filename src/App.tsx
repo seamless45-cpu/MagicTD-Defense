@@ -146,8 +146,12 @@ export default function App() {
   }, [save.font]);
 
   useEffect(() => {
-    document.documentElement.dataset.uiGlass = save.liquidGlass ? "on" : "off";
-  }, [save.liquidGlass]);
+    const root = document.documentElement;
+    root.dataset.uiGlass = save.liquidGlass ? "on" : "off";
+    root.dataset.uiTheme = save.uiTheme || "rift";
+    root.dataset.reducedMotion = save.reducedMotion ? "on" : "off";
+    root.dataset.powerSaver = save.powerSaver ? "on" : "off";
+  }, [save.liquidGlass, save.uiTheme, save.reducedMotion, save.powerSaver]);
 
   // the static splash in index.html is only there until the app has painted
   useEffect(() => {

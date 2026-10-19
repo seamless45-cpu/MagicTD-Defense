@@ -49,8 +49,8 @@ published site keeps serving the previous version.
 - **Every enemy shows its health numbers.** The existing bar now carries a `current/max` readout
   (`12.3k/45.6k`), outlined so it stays readable at battle speed; bosses get a larger bar and the
   top boss bar lists exact health alongside its percentage.
-- **Enemy health raised again.** Regular and elite enemies receive +90% HP (`ENEMY_HP_SCALE`);
-  bosses receive a dedicated +55% (`BOSS_HP_MUL`). Rift Call summons use the regular-enemy scale.
+- **Enemy health raised again.** Enemy HP now compounds by +72% per wave; regular mobs use the
+  +90% spawn scale, elites also carry a 2.8× elite multiplier, and bosses use a dedicated +78% scale.
 - **Rebuilt sound bank.** All 53 cues (and every tower's firing voice) now play layered recordings
   from Kenney's CC0 interface, RPG, impact, sci-fi and music-jingle packs instead of synth
   oscillators, with a compressor, per-cue throttles and a voice cap on top. The old Tone.js engine
@@ -97,10 +97,9 @@ Pick a mode from the **Command Center**:
 
 Endless and Gauntlet also offer **Auto Battle** from the Command Center. The offline estimator uses unlocked lineup damage, attack rates, upgrades and awakenings to forecast waves survived and expedition duration. It delivers a claimable gold/gem/fragment report to the in-game Mailbox; no auto-battle option is offered for standard Battle.
 
-**Enemies get 120% stronger every wave** (×2.2 per wave, compounding). Both the wave banner and
-the HUD show the current multiplier. Each wave holds two more enemies than it used
-to, and every round-clear payout (gold + gems) was raised 40%. Regular and elite enemies use
-`ENEMY_HP_SCALE = 1.9` (+90%), while bosses use their dedicated `BOSS_HP_MUL = 1.55` (+55%).
+**Enemies gain 72% HP each wave** (×1.72 per wave, compounding). Both the wave banner and
+HUD show the current multiplier. Regular mobs use `ENEMY_HP_SCALE = 1.9` (+90%); elites are
+boosted to 2.8× their type HP, and bosses use `BOSS_HP_MUL = 1.78` (+78%).
 **Run gold pays 50% more** (`GOLD_GAIN_MUL`) from every kill, bounty and wave clear.
 
 ### Bosses
@@ -721,10 +720,10 @@ enemies, with Overpenetration and Rail Burn awakenings).
 
 ## Harder waves, richer runs, a scrollable Towers tab and a boot that plays
 
-- **The wave curve is steeper.** `HP_GROWTH` is **2.2×** per wave (+120% HP): wave 12 is ~7,430x
-  wave 1. Regular and elite enemies now get +90% health (`ENEMY_HP_SCALE = 1.9`); bosses instead
-  get +55% (`BOSS_HP_MUL = 1.55`) on their role-specific health multiplier. Rift Call summons use
-  the regular-enemy increase.
+- **The wave curve is steeper.** `HP_GROWTH` is **1.72×** per wave (+72% HP): wave 12 is ~390×
+  wave 1. Regular enemies use `ENEMY_HP_SCALE = 1.9`, elites receive an additional 2.8× type-health
+  multiplier, and bosses use `BOSS_HP_MUL = 1.78` (+78%) on their role-specific health multiplier.
+  Rift Call summons use the regular-enemy increase.
 - **Run gold pays 50% more.** `runGold()` wraps the three places gold is earned in a battle: the
   kill payout, the bounty family of awakenings and the wave-clear purse. Whatever is left in the
   wallet is settled when the run ends, so the bonus carries into the results screen. Account gold

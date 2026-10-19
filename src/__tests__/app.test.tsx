@@ -327,6 +327,11 @@ describe("Settings", () => {
     expect(dmg.getAttribute("aria-checked")).toBe("true");
     click(dmg);
     await waitFor(() => saved().dmgNums === false, "toggled through the knob");
+    const oceanTheme = document.querySelector('[data-testid="ui-theme-ocean"]') as HTMLElement;
+    expect(oceanTheme).toBeTruthy();
+    click(oceanTheme);
+    await waitFor(() => saved().uiTheme === "ocean", "theme preference saved");
+    await waitFor(() => document.documentElement.dataset.uiTheme === "ocean", "theme palette applied");
     const glass = document.querySelector('[data-testid="toggle-liquidGlass"]') as HTMLElement;
     expect(glass).toBeTruthy();
     expect(document.documentElement.dataset.uiGlass).toBe("off");

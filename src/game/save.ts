@@ -103,6 +103,15 @@ export interface GuildState {
   questsDone: string[];
 }
 
+export const UI_THEMES = [
+  { id: "rift", name: "Rift", accent: "#b06bff", swatches: ["#0c0824", "#251454", "#b06bff"] },
+  { id: "ocean", name: "Ocean", accent: "#35e0ff", swatches: ["#061827", "#123b58", "#35e0ff"] },
+  { id: "ember", name: "Ember", accent: "#ff8a3d", swatches: ["#210b12", "#4a1722", "#ff8a3d"] },
+  { id: "forest", name: "Forest", accent: "#3dff8e", swatches: ["#071a18", "#123c2d", "#3dff8e"] },
+  { id: "royal", name: "Royal", accent: "#ff4fd8", swatches: ["#130a2b", "#30205c", "#ff4fd8"] },
+] as const;
+export type UiTheme = (typeof UI_THEMES)[number]["id"];
+
 export interface SaveData {
   gold: number;
   gems: number;
@@ -153,7 +162,9 @@ export interface SaveData {
   powerSaver: boolean;
   /** enable optional translucent liquid-glass UI styling */
   liquidGlass: boolean;
-  /** selected UI font id from the 60-font catalog in game/fonts.ts */
+  /** color palette selected in the theme picker */
+  uiTheme: UiTheme;
+  /** selected UI font id from the 80-font catalog in game/fonts.ts */
   font: string;
   /** crystal potions, spent on the crystal vault in the Towers tab */
   potions: number;
@@ -258,6 +269,7 @@ export function defaultSave(): SaveData {
     volBoost: false,
     powerSaver: false,
     liquidGlass: false,
+    uiTheme: "rift",
     font: "rajdhani",
     // a new account can immediately ignite one crystal
     potions: 6,
@@ -311,6 +323,7 @@ function normalise(s: SaveData): SaveData {
   }
   s.eventStreak = Math.max(0, Math.min(7, Number.isFinite(s.eventStreak) ? Math.round(s.eventStreak) : 0));
   s.zoom = clampZoom(s.zoom);
+  if (!UI_THEMES.some((theme) => theme.id === s.uiTheme)) s.uiTheme = "rift";
   s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
   s.heroShards = s.heroShards && typeof s.heroShards === "object" ? s.heroShards : {};
   s.chips = { ...emptyChips(), ...(s.chips && typeof s.chips === "object" ? s.chips : {}) };

@@ -1078,8 +1078,8 @@ export function spawnBudget(n = SPAWN_BUDGET_TOWERS) {
 export const REWARD_MUL = 1.4;
 export const reward = (v: number) => Math.round(v * REWARD_MUL);
 
-/** Enemy durability grows by 50% per wave for steadier late-run pressure. */
-export const HP_GROWTH = 1.5;
+/** Enemy durability grows by 72% each wave, compounding with the run length. */
+export const HP_GROWTH = 1.72;
 
 /** Network bonus applied to both Power Plant damage and attack-speed auras. */
 export function powerPlantNetworkScale(plantCount: number): number {
@@ -1094,7 +1094,7 @@ export function powerPlantNetworkScale(plantCount: number): number {
  * Damage a tower deals per shot.
  * Menu levels add flat damage, battle levels multiply it, points multiply it again,
  * and aura buffs come in as `atkMul`. Growth is multiplicative so it can keep up
- * with the 2.2x enemy curve.
+ * with the 1.72x enemy curve.
  */
 // ---------- crit damage ----------------
 /**
@@ -1758,17 +1758,20 @@ export function roundHp(round: number) {
 }
 
 /**
- * Boss HP scale replaces the regular-enemy scale: bosses receive +55%, while
- * ordinary and elite enemies receive +90%. Their type-specific multipliers
- * remain on top. Speed, armour, lives and gold are untouched.
+ * Bosses receive a dedicated +78% health scale; normal enemies and elites use
+ * the regular-enemy scale, with elites also carrying their 2.8x elite modifier.
+ * Type-specific multipliers remain on top. Speed, armour, lives and gold are untouched.
  */
-export const BOSS_HP_MUL = 1.8;
+export const BOSS_HP_MUL = 1.78;
 
 /**
  * Non-boss enemies receive +90% maximum health at spawn time, including
- * elites, normal waves and Rift Call summons. Bosses use BOSS_HP_MUL instead.
+ * elites, normal waves and Rift Call summons. Bosses use BOSS_HP_MUL instead; elites
+ * additionally have 2.8x their type-scaled health.
  */
 export const ENEMY_HP_SCALE = 1.9;
+/** Elites are markedly tougher than their base enemy type. */
+export const ELITE_HP_MUL = 2.8;
 
 /**
  * Compact number for the in-battle health readout: 987, 12.3k, 4.56M, 7.9B.

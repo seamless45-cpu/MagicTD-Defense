@@ -1,6 +1,7 @@
 import {
   BOSS_HP_MUL,
   ENEMY_HP_SCALE,
+  ELITE_HP_MUL,
   eventBonus,
   eventForDate,
   ENEMY_TYPES,
@@ -64,7 +65,7 @@ function bossTypesForWave(wave: number): number[] {
 function waveHealthBudget(wave: number): number {
   const count = Math.min(46, 8 + wave * 2);
   const eliteChance = Math.min(0.35, 0.06 + wave * 0.015);
-  const averageEliteMultiplier = 1 + eliteChance * 1.2; // elites have 2.2x HP
+  const averageEliteMultiplier = 1 + eliteChance * (ELITE_HP_MUL - 1);
   const normalHp =
     46 * Math.pow(HP_GROWTH, wave - 1) *
     ENEMY_HP_SCALE *

@@ -12,6 +12,7 @@ import {
   HP_GROWTH,
   BOSS_HP_MUL,
   ENEMY_HP_SCALE,
+  ELITE_HP_MUL,
   powerPlantNetworkScale,
   shortHp,
   runGold,
@@ -92,7 +93,7 @@ import {
   type RunShopItem,
 } from "../game/data";
 import { SKILLS } from "../game/skills";
-import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon, GemIcon, TokenIcon, ShardIcon, PotionIcon } from "../components/ui";
+import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon, GemIcon, TokenIcon, ShardIcon, PotionIcon, ViewportPortal } from "../components/ui";
 
 /**
  * The weekday event is resolved once per module load: it modifies enemy health,
@@ -104,21 +105,23 @@ const LIVE_MONTH = monthlyEventForDate();
 const MONTH_BONUS: MonthlyBonus = monthlyEventBonus(LIVE_MONTH.id);
 
 // ---------- board geometry ----------
-const W = 1000;
-const H = 580;
-const C = 90;
-const COLS = 7;
-const ROWS = 4;
+// A portrait-oriented view that keeps the original arena route, rotated into a
+// four-column, seven-row board so the battlefield uses the phone's full height.
+const W = 640;
+const H = 820;
+const C = 110;
+const COLS = 4;
+const ROWS = 7;
 const OX = (W - COLS * C) / 2;
 const OY = (H - ROWS * C) / 2;
 
 const WPTS: [number, number][] = [
-  [-0.7, 0],
+  [0, -0.7],
   [0, 0],
-  [0, 3],
-  [6, 3],
-  [6, 0],
-  [6, -0.7],
+  [3, 0],
+  [3, 6],
+  [0, 6],
+  [-0.7, 6],
 ];
 
 /** Towers used to be limited to a 236px bubble around their cell. They are not
@@ -126,7 +129,7 @@ const WPTS: [number, number][] = [
  *  TARGETING), so the guide draws an arena-wide field instead of a range ring. */
 
 const cellCenter = (c: number, r: number) => ({ x: OX + (c + 0.5) * C, y: OY + (r + 0.5) * C });
-const isPathCell = (c: number, r: number) => c === 0 || c === 6 || r === 3;
+const isPathCell = (c: number, r: number) => c === 3 || r === 0 || r === 6;
 
 /** Client coords -> canvas world coords, safe against a zero-sized layout box. */
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
@@ -853,6 +856,22 @@ export default function Battle({
     // opaque canvas: the cached backdrop covers every pixel, so the browser can
     // skip per-frame alpha compositing of the whole arena
     const ctx = canvas.getContext("2d", { alpha: false })!;
+    // Half-resolution history buffers keep shake blur inexpensive on phones.
+    const trailCanvas = document.createElement("canvas");
+    trailCanvas.width = Math.max(1, Math.round(W * 0.5));
+    trailCanvas.height = Math.max(1, Math.round(H * 0.5));
+    const trailCtx = trailCanvas.getContext("2d", { alpha: true })!;
+    const currentCanvas = document.createElement("canvas");
+    currentCanvas.width = trailCanvas.width;
+    currentCanvas.height = trailCanvas.height;
+    const currentCtx = currentCanvas.getContext("2d", { alpha: true })!;
+    const previousCanvas = document.createElement("canvas");
+    previousCanvas.width = trailCanvas.width;
+    previousCanvas.height = trailCanvas.height;
+    const previousCtx = previousCanvas.getContext("2d", { alpha: true })!;
+    let hasPreviousFrame = false;
+    let lastShakeX = 0;
+    let lastShakeY = 0;
     const wrap = canvas.parentElement as HTMLElement;
     const fit = () => {
       const rw = wrap.clientWidth || 1;
@@ -3463,11 +3482,11 @@ export default function Battle({
           g.waveSpawned++;
           const et = ENEMY_TYPES[s.type];
           const boss = isBossType(s.type);
-          // elites: tougher variants with a golden sigil, 5x sp and double gold
+          // elites: 2.8x-health variants with a golden sigil, 5x SP and double gold
           const elite = !boss && Math.random() < Math.min(0.35, 0.06 + g.round * 0.015);
-          // Bosses use their dedicated +55% scale; regulars and elites use +90%.
+          // Bosses use +78%; regulars use +90%, and elites gain the 2.8x variant multiplier.
           const hp =
-            roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? 2.2 : 1) * (boss ? BOSS_HP_MUL : ENEMY_HP_SCALE);
+            roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? ELITE_HP_MUL : 1) * (boss ? BOSS_HP_MUL : ENEMY_HP_SCALE);
           g.enemies.push({
             id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012) * (elite ? 1.08 : 1), type: s.type,
             elite,
@@ -6767,6 +6786,8 @@ export default function Battle({
 
     const draw = () => {
       const now = performance.now();
+      let shakeX = 0;
+      let shakeY = 0;
       ctx.clearRect(0, 0, W, H);
 
       // ================= BATTLEFIELD =================
@@ -6799,8 +6820,14 @@ export default function Battle({
 
       // camera shake/punch move the arena content but never the sky
       ctx.save();
-      if (g.shake > 0.3 && fxOn() && !saveRef.current.powerSaver)
-        ctx.translate((Math.random() - 0.5) * g.shake, (Math.random() - 0.5) * g.shake);
+      if (g.shake > 0.3 && fxOn() && !saveRef.current.powerSaver) {
+        // A smooth, high-frequency rumble gives the temporal smear a real
+        // direction instead of flickering randomly between unrelated offsets.
+        const shakePhase = now * 0.058;
+        shakeX = Math.sin(shakePhase) * g.shake;
+        shakeY = Math.cos(shakePhase * 1.17) * g.shake * 0.72;
+        ctx.translate(shakeX, shakeY);
+      }
       if (g.punch > 0.01) {
         const sc = 1 + g.punch * 0.045;
         ctx.translate(W / 2, H / 2);
@@ -7604,6 +7631,37 @@ export default function Battle({
         ctx.fillRect(0, 0, W, H);
         ctx.restore();
       }
+
+      // Directional temporal smear only while the camera is actually shaking.
+      // It uses a downsampled prior frame, fades quickly, and is disabled by
+      // reduced effects, power saving, or the user's screen-shake preference.
+      const shakeVelocity = Math.hypot(shakeX - lastShakeX, shakeY - lastShakeY);
+      const blurStrength = Math.min(0.28, shakeVelocity * 0.024);
+      const useMotionBlur =
+        hasPreviousFrame && blurStrength > 0.025 && g.shake > 1.5 && fxOn() && fxQ() >= 0.7 &&
+        saveRef.current.shakeFx && !saveRef.current.powerSaver;
+      const tw = trailCanvas.width;
+      const th = trailCanvas.height;
+      currentCtx.clearRect(0, 0, tw, th);
+      currentCtx.drawImage(canvas, 0, 0, tw, th);
+      if (useMotionBlur) {
+        trailCtx.clearRect(0, 0, tw, th);
+        trailCtx.globalAlpha = 1;
+        trailCtx.drawImage(currentCanvas, 0, 0, tw, th);
+        trailCtx.globalAlpha = blurStrength;
+        trailCtx.drawImage(previousCanvas, -(shakeX - lastShakeX) * 1.5, -(shakeY - lastShakeY) * 1.5, tw, th);
+        trailCtx.globalAlpha = 1;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, W, H);
+        ctx.drawImage(trailCanvas, 0, 0, tw, th, 0, 0, W, H);
+        ctx.restore();
+      }
+      previousCtx.clearRect(0, 0, tw, th);
+      previousCtx.drawImage(currentCanvas, 0, 0, tw, th);
+      lastShakeX = shakeX;
+      lastShakeY = shakeY;
+      hasPreviousFrame = true;
     };
 
     // ---------- loop ----------
@@ -8711,13 +8769,14 @@ function RunShop({
   onClose: () => void;
 }) {
   return (
+    <ViewportPortal>
     <div
       className="fixed inset-0 z-[95] flex items-center justify-center bg-black/80 p-4"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="panel anim-pop max-h-[88vh] w-[560px] overflow-y-auto scroll-thin p-5" data-testid="run-shop">
+      <div className="panel anim-pop max-h-[88dvh] w-[min(560px,94vw)] overflow-y-auto scroll-thin p-3 sm:p-5" data-testid="run-shop">
         <div className="flex items-center justify-between">
           <div>
             <div className="font-disp text-2xl text-[#8effc4]">Battle Shop</div>
@@ -8764,6 +8823,7 @@ function RunShop({
         </button>
       </div>
     </div>
+    </ViewportPortal>
   );
 }
 

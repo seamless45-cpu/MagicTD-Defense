@@ -51,6 +51,7 @@ import {
   claimCompetition,
   compClaimed,
   GUILD_DONATIONS_PER_DAY,
+  UI_THEMES,
 } from "../game/save";
 import { sfx, setVolume, setVolumeBoost } from "../game/audio";
 import {
@@ -2496,6 +2497,37 @@ export function SettingsModal({
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
+      <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <div className="font-bold">Interface Theme</div>
+            <div className="text-[11px] font-semibold text-[var(--dim)]">Choose the arena control-room palette</div>
+          </div>
+          <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--dim)]">{save.uiTheme || "rift"}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="radiogroup" aria-label="Interface Theme">
+          {UI_THEMES.map((theme) => {
+            const active = (save.uiTheme || "rift") === theme.id;
+            return (
+              <button
+                key={theme.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                data-testid={`ui-theme-${theme.id}`}
+                onClick={() => { sfx.uiTab(); mutate((s) => { s.uiTheme = theme.id; }); }}
+                className={`theme-choice rounded-lg border p-1.5 text-left transition ${active ? "is-active" : ""}`}
+                style={{ borderColor: active ? theme.accent : "var(--line)", "--theme-accent": theme.accent } as React.CSSProperties}
+              >
+                <span className="mb-1.5 flex h-5 overflow-hidden rounded-md" aria-hidden="true">
+                  {theme.swatches.map((color) => <i key={color} className="h-full flex-1" style={{ background: color }} />)}
+                </span>
+                <span className="block truncate text-[10px] font-bold">{theme.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div className="mt-1.5 space-y-3">
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="max-fps-row">
           <SetIcon name="fps" color="#3dff8e" />

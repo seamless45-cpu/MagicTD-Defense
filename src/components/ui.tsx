@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { sfx } from "../game/audio";
 import type { ChipId, TowerDef } from "../game/data";
 import { HERO_BY_ID, RARITY, TOWER_BY_ID, leagueFor, towerArt } from "../game/data";
 import type { RewardLine } from "../game/save";
+
+/** Escape fixed overlays from transformed/scrolling app panels into the viewport. */
+export function ViewportPortal({ children }: { children: ReactNode }) {
+  if (typeof document === "undefined") return <>{children}</>;
+  const root = document.documentElement;
+  const classes = [
+    root.dataset.reducedMotion === "on" ? "calm" : "",
+    root.dataset.powerSaver === "on" ? "power-saver" : "",
+  ].filter(Boolean).join(" ");
+  return createPortal(<div className={classes} style={{ display: "contents" }}>{children}</div>, document.body);
+}
 
 export function CoinIcon({ size = 18 }: { size?: number }) {
   return (
@@ -721,6 +733,7 @@ export function useToasts() {
 
 export function Toasts({ toasts }: { toasts: { id: number; msg: string; color?: string }[] }) {
   return (
+    <ViewportPortal>
     <div className="pointer-events-none fixed left-1/2 top-16 z-[90] flex -translate-x-1/2 flex-col items-center gap-2">
       {toasts.map((t) => (
         <div
@@ -737,6 +750,7 @@ export function Toasts({ toasts }: { toasts: { id: number; msg: string; color?: 
         </div>
       ))}
     </div>
+    </ViewportPortal>
   );
 }
 
@@ -783,7 +797,8 @@ export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () =>
   const title = data.kind === "awaken" ? "CONGRATULATIONS!" : data.kind === "unlock" ? "TOWER UNLOCKED!" : "TOWER ASCENDED!";
 
   return (
-    <div
+    <ViewportPortal>
+      <div
       className="fixed inset-0 z-[98] flex items-center justify-center overflow-hidden bg-black/85"
       style={{ animation: "cerBackdrop 0.35s ease both" }}
       onPointerDown={onClose}
@@ -873,7 +888,8 @@ export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () =>
           Continue
         </button>
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   );
 }
 
@@ -1094,16 +1110,18 @@ export function Modal({
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
   return (
+    <ViewportPortal>
     <div
       className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose?.();
       }}
     >
-      <div className="panel anim-pop max-h-[88vh] overflow-y-auto scroll-thin p-5" style={{ width: w }}>
+      <div className="panel anim-pop max-h-[88dvh] max-w-[calc(100vw-2rem)] overflow-y-auto scroll-thin p-5" style={{ width: w, maxWidth: "calc(100vw - 2rem)" }}>
         {children}
       </div>
     </div>
+    </ViewportPortal>
   );
 }
 
@@ -1476,7 +1494,8 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
   const shaking = phase === "rattle" || phase === "crack";
 
   return (
-    <div
+    <ViewportPortal>
+      <div
       className={`claim-root fixed inset-0 z-[90] flex items-center justify-center p-4 ${shaking ? "claim-quake" : ""} ${phase === "wind" ? "claim-vacuum" : ""}`}
       data-testid="reward-claim"
       onPointerDown={onClose}
@@ -1654,7 +1673,8 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
           {opening ? "Opening…" : "Collect"}
         </button>
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   );
 }
 
@@ -1715,7 +1735,8 @@ export function UpgradeCeremony({ data, onClose }: { data: UpgradeData; onClose:
   }, [onClose]);
 
   return (
-    <div className="upg-root fixed inset-0 z-[95] flex items-center justify-center p-4" data-testid="upgrade-ceremony" onPointerDown={onClose}>
+    <ViewportPortal>
+      <div className="upg-root fixed inset-0 z-[95] flex items-center justify-center p-4" data-testid="upgrade-ceremony" onPointerDown={onClose}>
       <div className="relative flex flex-col items-center" onPointerDown={(e) => e.stopPropagation()}>
         {/* rays + burst rings behind the art */}
         <div className="relative grid place-items-center" style={{ width: 240, height: 240 }}>
@@ -1804,6 +1825,7 @@ export function UpgradeCeremony({ data, onClose }: { data: UpgradeData; onClose:
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   );
 }

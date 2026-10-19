@@ -43,6 +43,7 @@ import {
   TokenIcon,
   TowerIcon,
   UpgradeCeremony,
+  ViewportPortal,
   type CeremonyData,
   type UpgradeData,
 } from "../components/ui";
@@ -788,6 +789,7 @@ function TowerPreview({
   const rows = stats;
 
   return (
+    <ViewportPortal>
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4"
       onPointerDown={(e) => {
@@ -795,7 +797,7 @@ function TowerPreview({
       }}
     >
       <div
-        className="panel anim-pop max-h-[90vh] w-[620px] overflow-y-auto scroll-thin p-5"
+        className="panel anim-pop max-h-[90dvh] w-[min(620px,94vw)] overflow-y-auto scroll-thin p-3 sm:p-5"
         style={{ borderColor: rc.color + "aa" }}
         data-testid="tower-preview"
       >
@@ -956,6 +958,7 @@ function TowerPreview({
         </div>
       </div>
     </div>
+    </ViewportPortal>
   );
 }
 

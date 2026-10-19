@@ -21,6 +21,7 @@ import {
   HP_GROWTH,
   BOSS_HP_MUL,
   ENEMY_HP_SCALE,
+  ELITE_HP_MUL,
   powerPlantNetworkScale,
   shortHp,
   GOLD_GAIN_MUL,
@@ -183,14 +184,13 @@ describe("tower data", () => {
     expect(roundHp(12)).toBeGreaterThan(roundHp(11));
   });
 
-  it("uses steadier 1.5x enemy HP growth each wave", () => {
-    // Lower per-wave growth smooths late-game spikes while preserving the role multipliers.
-    expect(HP_GROWTH).toBeCloseTo(1.5, 10);
+  it("grows enemy HP by 72% each wave", () => {
+    expect(HP_GROWTH).toBeCloseTo(1.72, 10);
     for (const w of [1, 2, 5, 11, 30, 60]) {
-      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(1.5, 8);
+      expect(roundHp(w + 1) / roundHp(w)).toBeCloseTo(1.72, 8);
     }
-    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.5, 29), 3);
-    expect(roundHp(2)).toBeCloseTo(46 * 1.5, 6);
+    expect(roundHp(30) / roundHp(1)).toBeCloseTo(Math.pow(1.72, 29), 3);
+    expect(roundHp(2)).toBeCloseTo(46 * 1.72, 6);
   });
 
   it("scales Power Plant networks into stronger damage and speed auras", () => {
@@ -204,7 +204,8 @@ describe("tower data", () => {
 
   it("applies a dedicated HP modifier to regular enemies and bosses", () => {
     expect(ENEMY_HP_SCALE).toBeCloseTo(1.9, 10);
-    expect(BOSS_HP_MUL).toBeCloseTo(1.8, 10);
+    expect(BOSS_HP_MUL).toBeCloseTo(1.78, 10);
+    expect(ELITE_HP_MUL).toBeCloseTo(2.8, 10);
     for (const [i, et] of ENEMY_TYPES.entries()) {
       const scale = isBossType(i) ? BOSS_HP_MUL : ENEMY_HP_SCALE;
       expect(scale).toBeGreaterThan(1);
@@ -225,8 +226,8 @@ describe("tower data", () => {
     expect(shortHp(999_600)).toBe("1M");
   });
 
-  it("applies the dedicated +80% boss health multiplier", () => {
-    expect(BOSS_HP_MUL).toBeCloseTo(1.8, 10);
+  it("applies the dedicated +78% boss health multiplier", () => {
+    expect(BOSS_HP_MUL).toBeCloseTo(1.78, 10);
     // the multiplier lands on each boss's own type HP; their large role-based
     // multipliers remain intact on top of the new global boss health bonus.
     const bossMul = ENEMY_TYPES.map((e, i) => ({ e, i })).filter(({ i }) => isBossType(i)).map(({ e }) => e.hpMul * BOSS_HP_MUL);
@@ -1662,17 +1663,20 @@ describe("gauntlet mode", () => {
     expect(shallow3.potions).toBeGreaterThan(0);
   });
 
-  it("round-trips the gauntlet record and the chosen font through a save", () => {
+  it("round-trips the gauntlet record, chosen font, and UI theme through a save", () => {
     const s = defaultSave();
     s.gauntletBest = 17;
     s.font = "marker";
+    s.uiTheme = "ocean";
     const back = importSave(JSON.stringify(s));
     expect(back.gauntletBest).toBe(17);
     expect(back.font).toBe("marker");
+    expect(back.uiTheme).toBe("ocean");
     // a legacy blob with no font/gauntlet fields gets the defaults
     const legacy = importSave(JSON.stringify({ gold: 5 }));
     expect(legacy.gauntletBest).toBe(0);
     expect(legacy.font).toBe(DEFAULT_FONT);
+    expect(legacy.uiTheme).toBe("rift");
     // junk normalises instead of crashing
     const junk = importSave(JSON.stringify({ gauntletBest: -9, font: "" }));
     expect(junk.gauntletBest).toBe(0);
