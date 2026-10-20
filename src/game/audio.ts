@@ -1,31 +1,36 @@
 /**
- * MagicTD's audio engine — built on **Tone.js** (https://tonejs.github.io), the
- * Web Audio framework that ships as a real dependency of this project.
+ * MagicTD's audio engine — a **sample-first** mixer with a Tone.js fallback.
  *
- * The sounds are authored the way a game sound designer would author them in
- * Tone rather than as bare beeps:
+ * PRIMARY LAYER (`game/sfxSamples.ts`)
+ *   Every cue is built from short, real recordings — Kenney's CC0 interface,
+ *   UI, RPG, impact, sci-fi and music-jingle packs — layered transient + body +
+ *   tail, with a little random pitch so repeated shots never sound identical.
+ *   The clips live in `public/sfx/`; the first user gesture unlocks the bus and
+ *   preloads them. A compressor keeps a screen full of explosions from clipping,
+ *   per-cue throttles gate rapid fire, and a voice cap protects the frame rate.
  *
- *  - a Tone signal graph instead of one gain node: a `Gain` SFX bus into a
- *    `Compressor` and `Limiter` (so a wave of explosions never clips), a
- *    `Reverb` plate fed by a send, a `FeedbackDelay` for slap, and a separate
- *    bass lane through a lowpass so sub hits can be shaped alone
- *  - voices are Tone instruments/nodes: `Oscillator` + `AmplitudeEnvelope` +
- *    `Filter` sweeps for shaped tones, `Noise` bursts through sweeping filters
- *    for impacts and whooshes, `FMSynth` clangs for metal, `MembraneSynth`
- *    booms for explosions and heavy hits, `MetalSynth` for coins and chests
- *  - every sound is a small multi-layer composition (transient + body + tail),
- *    scheduled on Tone's clock so everything stays sample-accurate together
+ * FALLBACK LAYER (this file, Tone.js)
+ *   If a browser has no Web Audio, a clip cannot be fetched/decoded, or the game
+ *   is opened from file://, the original Tone synth voices below take over. The
+ *   sound design is still multi-layered: `Oscillator` + `AmplitudeEnvelope` +
+ *   `Filter` sweeps for tones, `Noise` bursts for impacts and whooshes,
+ *   `FMSynth` clangs for metal, `MembraneSynth` booms for explosions, a
+ *   `MetalSynth` for coins/chests, a plate reverb send and a sub-bass lane.
  *
- * The engine racks itself up on the first user gesture (`initAudio`) and
- * degrades to silence where Web Audio is unavailable. Every sfx.* entry keeps
- * its original name, so gameplay code is unchanged.
+ * `sfx.*` keeps its original API, so gameplay code is unchanged. Every call
+ * tries the external samples first and only falls through to the synth when the
+ * sample layer has nothing to play.
  */
 import * as Tone from "tone";
+import { initSamples, playSample, setSampleState, setSampleEQ } from "./sfxSamples";
 
 let rack: {
   master: Tone.Gain;
   bus: Tone.Gain;
   bass: Tone.Gain;
+  eqLow: Tone.Filter;
+  eqMid: Tone.Filter;
+  eqHigh: Tone.Filter;
   send: Tone.Gain;
   built: boolean;
 } | null = null;
@@ -34,6 +39,9 @@ let enabled = true;
 let volume = 0.7;
 /** volume booster: pushes the master bus up to 300% of the slider value */
 let boosted = false;
+let bassBoosted = false;
+let trebleBoosted = false;
+let eq = { bass: 0, mid: 0, treble: 0 };
 let lastShot = 0;
 
 const MASTER_LEVEL = 0.42;
@@ -45,12 +53,14 @@ const masterGain = () => (enabled ? MASTER_LEVEL * volume * (boosted ? BOOST_MUL
 export function setSfx(on: boolean) {
   enabled = on;
   if (rack) rack.master.gain.rampTo(masterGain(), 0.06);
+  setSampleState(enabled, volume, boosted);
 }
 
 /** master volume, 0..1 */
 export function setVolume(v: number) {
   volume = Math.min(1, Math.max(0, v));
   if (rack) rack.master.gain.rampTo(masterGain(), 0.06);
+  setSampleState(enabled, volume, boosted);
 }
 
 /**
@@ -61,21 +71,41 @@ export function setVolume(v: number) {
 export function setVolumeBoost(on: boolean) {
   boosted = !!on;
   if (rack) rack.master.gain.rampTo(masterGain(), 0.08);
+  setSampleState(enabled, volume, boosted);
 }
 
 export const volumeBoosterOn = () => boosted;
 
-/**
- * Build the mixer once. Safe to call repeatedly; starts Tone's audio clock
- * (which needs a gesture) and then leaves the graph alone.
- */
-export function initAudio() {
+function applyEq() {
+  const bass = eq.bass + (bassBoosted ? 6 : 0);
+  const treble = eq.treble + (trebleBoosted ? 6 : 0);
+  setSampleEQ(bass, eq.mid, treble);
+  if (!rack?.built) return;
+  rack.eqLow.gain.rampTo(bass, 0.08);
+  rack.eqMid.gain.rampTo(eq.mid, 0.08);
+  rack.eqHigh.gain.rampTo(1.5 + treble, 0.08);
+}
+
+/** Three-band sound-effects equalizer, in decibels (-12 to +12). */
+export function setAudioEQ(bass: number, mid: number, treble: number) {
+  eq = {
+    bass: Math.max(-12, Math.min(12, bass)),
+    mid: Math.max(-12, Math.min(12, mid)),
+    treble: Math.max(-12, Math.min(12, treble)),
+  };
+  applyEq();
+}
+export function setBassBoost(on: boolean) { bassBoosted = !!on; applyEq(); }
+export function setTrebleBoost(on: boolean) { trebleBoosted = !!on; applyEq(); }
+
+/** build the Tone fallback graph; safe to call repeatedly */
+function initRack() {
+  if (rack?.built) return;
   try {
     void Tone.start().catch(() => {});
   } catch {
     /* no Web Audio: stay silent */
   }
-  if (rack?.built) return;
   try {
     const master = new Tone.Gain(masterGain()).toDestination();
     const limiter = new Tone.Limiter(-1).connect(master);
@@ -86,7 +116,12 @@ export function initAudio() {
       attack: 0.004,
       release: 0.18,
     }).connect(limiter);
-    const bus = new Tone.Gain(0.9).connect(comp);
+    const bus = new Tone.Gain(0.9);
+    const lowCut = new Tone.Filter({ frequency: 36, type: "highpass", Q: 0.65 });
+    const eqLow = new Tone.Filter({ frequency: 120, type: "lowshelf", gain: eq.bass + (bassBoosted ? 6 : 0) });
+    const eqMid = new Tone.Filter({ frequency: 1000, type: "peaking", Q: 0.85, gain: eq.mid });
+    const eqHigh = new Tone.Filter({ frequency: 4800, type: "highshelf", gain: 1.5 + eq.treble + (trebleBoosted ? 6 : 0) });
+    bus.connect(lowCut).connect(eqLow).connect(eqMid).connect(eqHigh).connect(comp);
 
     // a small plate-style reverb on a send, plus slap delay in front of it
     const reverb = new Tone.Reverb({ decay: 2.1, preDelay: 0.018, wet: 1 }).connect(master);
@@ -96,10 +131,36 @@ export function initAudio() {
     const bass = new Tone.Gain(1);
     bass.connect(new Tone.Filter(220, "lowpass")).connect(bus);
 
-    rack = { master, bus, bass, send, built: true };
+    rack = { master, bus, bass, eqLow, eqMid, eqHigh, send, built: true };
+    applyEq();
   } catch {
-    rack = rack ?? { master: new Tone.Gain(0) as Tone.Gain, bus: new Tone.Gain(0) as Tone.Gain, bass: new Tone.Gain(0) as Tone.Gain, send: new Tone.Gain(0) as Tone.Gain, built: false };
+    rack = rack ?? {
+      master: new Tone.Gain(0) as Tone.Gain, bus: new Tone.Gain(0) as Tone.Gain, bass: new Tone.Gain(0) as Tone.Gain,
+      eqLow: new Tone.Filter(120, "lowshelf"), eqMid: new Tone.Filter(1000, "peaking"), eqHigh: new Tone.Filter(4800, "highshelf"),
+      send: new Tone.Gain(0) as Tone.Gain, built: false,
+    };
   }
+}
+
+/** call before any synth fallback voice, so it starts inside the user gesture */
+function useSynth() {
+  initRack();
+  try {
+    void Tone.start().catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Unlock audio on the first gesture. The external sample bus is the primary
+ * engine; the Tone rack is only built when the sample engine is unavailable
+ * (no AudioContext), or later if every clip failed to decode.
+ */
+export function initAudio() {
+  const samplesOk = initSamples(() => initRack());
+  setSampleState(enabled, volume, boosted);
+  if (!samplesOk) initRack();
 }
 
 const now = () => {
@@ -308,7 +369,7 @@ function impact(vol = 0.3, size = 1) {
   boom(90 * size, 0.42 * size, vol * 0.85);
 }
 
-export const sfx = {
+const synthSfx = {
   // ---------- UI ----------
   click: () => {
     tone(660, 0.05, "square", 0.16, -180, 0, { cutoff: 2600, q: 1.5 });
@@ -450,6 +511,11 @@ export const sfx = {
     noise(0.1, 0.24, 1600, { sweep: 0.3, q: 1.2 });
     tone(220, 0.14, "square", 0.18, 90, 0, { cutoff: 1400, q: 3 });
     fm(340, 2.01, 1.6, 0.12, 0.12, 0.02);
+  },
+  towerDrop: () => {
+    noise(0.16, 0.28, 900, { sweep: 0.25, q: 1.4, noiseType: "pink" });
+    boom(145, 0.22, 0.16);
+    tone(440, 0.12, "triangle", 0.12, 180, 0.04, { verb: 0.45 });
   },
   summon: () => {
     riser(0.22, 0.16, 300, 1500);
@@ -648,6 +714,28 @@ export const sfx = {
     boom(120, 0.5, 0.2, 0, 3);
     stab([700, 1050, 1400], 0.3, 0.12, 0.02, "triangle");
   },
+  demonExecution: () => {
+    noise(0.42, 0.32, 1800, { type: "bandpass", q: 1.3, sweep: 0.22, verb: 0.9 });
+    tone(82, 0.62, "sawtooth", 0.26, -38, 0, { sub: true, cutoff: 280 });
+    boom(95, 0.5, 0.28, 0, 4);
+  },
+  supervisorMerge: () => {
+    noise(0.5, 0.28, 2400, { type: "highpass", sweep: 0.28, verb: 0.65 });
+    tone(96, 0.66, "sawtooth", 0.24, -42, 0, { sub: true, cutoff: 260 });
+    stab([185, 277, 370], 0.42, 0.13, 0.03, "square");
+    boom(78, 0.72, 0.32, 0.04, 5);
+  },
+  doomsday: () => {
+    noise(1.1, 0.4, 1300, { type: "lowpass", sweep: 0.12, q: 0.8, noiseType: "brown" });
+    tone(42, 1.25, "sine", 0.38, -20, 0, { sub: true, cutoff: 170 });
+    boom(64, 1, 0.42, 0.04, 7);
+    stab([65, 98, 147], 0.72, 0.16, 0.08, "sawtooth");
+  },
+  heavenlyImpact: () => {
+    noise(0.24, 0.2, 5200, { type: "highpass", q: 1.8, sweep: 0.45, verb: 0.85 });
+    stab([784, 1175, 1568], 0.3, 0.15, 0.01, "triangle");
+    tone(196, 0.36, "sine", 0.18, -92, 0, { sub: true, verb: 0.45 });
+  },
   explosion: () => {
     noise(0.36, 0.32, 2200, { sweep: 0.1, q: 0.8, verb: 0.8, noiseType: "pink" });
     boom(140, 0.42, 0.3);
@@ -695,6 +783,25 @@ export const sfx = {
     stab([587, 784], 0.42, 0.16, 0.18, "square");
     noise(0.5, 0.1, 1400, { type: "bandpass", q: 1.5, sweep: 0.5, noiseType: "pink" });
   },
+  battleStart: () => {
+    riser(0.45, 0.12, 160, 900);
+    stab([392, 523, 659], 0.34, 0.16, 0.08, "triangle");
+    noise(0.4, 0.08, 2400, { type: "highpass", sweep: 0.35, verb: 0.55 });
+  },
+  waveClear: () => {
+    stab([523, 659, 784], 0.3, 0.13, 0, "triangle");
+    clang(1046, 0.22, 0.055, 0.12, 0.68);
+    tone(262, 0.2, "sine", 0.12, 140, 0.04, { verb: 0.5 });
+  },
+  autoResolve: () => {
+    noise(0.26, 0.14, 4200, { type: "highpass", sweep: 0.28, verb: 0.5 });
+    stab([660, 880, 1175], 0.24, 0.12, 0.04, "sine");
+    tone(180, 0.24, "sine", 0.1, -60, 0.05, { sub: true });
+  },
+  bossSkip: () => {
+    noise(0.14, 0.15, 3000, { type: "highpass", sweep: 0.5 });
+    tone(880, 0.12, "square", 0.1, -500, 0, { cutoff: 4000 });
+  },
   boss: () => {
     impact(0.34, 1.5);
     tone(70, 1, "sawtooth", 0.3, 30, 0, { sub: true, detune: 0.006, verb: 0.8 });
@@ -718,3 +825,25 @@ export const sfx = {
     stab([523, 784, 1046], 0.4, 0.16, 0.12, "triangle");
   },
 } as const;
+
+/**
+ * Public sound API. Every name from the original Tone voice book is preserved:
+ * gameplay calls `sfx.shoot(kind)`, `sfx.chestLoot(n)`, etc. and never needs to
+ * know which engine handled it. External samples win; the synth is the safety
+ * net for a missing clip or a browser without Web Audio.
+ */
+type SynthApi = typeof synthSfx;
+
+const sfxApi = {} as SynthApi;
+for (const name of Object.keys(synthSfx) as (keyof SynthApi)[]) {
+  const synth = synthSfx[name] as (...args: unknown[]) => void;
+  (sfxApi as Record<string, (...args: unknown[]) => void>)[name as string] = (...args: unknown[]) => {
+    if (!enabled) return;
+    const first = args[0] as string | number | undefined;
+    if (playSample(name as string, first)) return;
+    useSynth();
+    synth(...args);
+  };
+}
+
+export const sfx = sfxApi;

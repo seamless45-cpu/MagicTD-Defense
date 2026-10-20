@@ -17,7 +17,6 @@ import {
 } from "../game/save";
 import {
   todayStr,
-  clearSave,
   defaultSave,
   importSave,
   persistSave,
@@ -52,8 +51,10 @@ import {
   claimCompetition,
   compClaimed,
   GUILD_DONATIONS_PER_DAY,
+  UI_THEMES,
 } from "../game/save";
-import { sfx, setVolume, setVolumeBoost } from "../game/audio";
+import { sfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost } from "../game/audio";
+import { clearMusic, getMusicSnapshot, loadSavedMusic, pauseMusic, subscribeMusic, setMusicSettings, toggleMusic, uploadMusic, type MusicSnapshot } from "../game/music";
 import {
   ChipIcon,
   CoinIcon,
@@ -192,6 +193,9 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
   return (
     <div className="boot-root" data-testid="launch-intro" aria-label="MagicTD Defense boot sequence">
       <div className="boot-vignette" />
+      <div className="boot-stars" aria-hidden="true">
+        {Array.from({ length: 18 }, (_, i) => <i key={i} style={{ left: `${(i * 47 + 11) % 100}%`, top: `${(i * 61 + 7) % 100}%`, animationDelay: `${(i % 7) * -0.43}s`, animationDuration: `${2.2 + (i % 5) * 0.6}s` }} />)}
+      </div>
       <div className={`boot-collapse ${beat >= 1 ? "on" : ""}`} />
       <div className={`boot-shock ${beat >= 2 ? "on" : ""}`} />
       {beat >= 6 && <div className="boot-wipe" />}
@@ -218,7 +222,7 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
 
         <div className={`boot-sub ${beat >= 4 ? "on" : ""}`}>DEFENSE</div>
         <div className={`boot-tagline ${beat >= 5 ? "on" : ""}`}>
-          HOLD THE LINE <span className="boot-dot">◆</span> MASTER THE ARCANE
+          DEFEND THE RIFT <span className="boot-dot">◆</span> COMMAND THE STORM
         </div>
       </div>
 
@@ -229,7 +233,7 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
 
 const LOAD_TIPS = [
   "Gold levels a tower up; fragments push it through ascension.",
-  "Endless waves scale enemy health ×1.8 every single round.",
+  "Endless waves scale enemy health ×2.2 every single round.",
   "Chilled enemies take 25% more damage from every source.",
   "Every tower upgrade adds +8% crit damage to your account.",
   "Bosses start throwing skills at you from round 16.",
@@ -581,7 +585,7 @@ export function Home({
           Command Center
         </div>
         <div className="mt-0.5 text-[12px] font-semibold tracking-[0.28em] text-[var(--dim)]">
-          ENEMIES GROW +80% STRONGER EVERY WAVE · HOLD THE LINE
+          ENEMIES GROW +120% STRONGER EVERY WAVE · HOLD THE LINE
         </div>
       </div>
 
@@ -697,7 +701,7 @@ export function Home({
 
       {/* TODAY'S EVENT */}
       <div className="tile event-card live relative p-3" data-testid="today-event" style={{ borderColor: liveEv.color + "77" }}>
-        <div className="relative flex flex-wrap items-center gap-3">
+        <div className="event-home-layout relative flex flex-wrap items-center gap-3">
           <EventGlyph id={liveEv.id} color={liveEv.color} size={46} />
           <div className="min-w-[200px] flex-1">
             <div className="flex items-center gap-2">
@@ -920,6 +924,9 @@ export function EventGlyph({ id, color, size = 40 }: { id: string; color: string
           <path d="M4.5 9A3.5 3.5 0 0 1 8 6" />
         </g>
       )}
+      {!(["luck", "chestbox", "trophy", "items", "mineshaft", "lightning"] as string[]).includes(id) && (
+        <g {...common}><path d="M12 5 14.2 10l5.3 2-5.3 2-2.2 5-2.2-5-5.3-2 5.3-2z" fill={color + "66"} /></g>
+      )}
     </svg>
   );
 }
@@ -932,6 +939,7 @@ function ModeCard({
   onClick,
   delay,
   badge,
+  onAuto,
 }: {
   accent: string;
   title: string;
@@ -940,17 +948,15 @@ function ModeCard({
   onClick: () => void;
   delay: string;
   badge?: string;
+  onAuto?: () => void;
 }) {
   return (
-    <button
-      onClick={() => {
-        sfx.click();
-        onClick();
-      }}
+    <div
       className="tile tile-hover anim-pop group relative overflow-hidden p-4 text-left"
       style={{ animationDelay: delay, borderColor: accent }}
       data-mode={title}
     >
+      <button className="relative z-[1] w-full text-left" onClick={() => { sfx.click(); onClick(); }}>
       <div
         className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full opacity-30 transition-opacity group-hover:opacity-60"
         style={{ background: `radial-gradient(circle, ${accent}, transparent 70%)` }}
@@ -966,7 +972,9 @@ function ModeCard({
       <div className="relative mt-1 text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--dim)]">{sub}</div>
       <p className="relative mt-2 text-[12.5px] font-semibold leading-snug text-[var(--txt)]/85">{body}</p>
       <span className="cta-banner relative mt-3 inline-block px-6 py-2 text-[14px]">DEPLOY</span>
-    </button>
+      </button>
+      {onAuto && <button className="btn btn-cyan relative z-[2] mt-2 w-full px-3 py-2 text-[11px] font-black tracking-wider" data-testid={`auto-${title.toLowerCase()}`} onClick={() => { sfx.awaken(); onAuto(); }}>⚡ AUTO BATTLE · MAIL REWARDS</button>}
+    </div>
   );
 }
 
@@ -1233,9 +1241,9 @@ function EventsPanel({
     <>
       <div className="panel event-card live relative overflow-hidden p-5" style={{ borderColor: live.color + "88" }} data-testid="event-live">
         <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(620px 180px at 25% 0%, ${live.color}66, transparent 70%)` }} />
-        <div className="relative flex flex-wrap items-start gap-4">
+        <div className="event-live-layout relative flex flex-wrap items-start gap-4">
           <EventGlyph id={live.id} color={live.color} size={76} />
-          <div className="min-w-[220px] flex-1">
+          <div className="event-live-copy min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="live-dot" style={{ background: live.color }} />
               <span className="text-[10px] font-bold tracking-[0.32em] text-[var(--dim)]">LIVE NOW · {live.tagline.toUpperCase()}</span>
@@ -1248,7 +1256,7 @@ function EventsPanel({
               {live.perk}
             </div>
           </div>
-          <div className="flex shrink-0 flex-col items-stretch gap-1.5">
+          <div className="event-live-actions flex shrink-0 flex-col items-stretch gap-1.5">
             <button className="cta-banner px-5 py-3 text-[14px]" disabled={!eventClaimable(save)} onClick={doClaim}>
               {eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED TODAY"}
             </button>
@@ -2349,11 +2357,12 @@ function KnobToggle({
     >
       <span className="knob-rail">
         <span className="knob-glow" />
+        <span className="knob-state">{on ? "ON" : "OFF"}</span>
       </span>
       <span className="knob-head">
         <span className="knob-grip" />
       </span>
-      <span className="knob-ripple" />
+      <span className="knob-ripple" aria-hidden="true" />
     </button>
   );
 }
@@ -2407,12 +2416,30 @@ export function SettingsModal({
   mutate: (fn: (s: SaveData) => void) => void;
   onClose: () => void;
 }) {
-  const [confirmReset, setConfirmReset] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const [closing, setClosing] = useState(false);
+  const [music, setMusic] = useState<MusicSnapshot>(getMusicSnapshot);
+  const musicFileRef = useRef<HTMLInputElement>(null);
+  const closeTimer = useRef<number | null>(null);
   const { promptEvent, installed } = useInstallPrompt();
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    closeTimer.current = window.setTimeout(onClose, 220);
+  };
+  useEffect(() => {
+    void loadSavedMusic();
+    return subscribeMusic(setMusic);
+  }, []);
+  useEffect(() => {
+    if (music.duration > 0 && save.musicEnd <= 0) {
+      mutate((s) => { s.musicEnd = music.duration; if (!s.musicName) s.musicName = music.name; });
+    }
+  }, [music.duration, music.name, save.musicEnd, save.musicName, mutate]);
+  useEffect(() => () => { if (closeTimer.current !== null) window.clearTimeout(closeTimer.current); }, []);
   const fs = useFullscreen();
   const diagnostics = () => {
     const w = window as unknown as { __magictdBootErrors?: string[]; __magictdLastError?: string };
@@ -2433,15 +2460,17 @@ export function SettingsModal({
     ["Rich FX", "fx", "Extra particles, smoke and hit effects", "fx", "#ff4fd8"],
     ["Damage Numbers", "dmgNums", "Floating damage values over every hit", "dmg", "#ffcf4d"],
     ["Screen Shake", "shakeFx", "Impact shake on explosions and hero skills", "shake", "#ff8a3d"],
+    ["Camera Motion Blur", "motionBlur", "Directional trail smear only while camera shake is active", "shake", "#ff315c"],
     ["Battlefield Guides", "guides", "Grid, buildable-cell and range circles", "guides", "#8effc4"],
     ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves", "fast", "#b98bff"],
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
     ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
     ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffcf4d"],
+    ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
   ];
   return (
-    <Modal onClose={onClose} w={470}>
+    <Modal onClose={requestClose} closing={closing} w={470}>
       <div className="font-disp text-2xl text-[#ffcf4d]">Settings</div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">AUDIO</div>
@@ -2489,7 +2518,100 @@ export function SettingsModal({
         />
       </div>
 
+      <div className="mt-3 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="music-player">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Personal Music · Loop Player</div>
+            <div className="truncate text-[11px] font-semibold text-[var(--dim)]" title={music.name || save.musicName}>{music.name || save.musicName || "Upload an audio file from this device"}</div>
+          </div>
+          <button className="btn btn-cyan px-3 py-1.5 text-xs" onClick={() => musicFileRef.current?.click()}>Choose Audio</button>
+          {music.hasTrack && (music.playing
+            ? <button className="btn px-3 py-1.5 text-xs" aria-label="Pause personal music" onClick={() => { sfx.click(); pauseMusic(); }}>Pause</button>
+            : <button className="btn px-3 py-1.5 text-xs" aria-label="Play personal music" onClick={() => { sfx.click(); void toggleMusic(); }}>Play loop</button>)}
+          {music.hasTrack && <button className="btn px-3 py-1.5 text-xs text-[#ff8f9a]" onClick={() => { void clearMusic(); mutate((s) => { s.musicName = ""; s.musicStart = 0; s.musicEnd = 0; }); }}>Remove</button>}
+          <input ref={musicFileRef} type="file" accept="audio/*" className="hidden" aria-label="Upload music file" onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            void uploadMusic(file).then(() => {
+              mutate((s) => { s.musicName = file.name; s.musicStart = 0; s.musicEnd = 0; });
+              setMusicSettings({ volume: save.musicVol, start: 0, end: 0, rate: save.musicRate });
+            });
+            e.currentTarget.value = "";
+          }} />
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+          <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Music volume <span className="ml-auto text-[var(--txt)]">{Math.round(save.musicVol * 100)}%</span>
+            <input className="w-28 accent-[#35e0ff]" type="range" min="0" max="100" value={Math.round(save.musicVol * 100)} aria-label="Music volume" onChange={(e) => { const volume = Number(e.target.value) / 100; mutate((s) => { s.musicVol = volume; }); setMusicSettings({ volume }); }} />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Playback speed / pitch <span className="ml-auto text-[var(--txt)]">{save.musicRate.toFixed(2)}×</span>
+            <input className="w-28 accent-[#ff4fd8]" type="range" min="0.5" max="2" step="0.01" value={save.musicRate} aria-label="Music speed and pitch" onChange={(e) => { const rate = Number(e.target.value); mutate((s) => { s.musicRate = rate; }); setMusicSettings({ rate }); }} />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Loop start <span className="ml-auto text-[var(--txt)]">{Math.min(save.musicStart, music.duration).toFixed(1)}s</span>
+            <input className="w-28 accent-[#8effc4]" type="range" min="0" max={Math.max(0.1, music.duration)} step="0.1" value={Math.min(save.musicStart, Math.max(0, music.duration))} disabled={!music.hasTrack || !music.duration} aria-label="Music loop start" onChange={(e) => { const start = Math.min(Number(e.target.value), Math.max(0, Math.min(save.musicEnd || music.duration, music.duration) - 0.1)); mutate((s) => { s.musicStart = start; }); setMusicSettings({ start }); }} />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Loop end <span className="ml-auto text-[var(--txt)]">{Math.min(save.musicEnd || music.duration, music.duration).toFixed(1)}s</span>
+            <input className="w-28 accent-[#ffd76a]" type="range" min={Math.min(music.duration, save.musicStart + 0.1)} max={Math.max(0.1, music.duration)} step="0.1" value={Math.min(save.musicEnd || music.duration, Math.max(save.musicStart + 0.1, music.duration))} disabled={!music.hasTrack || !music.duration} aria-label="Music loop end" onChange={(e) => { const end = Math.max(save.musicStart + 0.1, Number(e.target.value)); mutate((s) => { s.musicEnd = end; }); setMusicSettings({ end }); }} />
+          </label>
+        </div>
+        <div className="mt-1 text-[10px] font-semibold text-[var(--dim)]">Track stored privately on this device. Playback loops between the trim points; speed changes also change pitch.</div>
+      </div>
+
+      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {([['Bass Boost', 'bassBoost', 'Low-end +6 dB', setBassBoost], ['Treble Boost', 'trebleBoost', 'High-end +6 dB', setTrebleBoost]] as const).map(([label, key, desc, apply]) => (
+          <div key={key} className="row-card" data-testid={`toggle-${key}`}>
+            <SetIcon name="volume" color={key === "bassBoost" ? "#ff8a3d" : "#35e0ff"} />
+            <div className="min-w-0 flex-1"><div className="font-bold">{label}</div><div className="text-[11px] font-semibold text-[var(--dim)]">{desc}</div></div>
+            <KnobToggle on={save[key]} label={label} onToggle={() => { const next = !save[key]; mutate((s) => { s[key] = next; }); apply(next); }} />
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="sound-eq">
+        <div className="mb-2 font-bold">Sound EQ <span className="text-[10px] font-semibold text-[var(--dim)]">· Sound effects only</span></div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {([['Bass', 'eqBass'], ['Mids', 'eqMid'], ['Treble', 'eqTreble']] as const).map(([label, key]) => (
+            <label key={key} className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">{label}<span className="ml-auto min-w-8 text-right text-[var(--txt)]">{save[key] > 0 ? "+" : ""}{save[key]} dB</span>
+              <input className="w-24 accent-[#b98bff]" type="range" min="-12" max="12" step="1" value={save[key]} aria-label={`${label} EQ`} onChange={(e) => {
+                const value = Number(e.target.value);
+                mutate((s) => { s[key] = value; });
+                setAudioEQ(key === "eqBass" ? value : save.eqBass, key === "eqMid" ? value : save.eqMid, key === "eqTreble" ? value : save.eqTreble);
+              }} />
+            </label>
+          ))}
+        </div>
+      </div>
+
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
+      <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <div className="font-bold">Interface Theme</div>
+            <div className="text-[11px] font-semibold text-[var(--dim)]">Choose the arena control-room palette</div>
+          </div>
+          <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--dim)]">{save.uiTheme || "rift"}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="radiogroup" aria-label="Interface Theme">
+          {UI_THEMES.map((theme) => {
+            const active = (save.uiTheme || "rift") === theme.id;
+            return (
+              <button
+                key={theme.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                data-testid={`ui-theme-${theme.id}`}
+                onClick={() => { sfx.uiTab(); mutate((s) => { s.uiTheme = theme.id; }); }}
+                className={`theme-choice rounded-lg border p-1.5 text-left transition ${active ? "is-active" : ""}`}
+                style={{ borderColor: active ? theme.accent : "var(--line)", "--theme-accent": theme.accent } as React.CSSProperties}
+              >
+                <span className="mb-1.5 flex h-5 overflow-hidden rounded-md" aria-hidden="true">
+                  {theme.swatches.map((color) => <i key={color} className="h-full flex-1" style={{ background: color }} />)}
+                </span>
+                <span className="block truncate text-[10px] font-bold">{theme.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div className="mt-1.5 space-y-3">
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="max-fps-row">
           <SetIcon name="fps" color="#3dff8e" />
@@ -2561,6 +2683,10 @@ export function SettingsModal({
             />
           </div>
         ))}
+        <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+          <div className="min-w-0 flex-1"><div className="font-bold">Interpolation Method</div><div className="text-xs font-semibold text-[var(--dim)]">Hermite uses velocity-aware, monotonic easing; Smoothstep or Linear remain available.</div></div>
+          <select aria-label="Interpolation Method" className="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-xs" value={save.interpolationMethod} onChange={(e) => mutate((s) => { const method = e.target.value; s.interpolationMethod = method === "linear" || method === "hermite" ? method : "smoothstep"; })}><option value="linear">Linear</option><option value="smoothstep">Smoothstep</option><option value="hermite">Hermite</option></select>
+        </div>
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">APP</div>
@@ -2613,7 +2739,7 @@ export function SettingsModal({
         />
       </div>
 
-      {/* FONT VAULT — fifty faces, each tile previews itself. Picking one applies
+      {/* FONT VAULT — eighty faces, each tile previews itself. Picking one applies
           it live (UI + headings) and lazily pulls the Google stylesheet. */}
       <div className="mt-4 flex items-center gap-2">
         <div className="text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">FONT</div>
@@ -2716,29 +2842,6 @@ export function SettingsModal({
             </button>
           </div>
         )}
-        <div className="flex items-center gap-3 rounded-lg border border-[#ff4d5e55] bg-black/30 px-4 py-3">
-          <SetIcon name="reset" color="#ff4d5e" />
-          <div className="min-w-0 flex-1">
-            <div className="font-bold text-[#ff4d5e]">Reset Progress</div>
-            <div className="text-xs font-semibold text-[var(--dim)]">Wipes gold, gems, tokens, towers and lineup</div>
-          </div>
-          <button
-            className="btn btn-danger px-4 py-1.5 text-sm"
-            onClick={() => {
-              if (!confirmReset) {
-                setConfirmReset(true);
-                sfx.error();
-                return;
-              }
-              clearSave();
-              window.dispatchEvent(new CustomEvent("magictd-reset"));
-              sfx.click();
-              onClose();
-            }}
-          >
-            {confirmReset ? "Confirm?" : "Reset"}
-          </button>
-        </div>
         <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
           <SetIcon name="replay" color="#ff9be9" />
           <div className="min-w-0 flex-1">
@@ -2750,7 +2853,7 @@ export function SettingsModal({
             onClick={() => {
               sfx.click();
               window.dispatchEvent(new CustomEvent("magictd-intro"));
-              onClose();
+              requestClose();
             }}
           >
             Replay
@@ -2796,7 +2899,7 @@ export function SettingsModal({
           )}
         </div>
       </div>
-      <button className="btn mt-4 w-full py-2" onClick={() => { sfx.click(); onClose(); }}>
+      <button className="btn mt-4 w-full py-2" onClick={() => { sfx.click(); requestClose(); }}>
         Close
       </button>
     </Modal>

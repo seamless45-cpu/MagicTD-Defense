@@ -1,0 +1,9 @@
+EDO FONT ATTRIBUTION
+
+EDO font © 2009 Vic Fieger.
+The font is distributed as freeware under the Vic Fieger License v1.00:
+"Vic Fieger fonts are freeware, to be downloaded and used by anyone who wants them for free."
+Source credit: Vasco Free WordPress theme (GPLv2 or later), which bundles the EDO webfont and credits Vic Fieger.
+Font source file: https://github.com/pixelgrade/vasco-free/tree/dev/assets/fonts/edo
+
+This notice accompanies the bundled font file public/fonts/edo.ttf.

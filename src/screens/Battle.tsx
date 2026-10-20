@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, heroLevel } from "../game/save";
+import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, heroLevel, weekStr } from "../game/save";
 import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import {
@@ -8,11 +8,17 @@ import {
   TOWER_BY_ID,
   RARITY,
   ENEMY_TYPES,
+  enemySpawnInterval,
   roundHp,
   HP_GROWTH,
   BOSS_HP_MUL,
+  ENEMY_HP_SCALE,
+  ELITE_HP_MUL,
+  powerPlantNetworkScale,
+  shortHp,
   runGold,
   waveComp,
+  WAVE_ENEMY_COUNT,
   BATTLE_ROUNDS,
   MAX_BATTLE_LEVEL,
   MAX_POINTS,
@@ -89,7 +95,7 @@ import {
   type RunShopItem,
 } from "../game/data";
 import { SKILLS } from "../game/skills";
-import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon, GemIcon, TokenIcon, ShardIcon, PotionIcon } from "../components/ui";
+import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon, GemIcon, TokenIcon, ShardIcon, PotionIcon, ViewportPortal } from "../components/ui";
 
 /**
  * The weekday event is resolved once per module load: it modifies enemy health,
@@ -101,13 +107,15 @@ const LIVE_MONTH = monthlyEventForDate();
 const MONTH_BONUS: MonthlyBonus = monthlyEventBonus(LIVE_MONTH.id);
 
 // ---------- board geometry ----------
+// Restore the original seven-column, four-row arena route and place its board
+// lower in the viewport, as requested.
 const W = 1000;
 const H = 580;
 const C = 90;
 const COLS = 7;
 const ROWS = 4;
 const OX = (W - COLS * C) / 2;
-const OY = (H - ROWS * C) / 2;
+const OY = (H - ROWS * C) / 2 + 48;
 
 const WPTS: [number, number][] = [
   [-0.7, 0],
@@ -124,6 +132,7 @@ const WPTS: [number, number][] = [
 
 const cellCenter = (c: number, r: number) => ({ x: OX + (c + 0.5) * C, y: OY + (r + 0.5) * C });
 const isPathCell = (c: number, r: number) => c === 0 || c === 6 || r === 3;
+const isLightningTower = (def: TowerDef) => ["lightning", "tesla", "storm", "thundercrown", "ion"].includes(def.kind);
 
 /** Client coords -> canvas world coords, safe against a zero-sized layout box. */
 function canvasPoint(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
@@ -178,9 +187,12 @@ function enemyPos(e: { d: number; ox: number; oy: number; pd?: number }) {
 interface Enemy {
   id: number;
   d: number;
-  /** previous-frame distance along the path, for frame interpolation */
+  /** two snapshots for monotonic Hermite interpolation */
+  ppd?: number;
+  ppox?: number;
+  ppoy?: number;
+  /** previous-step path distance and lateral offsets */
   pd?: number;
-  /** previous-frame lateral offset (singularity pulls interpolate too) */
   pox?: number;
   poy?: number;
   hp: number;
@@ -230,12 +242,6 @@ interface Enemy {
   /** lateral offset from the path, used by the singularity pull */
   ox: number;
   oy: number;
-  /** Demon Ritual: seconds left imprisoned (boss skills are sealed) */
-  imprisonT: number;
-  /** Demon Ritual: seconds left bleeding and the share of max HP per tick */
-  bleedT: number;
-  bleedTick: number;
-  bleedPct: number;
 }
 interface BT {
   uid: number;
@@ -253,6 +259,8 @@ interface BT {
   flash: number;
   owner: string;
   atkMul: number;
+  /** live visual intensity of a Power Plant aura on this tower */
+  plantGlow?: number;
   /** Null Field: seconds left hexed (fires much slower) */
   hexT: number;
   /** Meteor Fall: seconds left offline (cannot fire at all) */
@@ -269,12 +277,14 @@ interface BT {
   surgeMul: number;
   /** Honor Emperor: permanent attack/attack-speed share handed over by honors */
   honorMul: number;
+  /** Supervisor's permanent +ATK-speed buff; removed with this tower */
+  superBuff: number;
 }
 /**
  * ONE SKY BOLT. A strike is no longer a straight pillar: it is a segmented
- * polyline from above the arena down to the impact point, with seeded lateral
- * jitter and two forked branches, so it reads like real lightning. All the
- * geometry is derived from `seed`, which means zero per-frame allocation.
+ * polyline from above the arena down to the impact point, with a 100 Hz
+ * changing lateral channel and forked branches. Offsets are reused in a typed
+ * buffer so the 10ms flicker adds no geometry allocations.
  */
 interface Strike {
   x: number;
@@ -288,6 +298,10 @@ interface Strike {
   top?: number;
   /** forks drawn off the main channel */
   forks?: number;
+  /** preallocated lateral offsets, refreshed at 100 Hz (10 ms) */
+  jitter?: Float32Array;
+  lastJit?: number;
+  points?: { x: number; y: number }[];
 }
 
 /** a falling rock telegraphed by a boss — the shadow grows, then it lands */
@@ -400,7 +414,7 @@ interface Zone {
   r: number;
   life: number;
   max: number;
-  kind: "lava" | "frost" | "rift";
+  kind: "lava" | "frost" | "rift" | "hell";
   color: string;
   /** damage per second dealt to anything inside */
   dps: number;
@@ -449,8 +463,10 @@ interface G {
   gold: number;
   /** hero level at the moment the run started (ability power / cooldown) */
   heroLv: number;
-  /** shop-bought damage bonus for this run (+% as a fraction) */
+  /** shop-bought and crystal attack bonus for this run (+% as a fraction) */
   dmgBonus: number;
+  /** Superbolt crystal bonus for lightning-family towers */
+  lightningBonus: number;
   /** Mana Conduit purchases: share of extra SP from kills and wave clears */
   spGainMul: number;
   /** Keen Sight purchases: flat crit chance added for this run */
@@ -484,8 +500,6 @@ interface G {
   strikes: Strike[];
   /** summons bought this run — drives the summon price */
   spSpend: number;
-  /** ascents bought this run — drives the ascent price */
-  ascSpend: number;
   enemies: Enemy[];
   towers: BT[];
   projs: Proj[];
@@ -589,10 +603,11 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     mode,
     heroId: HERO_BY_ID[save.hero] ? save.hero : "nova",
     heroLv: heroLevel(save, HERO_BY_ID[save.hero] ? save.hero : "nova"),
-    dmgBonus: crystal.atk,
+    dmgBonus: crystal.atk + crystal.magicianKing,
+    lightningBonus: crystal.lightning,
     spGainMul: crystal.sp,
-    critRate: crystal.crit,
-    critDmg: 0,
+    critRate: crystal.crit + crystal.superCritChance,
+    critDmg: crystal.critDamage,
     goldMul: 1 + crystal.gold,
     t: 0,
     phase: "deploy",
@@ -603,7 +618,7 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     lives: (mode === "endless" ? 15 : mode === "gauntlet" ? 12 : 20) + Math.round(crystal.lives),
     // small field-kit budget so the run shop is useful from wave 1
     gold: 120,
-    bonusAspd: crystal.aspd,
+    bonusAspd: crystal.aspd + crystal.magicianKing,
     waveTotal: 0,
     waveSpawned: 0,
     boons: [],
@@ -616,7 +631,6 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     // never placed for free any more
     sp: spawnBudget(),
     spSpend: 0,
-    ascSpend: 0,
     odT: 0,
     enemies: [],
     towers,
@@ -666,8 +680,8 @@ function ptColor(p: number) {
 // optimized tall jagged bolts: offsets live in a Float32Array, re-jittered only on the 5ms tick
 function randBolt(x0: number, y0: number, x1: number, y1: number, color: string, w: number, max: number, now: number): Bolt {
   const b: Bolt = {
-    x0, y0, x1, y1, n: 8,
-    off: new Float32Array(8),
+    x0, y0, x1, y1, n: 12,
+    off: new Float32Array(12),
     lastJit: 0,
     life: max,
     max,
@@ -678,12 +692,12 @@ function randBolt(x0: number, y0: number, x1: number, y1: number, color: string,
   return b;
 }
 function jitBolt(b: Bolt, now: number) {
-  if (now - b.lastJit < 5) return;
+  if (now - b.lastJit < 10) return;
   b.lastJit = now;
   const dx = b.x1 - b.x0;
   const dy = b.y1 - b.y0;
   const L = Math.max(1, Math.hypot(dx, dy));
-  const amp = Math.min(34, L * 0.14);
+  const amp = Math.min(24, L * 0.1);
   for (let i = 0; i < b.n; i++) {
     if (i === 0 || i === b.n - 1) b.off[i] = 0;
     else b.off[i] = (Math.random() - 0.5) * 2 * amp * Math.sin((Math.PI * i) / (b.n - 1));
@@ -716,6 +730,18 @@ const shopRef: { current: (item: RunShopItem) => void } = { current: () => {} };
  */
 /** where in the current sim step to draw (1 = now, 0 = start of step) */
 let renderAlpha = 1;
+let rawRenderAlpha = 1;
+function hermiteLerp(previous2: number | undefined, previous: number, current: number, t: number): number {
+  if (previous2 === undefined || !Number.isFinite(previous2)) return previous + (current - previous) * t;
+  const t2 = t * t;
+  const t3 = t2 * t;
+  const m0 = (current - previous2) * 0.5;
+  const m1 = current - previous;
+  const value = (2 * t3 - 3 * t2 + 1) * previous + (t3 - 2 * t2 + t) * m0 + (-2 * t3 + 3 * t2) * current + (t3 - t2) * m1;
+  // Keep the velocity-aware curve monotonic within this tick; no temporal
+  // overshoot at turns, path teleports or boss blink transitions.
+  return Math.max(Math.min(previous, current), Math.min(Math.max(previous, current), value));
+}
 
 /**
  * Frame-cost governor. Every frame we measure how long `draw()` actually took
@@ -760,6 +786,7 @@ export default function Battle({
   save,
   mutate,
   onExit,
+  onAutoBattle,
   debugRound,
   debugBoon,
 }: {
@@ -767,6 +794,7 @@ export default function Battle({
   save: SaveData;
   mutate: (fn: (s: SaveData) => void) => void;
   onExit: () => void;
+  onAutoBattle?: (mode: "endless" | "gauntlet", liveSquadDps: number, deployedCount: number, currentWave: number, walletGold: number, goldMul: number, boons: number) => void;
   /** start the run on a later round — used by tests to reach boss waves quickly */
   debugRound?: number;
   /** open the gauntlet boon card immediately — used by tests */
@@ -845,6 +873,22 @@ export default function Battle({
     // opaque canvas: the cached backdrop covers every pixel, so the browser can
     // skip per-frame alpha compositing of the whole arena
     const ctx = canvas.getContext("2d", { alpha: false })!;
+    // Half-resolution history buffers keep shake blur inexpensive on phones.
+    const trailCanvas = document.createElement("canvas");
+    trailCanvas.width = Math.max(1, Math.round(W * 0.5));
+    trailCanvas.height = Math.max(1, Math.round(H * 0.5));
+    const trailCtx = trailCanvas.getContext("2d", { alpha: true })!;
+    const currentCanvas = document.createElement("canvas");
+    currentCanvas.width = trailCanvas.width;
+    currentCanvas.height = trailCanvas.height;
+    const currentCtx = currentCanvas.getContext("2d", { alpha: true })!;
+    const previousCanvas = document.createElement("canvas");
+    previousCanvas.width = trailCanvas.width;
+    previousCanvas.height = trailCanvas.height;
+    const previousCtx = previousCanvas.getContext("2d", { alpha: true })!;
+    let hasPreviousFrame = false;
+    let lastShakeX = 0;
+    let lastShakeY = 0;
     const wrap = canvas.parentElement as HTMLElement;
     const fit = () => {
       const rw = wrap.clientWidth || 1;
@@ -875,10 +919,11 @@ export default function Battle({
     bgCache.height = H;
     {
       const bg = bgCache.getContext("2d") as CanvasRenderingContext2D;
+      const starfall = saveRef.current.scenes?.includes("starfall") === true;
       const grd = bg.createLinearGradient(0, 0, 0, H);
-      grd.addColorStop(0, "#120a33");
-      grd.addColorStop(0.45, "#0b0726");
-      grd.addColorStop(1, "#05040f");
+      grd.addColorStop(0, starfall ? "#08243a" : "#120a33");
+      grd.addColorStop(0.45, starfall ? "#091b36" : "#0b0726");
+      grd.addColorStop(1, starfall ? "#06101f" : "#05040f");
       bg.fillStyle = grd;
       bg.fillRect(0, 0, W, H);
       // two nebula blooms, baked in place
@@ -887,8 +932,8 @@ export default function Battle({
         const ny = H * (0.3 + i * 0.35);
         const nr = Math.min(W, H) * (0.5 + i * 0.12);
         const ng = bg.createRadialGradient(nx, ny, 0, nx, ny, nr);
-        ng.addColorStop(0, i ? "rgba(53,110,255,0.16)" : "rgba(160,60,255,0.17)");
-        ng.addColorStop(0.5, i ? "rgba(53,110,255,0.05)" : "rgba(160,60,255,0.05)");
+        ng.addColorStop(0, starfall ? (i ? "rgba(53,224,255,0.20)" : "rgba(255,207,77,0.12)") : i ? "rgba(53,110,255,0.16)" : "rgba(160,60,255,0.17)");
+        ng.addColorStop(0.5, starfall ? (i ? "rgba(53,224,255,0.07)" : "rgba(255,207,77,0.04)") : i ? "rgba(53,110,255,0.05)" : "rgba(160,60,255,0.05)");
         ng.addColorStop(1, "transparent");
         bg.fillStyle = ng;
         bg.fillRect(nx - nr, ny - nr, nr * 2, nr * 2);
@@ -966,7 +1011,7 @@ export default function Battle({
     const fxOn = () => saveRef.current.fx;
     /** the merged crit multiplier: base + 8% for every upgrade on the account.
      *  Tower levels can't change mid-run, so this is resolved once. */
-    const runCritMul = critMultiplierFrom(saveRef.current.levels);
+    const runCritMul = critMultiplierFrom(saveRef.current.levels) * (saveRef.current.scenes?.length ? 1.2 : 1);
     /** Mana Conduit turns every SP payout up by the share bought this run */
     const spGain = (n: number) => Math.round(n * (1 + g.spGainMul));
     /** screen shake that honours the Screen Shake setting */
@@ -1037,6 +1082,18 @@ export default function Battle({
           drag: 1.2,
         });
       }
+    };
+
+    /** Layered detonation: hot core, two readable rings, and outward debris. */
+    const impactBlast = (x: number, y: number, color: string, radius: number, heavy = false) => {
+      const r = Math.max(18, radius);
+      ring(x, y, color, r * 0.28);
+      glow(x, y, "#fff4d6", r * (heavy ? 0.58 : 0.36), heavy ? 0.22 : 0.14);
+      glow(x, y, color, r * 0.95, heavy ? 0.42 : 0.3);
+      shock(x, y, color, r * 0.78, heavy ? 0.62 : 0.44);
+      shock(x, y, "#fff8e8", r * 0.38, heavy ? 0.34 : 0.26);
+      burst(x, y, color, heavy ? 16 : 8, heavy ? 300 : 210);
+      shards(x, y, heavy ? "#fff4d6" : color, heavy ? 12 : 5, heavy ? 280 : 190);
     };
 
     /** four-point sparkle stars that drift upward — the "magic" layer */
@@ -1198,19 +1255,22 @@ export default function Battle({
     };
 
     const summonCost = () => spCost(g.spSpend);
-    /** ascent has its own price ladder so summoning never price-gouges upgrades */
-    const ascCost = () => ascSpCost(g.ascSpend);
+    /** Each tower family has its own ascent ladder, so upgrading one family
+     * never raises the price of the others. */
+    const ascCost = (battleLevel: number) => ascSpCost(Math.max(0, battleLevel - 1));
 
     const startWave = () => {
       g.phase = "wave";
       g.phaseT = 999;
-      g.spawnQ = waveComp(g.round).map((type, i) => ({ type, at: g.t + 0.8 + i * 0.72 + Math.random() * 0.25 }));
+      const spawnInterval = enemySpawnInterval(g.round);
+      g.spawnQ = waveComp(g.round).map((type, i) => ({ type, at: g.t + 0.8 + i * spawnInterval }));
       g.waveTotal = g.spawnQ.length;
       g.waveSpawned = 0;
       // bosses walk in first: their cutscene should open the wave, not trail it
       for (const s2 of g.spawnQ) if (isBossType(s2.type)) s2.at = Math.min(s2.at, g.t + 2.4);
       g.spawnQ.sort((a, b) => a.at - b.at);
-      sfx.wave();
+      if (g.round === 1) sfx.battleStart();
+      else sfx.wave();
     };
 
     /**
@@ -1305,14 +1365,16 @@ export default function Battle({
       if (mode === "gauntlet") {
         gauntletPay = collectGauntlet({ ...saveRef.current }, rounds, g.boons.length, saveRef.current.gauntletBest);
       }
-      const baseGold =
-        (gauntletPay
-          ? gauntletPay.gold
-          : mode === "endless"
-            ? endlessGold
-            : won
-              ? reward(150 + 30 * g.maxRounds)
-              : reward(30 + 10 * rounds)) + wallet;
+      const clearRewardGold = gauntletPay
+        ? gauntletPay.gold
+        : mode === "endless"
+          ? endlessGold
+          : won
+            ? reward(150 + 30 * g.maxRounds)
+            : reward(30 + 10 * rounds);
+      // Apply the +50% run-gold bonus to the final clear payout too; the wallet
+      // has already been boosted at each kill and wave-clear as it was earned.
+      const baseGold = runGold(clearRewardGold) + wallet;
       const baseGems = gauntletPay ? gauntletPay.gems : mode === "endless" ? endlessGems : won ? reward(2) : 0;
       // crystal potions are salvaged from the run: deeper runs and wins pay more
       const potions = gauntletPay ? gauntletPay.potions : (won ? 3 : 1) + Math.floor(rounds / 3);
@@ -1343,10 +1405,25 @@ export default function Battle({
     const killReward = (e: Enemy) => {
       e.dead = true;
       g.kills++;
+      // Supervisor turns every kill into a permanent speed-buff tick for each tower.
+      if (g.towers.some((tower) => tower.def.id === "supervisor" && tower.cell)) {
+        const hypervisorTier = saveRef.current.awn.supervisor?.[0] || 0;
+        const waveAmplification = hypervisorTier > 0 ? Math.min(6, Math.max(0, g.round - 1) * 0.1) : 0;
+        const superMultiplier = 1 + 6 + waveAmplification; // +600%, scaling to +1,200% with Hypervisor
+        for (const tower of g.towers) {
+          if (!tower.cell || tower.superBuff >= 2) continue;
+          const amplified = Math.random() < 0.2;
+          tower.superBuff = Math.min(2, tower.superBuff + 0.001 * (amplified ? superMultiplier : 1));
+          if (amplified) {
+            const tp = cellCenter(tower.cell.c, tower.cell.r);
+            glow(tp.x, tp.y, "#ff315c", 35, 0.22);
+          }
+        }
+      }
       // sp payout: 10 base, elites x5, bosses x10, then the monthly modifier and
       // whatever Mana Conduit share the run has bought
       g.sp += spGain(e.spv);
-      // run gold is 25% richer across the board (kills, bounties, wave clears)
+      // run gold is 50% richer across the board (kills, bounties, wave clears)
       g.gold += runGold(Math.round(e.gold * MONTH_BONUS.goldMul * g.goldMul));
       const p = enemyPos(e);
       const et = ENEMY_TYPES[e.type];
@@ -1354,11 +1431,8 @@ export default function Battle({
         addText(p.x, p.y - 30, "ELITE KILL", "#ffd23f", 13, true);
         ring(p.x, p.y, "#ffd23f", 40);
       }
-      // death now pops: a shock ring, hot core glow and spinning debris
-      burst(p.x, p.y, et.color, e.elite ? 12 : 7, 200);
-      shock(p.x, p.y, et.color, isBossType(e.type) ? 44 : 20, isBossType(e.type) ? 0.8 : 0.45);
-      glow(p.x, p.y, et.accent, isBossType(e.type) ? 110 : 34, 0.4);
-      shards(p.x, p.y, et.color, isBossType(e.type) ? 24 : 7, isBossType(e.type) ? 360 : 200);
+      // Deaths now share a layered detonation profile; bosses get a heavier core.
+      impactBlast(p.x, p.y, et.color, isBossType(e.type) ? 54 : e.elite ? 34 : 24, isBossType(e.type));
       if (isBossType(e.type)) {
         flash(et.color, 0.22);
         punch(0.7, 0.5);
@@ -1504,7 +1578,7 @@ export default function Battle({
     const onPlaced = (t: BT, c: number, r: number) => {
       t.cell = { c, r };
       const p = cellCenter(c, r);
-      sfx.place();
+      sfx.towerDrop();
       ring(p.x, p.y, RARITY[t.def.rarity].color, 40);
       burst(p.x, p.y, RARITY[t.def.rarity].color, 10);
       const tier = saveRef.current.awn["hellstorm"]?.[0] || 0;
@@ -1525,8 +1599,8 @@ export default function Battle({
       const now = performance.now();
       const tier1 = saveRef.current.awn["lightning"]?.[0] || 0;
       const tier2 = saveRef.current.awn["lightning"]?.[1] || 0;
-      const dmgBase = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * 1.12 * (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1);
-      const targets = g.enemies.filter((e) => !e.dead);
+      const dmgBase = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * 1.12 * globalMul(t);
+      const targets = g.enemies.filter((e) => !e.dead).sort((a, b) => a.d - b.d);
       const shown = targets.slice(0, 10);
       const superbolt = tier1 > 0 && Math.random() < t.def.awk1!.chance[tier1 - 1];
       const judgement = tier2 > 0 && Math.random() < t.def.awk2!.chance[tier2 - 1];
@@ -1591,6 +1665,18 @@ export default function Battle({
           dealDamage(e, dmgBase * 0.8, { tw: t, color: "#9ff3ff" });
         }
       }
+      // Superbolt's lane-chain carries past the front ten and deals a hard 45% hit.
+      if ((superbolt || g.lightningBonus > 0) && shown.length) {
+        const tail = shown[shown.length - 1];
+        const origin = enemyPos(tail);
+        for (const enemy of targets.slice(shown.length, shown.length + 3)) {
+          const ep = enemyPos(enemy);
+          if (g.bolts.length < 44) g.bolts.push(randBolt(origin.x, origin.y, ep.x, ep.y, "#fff6c4", 2.6, 0.2, now));
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.28, max: 0.28, width: 8, color: "#fff6c4", seed: Math.random() * 100, forks: 3 });
+          dealDamage(enemy, dmgBase * 0.45, { alwaysCrit: superbolt, tw: t, color: "#fff6c4" });
+        }
+      }
+
       // ---- chain light between whichever targets were struck ----
       if (shown.length > 1) {
         const pts = shown.map((e) => enemyPos(e));
@@ -1602,67 +1688,91 @@ export default function Battle({
       sfx.zap();
     };
 
-    /**
-     * Demon Execution. Every few seconds the sky opens: one red column falls per
-     * enemy on the field. Anything that is not a boss dies where it stands; a
-     * boss loses a straight share of its maximum health instead of dying.
-     * Awakened it falls twice as fast, bites deeper, and a bolt that lands on a
-     * boss imprisons it (skills sealed) and leaves it bleeding.
-     */
+    /** Demon Execution's fixed-cadence, unbuffable execution storm. */
     const demonStrike = (t: BT) => {
       const now = performance.now();
-      const tier1 = saveRef.current.awn["demon"]?.[0] || 0;
-      const tier2 = saveRef.current.awn["demon"]?.[1] || 0;
-      const bossShare = tier1 > 0 ? t.def.awk1!.mult[tier1 - 1] : t.def.execBossHp || 0.5;
+      const tier2 = saveRef.current.awn.demon?.[1] || 0;
       const list = g.enemies.filter((e) => !e.dead);
-      const shown = list.slice(0, 12);
-      // every column lands on the same frame: a single crimson storm front
+      const shown = list.slice(0, 24);
+      const hellTargets: { enemy: Enemy; x: number; y: number; knockMeters: number }[] = [];
+      const blood = "#920018";
+      const hotBlood = "#c00028";
+
+      // Hell Dimensions opens a descending portal at every elite or boss struck.
+      // Its target is banished to spawn; the universal execution resolves the
+      // target immediately afterward, while nearby enemies are hurled backward.
+      if (tier2 > 0) {
+        const baseRadius = 72;
+        const portalRadius = baseRadius * (1 + t.def.awk2!.mult[tier2 - 1]);
+        const knockMeters = 10 + t.def.awk2!.mult2![tier2 - 1];
+        const knockPixels = knockMeters * 10; // arena path scale: 10 px per metre
+        for (const e of list) {
+          if (!e.elite && !isBossType(e.type)) continue;
+          const portalAt = enemyPos(e);
+          g.strikes.push({ x: portalAt.x, y: portalAt.y, life: 0.26, max: 0.26, width: 26 + tier2 * 2, color: blood, seed: Math.random() * 100, forks: 5, top: -H });
+          addZone({ kind: "hell", x: portalAt.x, y: portalAt.y, r: portalRadius, life: 1.25, max: 1.25, dps: 0, slow: 0, color: hotBlood });
+          ring(portalAt.x, portalAt.y, hotBlood, portalRadius);
+          shock(portalAt.x, portalAt.y, hotBlood, portalRadius * 2.3, 0.72);
+          glow(portalAt.x, portalAt.y, "#ff263f", portalRadius * 2, 0.65);
+          burst(portalAt.x, portalAt.y, blood, 32, 430);
+          sparkAt(portalAt.x, portalAt.y, 30, 420);
+          addText(portalAt.x, portalAt.y - 82, `HELL DIMENSIONS · ${knockMeters}m`, "#ff5266", 15, true);
+
+          for (const nearby of list) {
+            if (nearby === e || nearby.dead) continue;
+            const np = enemyPos(nearby);
+            if (Math.hypot(np.x - portalAt.x, np.y - portalAt.y) > portalRadius * 1.35) continue;
+            nearby.d = Math.max(0, nearby.d - knockPixels);
+            nearby.ox = 0;
+            nearby.oy = 0;
+            const knocked = enemyPos(nearby);
+            if (g.bolts.length < 44) g.bolts.push(randBolt(portalAt.x, portalAt.y, knocked.x, knocked.y, hotBlood, 2.2, 0.24, now));
+            shock(knocked.x, knocked.y, hotBlood, 48, 0.3);
+          }
+          hellTargets.push({ enemy: e, x: portalAt.x, y: portalAt.y, knockMeters });
+          punch(0.8, 0.65);
+          hitStop(0.08);
+          g.shake = saveRef.current.shakeFx ? Math.min(26, g.shake + 22) : g.shake;
+        }
+      }
+
+      // Deep-red sky pillars and explosions are visual; the executions below
+      // directly award kills instead of passing through damage, armour or wards.
       shown.forEach((e) => {
         const ep = enemyPos(e);
         const boss = isBossType(e.type);
-        g.strikes.push({ x: ep.x, y: ep.y, life: 0.46, max: 0.46, width: boss ? 22 : 12, color: "#ff2b3d", seed: Math.random() * 100, forks: boss ? 3 : 2 });
-        g.strikes.push({ x: ep.x, y: ep.y, life: 0.32, max: 0.32, width: boss ? 9 : 4, color: "#ffffff", seed: Math.random() * 100 });
+        const elite = !!e.elite;
+        g.strikes.push({ x: ep.x, y: ep.y, life: 0.58, max: 0.58, width: boss ? 26 : elite ? 20 : 16, color: blood, seed: Math.random() * 100, forks: boss ? 6 : 4, top: -H });
+        g.strikes.push({ x: ep.x, y: ep.y, life: 0.34, max: 0.34, width: boss ? 11 : 7, color: "#ff5266", seed: Math.random() * 100, forks: 3, top: -H * 0.45 });
+        addZone({ kind: "rift", x: ep.x, y: ep.y, r: boss ? 150 : 96, life: 0.72, max: 0.72, dps: 0, slow: 0, color: hotBlood });
+        shock(ep.x, ep.y, hotBlood, boss ? 240 : 165, 0.68);
+        glow(ep.x, ep.y, "#ff1838", boss ? 260 : 190, 0.58);
+        burst(ep.x, ep.y, blood, boss ? 42 : 28, boss ? 520 : 400);
+        sparkAt(ep.x, ep.y, boss ? 42 : 28, boss ? 540 : 430);
       });
-      addZone({ kind: "rift", x: shown[0] ? enemyPos(shown[0]).x : W / 2, y: H * 0.55, r: 150, life: 0.4, max: 0.4, dps: 0, slow: 0, color: "#ff2b3d" });
-      flash("#ff2b3d", 0.2);
-      punch(0.6, 0.4);
-      hitStop(0.05);
-      g.shake = fxShake(9);
-      sfx.superbolt();
+      for (const portal of hellTargets) {
+        portal.enemy.d = 0;
+        portal.enemy.ox = 0;
+        portal.enemy.oy = 0;
+        addText(portal.x, portal.y - 58, `BANISHED TO SPAWN · ${portal.knockMeters}m BLAST`, "#ffd7dc", 12, true);
+      }
+      flash("#680010", 0.42);
+      punch(1, 0.85);
+      hitStop(0.12);
+      g.shake = saveRef.current.shakeFx ? Math.min(26, g.shake + 24) : g.shake;
+      sfx.demonExecution();
 
-      let executed = 0;
       for (const e of list) {
         if (e.dead) continue;
         const ep = enemyPos(e);
-        if (isBossType(e.type)) {
-          // exact share of maximum health, straight through armour and wards
-          dealDamage(e, e.max * bossShare, { tw: t, color: "#ff2b3d", noCrit: true });
-          addText(ep.x, ep.y - 58, `-${Math.round(bossShare * 100)}% MAX HP`, "#ff2b3d", 15, true);
-          if (tier2 > 0 && !e.dead) {
-            // Demon Ritual: seal its skills and set it bleeding
-            const imp = t.def.awk2!.mult[tier2 - 1];
-            const bleed = t.def.awk2!.mult2![tier2 - 1];
-            e.imprisonT = Math.max(e.imprisonT, imp);
-            e.bleedT = Math.max(e.bleedT, 4.5);
-            e.bleedPct = Math.max(e.bleedPct, bleed);
-            e.bleedTick = Math.min(e.bleedTick || 0.5, 0.5);
-            addText(ep.x, ep.y - 78, `IMPRISONED ${imp}s`, "#ff4fd8", 15, true);
-            for (let i = 0; i < 5; i++) {
-              if (g.bolts.length < 30) g.bolts.push(randBolt(ep.x + (Math.random() - 0.5) * 90, ep.y - 120, ep.x + (Math.random() - 0.5) * 40, ep.y + 40, "#ff4fd8", 2, 0.4, now));
-            }
-          }
-        } else {
-          executed++;
-          dealDamage(e, e.hp + 1, { tw: t, color: "#ff2b3d", noCrit: true });
-        }
+        addText(ep.x, ep.y - 58, isBossType(e.type) ? "BOSS EXECUTED" : "EXECUTED", "#ff4059", isBossType(e.type) ? 17 : 13, true);
+        e.hp = 0;
+        killReward(e); // unconditional: no immunity, armour, ward or damage modifiers
       }
-      if (executed > 0) addText(W / 2, H * 0.3, `${executed} EXECUTED`, "#ff2b3d", 20, true);
-      toastRef.current(
-        executed > 0
-          ? `DEMON EXECUTION — ${executed} enemies executed`
-          : `DEMON EXECUTION — boss lost ${Math.round(bossShare * 100)}% max HP`,
-        "#ff2b3d"
-      );
+      if (list.length > 0) {
+        addText(W / 2, H * 0.3, `SOULS ERASED · ${list.length}`, "#ff4059", 22, true);
+        toastRef.current(`DEMON EXECUTION — ${list.length} enemies executed`, "#a80020");
+      }
     };
 
     /** small helper: a tight fan of sparks at a point (used by the sky bolts) */
@@ -1685,8 +1795,11 @@ export default function Battle({
       }
     };
 
-    /** every global multiplier a shot picks up (overdrive + shop damage) */
-    const globalMul = () => (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1) * (1 + g.dmgBonus);
+    /** global buffs, with Superbolt's extra multiplier restricted to lightning towers */
+    const globalMul = (t?: BT) =>
+      (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1) *
+      (1 + g.dmgBonus) *
+      (t && isLightningTower(t.def) ? 1 + g.lightningBonus : 1);
 
     /** kill-stack towers (Dragon's Maw) build damage with every kill they land */
     const killStackMul = (t: BT) => {
@@ -1741,12 +1854,12 @@ export default function Battle({
       t.atkMul *
       (1 + t.honorMul) * // Honor Emperor: permanent blessing per honor taken
       (t.surgeT > 0 ? 1 + t.surgeMul : 1) * // Heavenly God: merge surge
-      globalMul() *
+      globalMul(t) *
       killStackMul(t);
 
     /** Solar flare (Sunforge): hits every enemy on the field at once. */
     const solarFlare = (t: BT) => {
-      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * killStackMul(t) * globalMul();
+      const dmg = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * killStackMul(t) * globalMul(t);
       const p = cellCenter(t.cell!.c, t.cell!.r);
       const tier1 = saveRef.current.awn["sun"]?.[0] || 0;
       const tier2 = saveRef.current.awn["sun"]?.[1] || 0;
@@ -1776,7 +1889,7 @@ export default function Battle({
       const ep = pathPos(target.d);
       t.angle = Math.atan2(ep.y - p.y, ep.x - p.x);
       t.flash = 0.12;
-      const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul() * killStackMul(t);
+      const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul(t) * killStackMul(t);
       const upg = t.menuLv - 1;
       const asc = t.bLv - 1;
       // ---------- awakening rolls that change the shot itself ----------
@@ -1817,7 +1930,9 @@ export default function Battle({
           demonStrike(t);
           break;
         case "heavenly": {
-          // a lightning laser: fast, bright, and it burns whatever stands behind
+          // Heavenly God calls down a clear gold-white bolt, distinct from the Demon
+          // Execution crimson strike.
+          sfx.heavenlyImpact();
           push({
             speed: 1400,
             kind: "heavenly",
@@ -2362,6 +2477,15 @@ export default function Battle({
         ring(pos.x, pos.y, "#8a4dff", 46);
       }
       dealDamage(target, pr.dmg, { alwaysCrit: pr.alwaysCrit, tw: pr.tw });
+      if (pr.tw && isLightningTower(pr.tw.def) && g.lightningBonus > 0) {
+        const chained = g.enemies.filter((e) => !e.dead && e.id !== target.id && e.d > target.d).sort((a, b) => a.d - b.d).slice(0, 3);
+        for (const enemy of chained) {
+          const ep = enemyPos(enemy);
+          if (g.bolts.length < 44) g.bolts.push(randBolt(pos.x, pos.y, ep.x, ep.y, "#fff3a0", 2.1, 0.18, performance.now()));
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.22, max: 0.22, width: 6, color: "#fff3a0", seed: Math.random() * 100, forks: 2 });
+          dealDamage(enemy, pr.dmg * 0.45, { alwaysCrit: pr.alwaysCrit, tw: pr.tw, color: "#fff3a0" });
+        }
+      }
 
       // ---------- Heavenly God: the laser punches straight through ----------
       if (pr.behind) {
@@ -2543,7 +2667,7 @@ export default function Battle({
             ? pr.dmg * pr.blastDmg
             : (pr.splash || 0) * (pr.tw ? towerPower(pr.tw) : 1);
         if (blastBase > 0) {
-          ring(pos.x, pos.y, "#ff9d4d", Math.min(280, blastR));
+          impactBlast(pos.x, pos.y, "#ff9d4d", Math.min(130, blastR), blastR >= 100);
           sfx.explosion();
           g.shake = fxShake(2);
           g.enemies.forEach((e) => {
@@ -2675,8 +2799,58 @@ export default function Battle({
         return;
       }
 
-      const wasHeavenly = a.def.id === "heavenly" || b.def.id === "heavenly";
-      const wasDemon = a.def.id === "demon" || b.def.id === "demon";
+      const heavenlySource = a.def.id === "heavenly" ? a : b.def.id === "heavenly" ? b : undefined;
+      const wasHeavenly = !!heavenlySource;
+      const demonSource = a.def.id === "demon" ? a : b.def.id === "demon" ? b : undefined;
+      const demonPoints = demonSource?.points ?? 0;
+      const supervisorSource = a.def.id === "supervisor" ? a : b.def.id === "supervisor" ? b : undefined;
+      if (supervisorSource) {
+        const victims = g.enemies.filter((e) => !e.dead).sort((x, y) => x.d - y.d).slice(0, 10);
+        for (const enemy of victims) {
+          const ep = enemyPos(enemy);
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.62, max: 0.62, width: 20, color: "#ff173d", seed: Math.random() * 100, forks: 5, top: -220 });
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.38, max: 0.38, width: 7, color: "#ff9aa9", seed: Math.random() * 100, forks: 3 });
+          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#ff173d", 3.2, 0.42, performance.now()));
+          shock(ep.x, ep.y, "#ff173d", 112, 0.5);
+          glow(ep.x, ep.y, "#ff315c", 150, 0.5);
+          sparkAt(ep.x, ep.y, 20, 340);
+          addText(ep.x, ep.y - 62, "SUPERVISOR EXECUTION", "#ff315c", 13, true);
+        }
+        flash("#5b0013", 0.34);
+        punch(0.8, 0.7);
+        hitStop(0.12);
+        g.shake = fxShake(15);
+        sfx.supervisorMerge();
+
+        const doomsdayTier = saveRef.current.awn.supervisor?.[1] || 0;
+        if (doomsdayTier > 0 && victims.length > 0 && Math.random() < 0.19) {
+          const radius = supervisorSource.def.awk2!.mult[doomsdayTier - 1];
+          ring(p.x, p.y, "#a00024", radius);
+          shock(p.x, p.y, "#ff173d", Math.min(1100, radius * 1.35), 0.9);
+          shock(p.x, p.y, "#ffd8df", Math.min(760, radius * 0.8), 0.7);
+          burst(p.x, p.y, "#ff173d", 48, 620);
+          flash("#b0002b", 0.62);
+          punch(1, 1);
+          hitStop(0.2);
+          g.shake = fxShake(24);
+          addText(p.x, p.y - 100, "DOOMSDAY · 900M", "#ff315c", 24, true);
+          sfx.doomsday();
+          const doomed = g.enemies.filter((e) => !e.dead && Math.hypot(enemyPos(e).x - p.x, enemyPos(e).y - p.y) <= radius);
+          for (const enemy of doomed) {
+            const ep = enemyPos(enemy);
+            g.strikes.push({ x: ep.x, y: ep.y, life: 0.72, max: 0.72, width: 25, color: "#ff173d", seed: Math.random() * 100, forks: 6, top: -260 });
+            enemy.hp = 0;
+            killReward(enemy);
+          }
+        }
+        // Anything still alive after a possible nuclear strike is executed by
+        // the ten pre-called red bolts. Avoid double-paying a kill.
+        for (const enemy of victims) {
+          if (enemy.dead) continue;
+          enemy.hp = 0;
+          killReward(enemy);
+        }
+      }
 
       // ---------- Honor Emperor: hands the point over, keeps the tower ----------
       if (a.def.honor || b.def.honor) {
@@ -2748,44 +2922,77 @@ export default function Battle({
         let bolts = def.mergeBolts || 2;
         let pts = def.mergePoints || 2;
         let buff = def.mergeBuff || 3;
-        if (t1 > 0 && Math.random() < def.awk1!.chance[t1 - 1]) {
-          bolts += def.awk1!.mult[t1 - 1];
-          pts += 1;
-          buff = def.awk1!.mult2![t1 - 1];
-          addText(p.x, p.y - 70, "POSITIVE LIGHTNING", "#fff6c4", 15, true);
+        if (t1 > 0) {
+          // First awakening unlocks the divine merge strike. Positive Lightning
+          // still adds its extra blessing bolts as a chance-based bonus.
+          if (Math.random() < def.awk1!.chance[t1 - 1]) {
+            bolts += def.awk1!.mult[t1 - 1];
+            pts += 1;
+            buff = def.awk1!.mult2![t1 - 1];
+          }
+          addText(p.x, p.y - 70, "DIVINE AWAKENING", "#fff6c4", 17, true);
+          const god = heavenlySource!;
+          const divineBase = towerDamage(god.def, god.menuLv, god.bLv, god.points, god.atkMul);
+          const victims = g.enemies.filter((e) => !e.dead);
+          victims.forEach((e) => {
+            const ep = enemyPos(e);
+            g.strikes.push({ x: ep.x, y: ep.y, life: 0.55, max: 0.55, width: 26, color: "#fff6c4", seed: Math.random() * 100, forks: 5, top: -180 });
+            g.strikes.push({ x: ep.x, y: ep.y, life: 0.38, max: 0.38, width: 10, color: "#8feaff", seed: Math.random() * 100, forks: 3 });
+            shock(ep.x, ep.y, "#fff6c4", 150, 0.48);
+            glow(ep.x, ep.y, "#8feaff", 180, 0.52);
+            sparkAt(ep.x, ep.y, 30, 360);
+            // 3x a standard crit: 200% more crit damage, before normal
+            // armour/ward handling, and still recorded as a critical hit.
+            dealDamage(e, divineBase * 3, { alwaysCrit: true, tw: god, color: "#fff6c4" });
+            addText(ep.x, ep.y - 72, "DIVINE SUPERCRIT ×3", "#fff6c4", 15, true);
+          });
+          flash("#fff6c4", 0.3);
+          hitStop(0.11);
+          punch(1, 1);
+          g.shake = fxShake(14);
+          sfx.superbolt();
         }
         const dur = def.mergeBuffT || 13;
         const board = [...g.towers];
+        // every blessing bolt falls on the same frame: the judgement is one
+        // sky event, not a queue of single strikes
         for (let i = 0; i < bolts && board.length; i++) {
           const pick = board[Math.floor(Math.random() * board.length)];
-          schedule(i * 0.09, () => blessTower(pick, pts, buff, dur, "#ffe86b", "BLESSED"));
+          blessTower(pick, pts, buff, dur, "#ffe86b", "BLESSED");
         }
         sfx.superbolt();
         flash("#fff6c4", 0.16);
         toastRef.current(`HEAVENLY JUDGEMENT — ${bolts} towers blessed · +${Math.round(buff * 100)}%`, "#ffe86b");
       }
 
-      // ---------- Demon Execution: a merge whips the altars into a frenzy ----------
-      if (wasDemon || b.def.execCd) {
-        const d1 = saveRef.current.awn["demon"]?.[0] || 0;
-        if (d1 > 0) {
-          // 35% off the timer for 5 seconds, riding the same surge the Super
-          // Clone uses so it stacks sanely with everything else
-          let whipped = 0;
-          for (const dt of g.towers) {
-            if (!dt.def.execCd) continue;
-            dt.hasteT = Math.max(dt.hasteT, 5);
-            dt.hasteMul = Math.max(dt.hasteMul, 1 / 0.65 - 1);
-            whipped++;
-          }
-          if (whipped > 0) {
-            addText(p.x, p.y - 72, "RAPID STRIKE", "#ff2b3d", 15, true);
-            toastRef.current(
-              `RAPID STRIKE — ${whipped} altar${whipped === 1 ? "" : "s"} strike 35% faster for 5s`,
-              "#ff2b3d"
-            );
-          }
+      // ---------- Soul Wipeout: point-scaled execution beams on a Demon merge ----------
+      if (demonSource) {
+        const tier = saveRef.current.awn.demon?.[0] || 0;
+        const bonusBeams = tier > 0 ? TOWER_BY_ID.demon.awk1!.mult[tier - 1] : 0;
+        const beamCount = Math.min(48, Math.max(1, demonPoints + bonusBeams));
+        const targets = g.enemies.filter((e) => !e.dead).sort((x, y) => y.d - x.d).slice(0, beamCount);
+        const blood = "#920018";
+        const now = performance.now();
+        for (const enemy of targets) {
+          const ep = enemyPos(enemy);
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.62, max: 0.62, width: 24, color: blood, seed: Math.random() * 100, forks: 5, top: -H });
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.36, max: 0.36, width: 9, color: "#ff5266", seed: Math.random() * 100, forks: 3, top: -H * 0.45 });
+          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#c00028", 3.4, 0.38, now));
+          addZone({ kind: "rift", x: ep.x, y: ep.y, r: 110, life: 0.75, max: 0.75, dps: 0, slow: 0, color: "#c00028" });
+          shock(ep.x, ep.y, "#c00028", 185, 0.62);
+          glow(ep.x, ep.y, "#ff1838", 210, 0.58);
+          burst(ep.x, ep.y, blood, 34, 440);
+          sparkAt(ep.x, ep.y, 30, 440);
+          enemy.hp = 0;
+          killReward(enemy);
         }
+        flash("#680010", 0.44);
+        punch(1, 0.8);
+        hitStop(0.14);
+        g.shake = saveRef.current.shakeFx ? Math.min(26, g.shake + 23) : g.shake;
+        sfx.demonExecution();
+        addText(p.x, p.y - 78, `SOUL WIPEOUT · ${beamCount} BEAMS`, "#ff4059", 18, true);
+        toastRef.current(`SOUL WIPEOUT — ${targets.length}/${beamCount} execution beams`, "#a80020");
       }
 
       // ---------- Hellstorm still answers a merge with a blaze ----------
@@ -3224,7 +3431,7 @@ export default function Battle({
         uid: uidC++, def, menuLv: saveRef.current.levels[id], bLv: 1, points: 0, cell,
         cd: 0.6, shots: 0, angle: 0, rapidT: 0, rapidCool: 5, streak: 0, flash: 0,
         owner: "you", atkMul: 1, hexT: 0, downT: 0, hasteT: 0, hasteMul: 0,
-        surgeT: 0, surgeMul: 0, honorMul: 0,
+        surgeT: 0, surgeMul: 0, honorMul: 0, superBuff: 0,
       });
       const p = cellCenter(cell.c, cell.r);
       levelFlourish(p.x, p.y, RARITY[def.rarity].color, "DEPLOYED", def.rarity === "legendary" ? 3 : 1);
@@ -3247,24 +3454,23 @@ export default function Battle({
       const family = g.towers.filter((x) => x.def.id === src.def.id);
       const open = family.filter((x) => x.bLv < MAX_BATTLE_LEVEL);
       if (!open.length) return;
-      const cost = ascCost();
+      const cost = ascCost(src.bLv);
       if (g.sp < cost) { sfx.error(); toastRef.current("Not enough SP", "#ff4d5e"); return; }
       g.sp -= cost;
-      g.ascSpend++;
       const lv = Math.min(MAX_BATTLE_LEVEL, src.bLv + 1);
       // every copy of the tower stays in lockstep
       for (const t of family) t.bLv = lv;
       sfx.ascend();
-      // ascent flourish: a light pillar per tower, staggered so a mass ascend
-      // reads as a wave rolling across the board
-      flash("#35e0ff", 0.18);
-      open.forEach((t, i) => {
+      // One simultaneous ascent flash: every copy's lightning lands together.
+      flash("#35e0ff", 0.22);
+      hitStop(0.045);
+      open.forEach((t) => {
         if (!t.cell) return;
         const p = cellCenter(t.cell.c, t.cell.r);
-        schedule(i * 0.07, () => {
-          levelFlourish(p.x, p.y, "#35e0ff", `ASCENT ${ROMAN[lv] || lv}`, lv >= MAX_BATTLE_LEVEL ? 3 : 2);
-          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y - 220, p.x, p.y, "#b9f4ff", 5, 0.4, performance.now()));
-        });
+        levelFlourish(p.x, p.y, "#35e0ff", `ASCENT ${ROMAN[lv] || lv}`, lv >= MAX_BATTLE_LEVEL ? 3 : 2);
+        g.strikes.push({ x: p.x, y: p.y, life: 0.38, max: 0.38, width: 14, color: "#b9f4ff", seed: Math.random() * 100, forks: 3, top: -220 });
+        g.strikes.push({ x: p.x, y: p.y, life: 0.26, max: 0.26, width: 5, color: "#ffffff", seed: Math.random() * 100, top: -220 });
+        sparkAt(p.x, p.y, 18, 220);
       });
       toastRef.current(
         open.length > 1
@@ -3319,6 +3525,9 @@ export default function Battle({
       // remember where everything was: with frame interpolation on, the draw
       // pass glides between this snapshot and the post-step positions
       for (const e of g.enemies) {
+        e.ppd = e.pd ?? e.d;
+        e.ppox = e.pox ?? e.ox;
+        e.ppoy = e.poy ?? e.oy;
         e.pd = e.d;
         e.pox = e.ox;
         e.poy = e.oy;
@@ -3407,12 +3616,11 @@ export default function Battle({
           g.waveSpawned++;
           const et = ENEMY_TYPES[s.type];
           const boss = isBossType(s.type);
-          // elites: tougher variants with a golden sigil, 5x sp and double gold
+          // elites: 2.8x-health variants with a golden sigil, 5x SP and double gold
           const elite = !boss && Math.random() < Math.min(0.35, 0.06 + g.round * 0.015);
-          // BOSS_HP_MUL trims 10% off every boss's maximum health: the wave curve
-          // is steeper now and a boss is 15-34x a normal enemy on top of it
+          // Bosses use +78%; regulars use +90%, and elites gain the 2.8x variant multiplier.
           const hp =
-            roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? 2.2 : 1) * (boss ? BOSS_HP_MUL : 1);
+            roundHp(g.round) * et.hpMul * EV_BONUS.hpMul * MONTH_BONUS.hpMul * (elite ? ELITE_HP_MUL : 1) * (boss ? BOSS_HP_MUL : ENEMY_HP_SCALE);
           g.enemies.push({
             id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012) * (elite ? 1.08 : 1), type: s.type,
             elite,
@@ -3424,7 +3632,6 @@ export default function Battle({
             chainsCd: BOSS_CHAINS_CD, warpCd: BOSS_WARP_CD, link: 0,
             enraged: false, cast: 0,
             encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
-            imprisonT: 0, bleedT: 0, bleedTick: 0, bleedPct: 0,
           });
           // a boss walks in with a cutscene — the sim holds until it finishes.
           // When a wave carries several bosses the card introduces the marquee
@@ -3446,6 +3653,7 @@ export default function Battle({
           const bonus = 40 + 10 * g.round;
           g.sp += spGain(bonus);
           g.wavesCleared++;
+          sfx.waveClear();
           // gold + gem payouts were buffed 40% (REWARD_MUL) in the balance patch
           g.gold += runGold(reward(bonus / 2) * g.goldMul);
           if (g.mode === "battle" && g.round >= g.maxRounds) {
@@ -3507,19 +3715,10 @@ export default function Battle({
           };
           e.cast = Math.max(0, e.cast - dt);
           e.ward = Math.max(0, e.ward - dt);
-          // Demon Ritual: while imprisoned the boss cannot cast a single skill —
-          // it still walks, it just cannot answer back
-          const sealed = e.imprisonT > 0;
-          if (sealed) {
-            e.imprisonT -= dt;
-            if (e.imprisonT <= 0) addText(ep0.x, ep0.y - 62, "FREE", "#ff4fd8", 13, true);
-            else if (Math.random() < dt * 4 && g.parts.length < 340) {
-              g.parts.push({ x: ep0.x + (Math.random() - 0.5) * 70, y: ep0.y + (Math.random() - 0.5) * 70, vx: 0, vy: -22, life: 0.5, max: 0.5, size: 3, color: "#ff4fd8", kind: "spark", add: true });
-            }
-          }
+
 
           // --- Blood Frenzy: one-shot, below 45% health
-          if (!sealed && kit.includes("enrage") && !e.enraged && e.hp / e.max <= BOSS_ENRAGE_AT) {
+          if (kit.includes("enrage") && !e.enraged && e.hp / e.max <= BOSS_ENRAGE_AT) {
             e.enraged = true;
             e.speed *= 1.45;
             e.ward = Math.max(e.ward, 1.2);
@@ -3530,14 +3729,14 @@ export default function Battle({
           }
 
           // --- Rift Call
-          if (!sealed && kit.includes("summon")) {
+          if (kit.includes("summon")) {
             e.summonCd -= dt;
             if (e.summonCd <= 0) {
               e.summonCd = BOSS_SUMMON_CD;
               const et0 = ENEMY_TYPES[0];
               const nSum = 2 + (g.round >= 16 ? 1 : 0);
               for (let i = 0; i < nSum; i++) {
-                const hp = roundHp(g.round) * et0.hpMul * MONTH_BONUS.hpMul * 0.6;
+                const hp = roundHp(g.round) * et0.hpMul * MONTH_BONUS.hpMul * 0.6 * ENEMY_HP_SCALE;
                 const back = Math.max(0, e.d - 30 - i * 26);
                 g.enemies.push({
                   id: eidC++, d: back, hp, max: hp, speed: et0.speed * (1 + g.round * 0.012) * 1.25, type: 0,
@@ -3548,8 +3747,7 @@ export default function Battle({
                   nullCd: 0, devourCd: 0, meteorCd: 0, chainsCd: 0, warpCd: 0, link: 0,
                   enraged: false, cast: 0,
                   encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
-                  imprisonT: 0, bleedT: 0, bleedTick: 0, bleedPct: 0,
-                });
+                      });
                 ring(ep0.x, ep0.y, "#c44dff", 30 + i * 8);
               }
               castSkill("summon");
@@ -3558,7 +3756,7 @@ export default function Battle({
           }
 
           // --- Void Step
-          if (!sealed && kit.includes("blink")) {
+          if (kit.includes("blink")) {
             e.blinkCd -= dt;
             if (e.blinkCd <= 0) {
               e.blinkCd = BOSS_BLINK_CD;
@@ -3574,7 +3772,7 @@ export default function Battle({
           }
 
           // --- Bulwark
-          if (!sealed && kit.includes("ward")) {
+          if (kit.includes("ward")) {
             e.wardCd -= dt;
             if (e.wardCd <= 0 && e.hp / e.max < 0.85) {
               e.wardCd = BOSS_WARD_CD;
@@ -3585,7 +3783,7 @@ export default function Battle({
           }
 
           // --- Null Field: hex the towers guarding the lane
-          if (!sealed && kit.includes("nullfield")) {
+          if (kit.includes("nullfield")) {
             e.nullCd -= dt;
             if (e.nullCd <= 0) {
               const near = g.towers
@@ -3608,7 +3806,7 @@ export default function Battle({
           }
 
           // --- Soul Devour: eat its own minions to heal
-          if (!sealed && kit.includes("devour")) {
+          if (kit.includes("devour")) {
             e.devourCd -= dt;
             if (e.devourCd <= 0 && e.hp / e.max < 0.92) {
               const snacks = g.enemies.filter((o) => o !== e && !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= 300).slice(0, 3);
@@ -3629,7 +3827,7 @@ export default function Battle({
           }
 
           // --- Meteor Fall: burning rocks knock towers offline
-          if (!sealed && kit.includes("meteor")) {
+          if (kit.includes("meteor")) {
             e.meteorCd -= dt;
             if (e.meteorCd <= 0) {
               const targets = g.towers.filter((t) => t.cell && t.downT <= 0);
@@ -3647,7 +3845,7 @@ export default function Battle({
           }
 
           // --- Rift Chains: shield every minion around it
-          if (!sealed && kit.includes("chains")) {
+          if (kit.includes("chains")) {
             e.chainsCd -= dt;
             if (e.chainsCd <= 0) {
               const herd = g.enemies.filter((o) => !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= BOSS_CHAINS_RADIUS);
@@ -3665,7 +3863,7 @@ export default function Battle({
           }
 
           // --- Warp Surge: wrench the whole horde down the lane
-          if (!sealed && kit.includes("warp")) {
+          if (kit.includes("warp")) {
             e.warpCd -= dt;
             if (e.warpCd <= 0) {
               e.warpCd = BOSS_WARP_CD;
@@ -3756,24 +3954,6 @@ export default function Battle({
           }
           if (e.hp <= 0 && !e.dead) killReward(e);
         }
-        // Demon Ritual bleed: a share of maximum health every half second
-        if (e.bleedT > 0 && !e.dead) {
-          e.bleedT -= dt;
-          e.bleedTick -= dt;
-          if (e.bleedTick <= 0) {
-            e.bleedTick = 0.5;
-            const cut = e.max * e.bleedPct;
-            const bp = enemyPos(e);
-            e.hp -= cut;
-            addText(bp.x + (Math.random() - 0.5) * 20, bp.y - 34, `${Math.round(cut)}`, "#ff4d5e", 13, false);
-            for (let i = 0; i < 4; i++) {
-              if (g.parts.length < 340)
-                g.parts.push({ x: bp.x + (Math.random() - 0.5) * 18, y: bp.y, vx: (Math.random() - 0.5) * 40, vy: 40 + Math.random() * 60, life: 0.5, max: 0.5, size: 2 + Math.random() * 3, color: "#c4243a", kind: "spark", grav: 1 });
-            }
-            if (e.hp <= 0 && !e.dead) killReward(e);
-          }
-          if (e.bleedT <= 0) e.bleedPct = 0;
-        }
         if (e.dead) continue;
         // Cinder Wraiths are weightless: chill and slow slide right off them
         if (e.type === WRAITH_TYPE) {
@@ -3807,30 +3987,36 @@ export default function Battle({
       const aspdA = new Map<number, number>();
       const atkA = new Map<number, number>();
       const plantCount = g.towers.filter((t) => t.cell && t.def.id === "plant").length;
-      const hpState = plantCount > 0 && [4, 6, 8, 12].includes(plantCount) ? 1.5 : 1;
+      const plantNetwork = powerPlantNetworkScale(plantCount);
+      for (const target of g.towers) target.plantGlow = 0;
       for (const t of g.towers) {
         if (!t.cell || !t.def.aura) continue;
         const upg = t.menuLv - 1;
         const asc = t.bLv - 1;
         let bonus = (t.def.aspd || 0) + (t.def.upAspd || 0) * upg + (t.def.ascAspd || 0) * asc;
         bonus *= 1 + 0.5 * t.points;
-        if (t.def.id === "plant") bonus *= hpState;
-        const atk = ((t.def.atkAura || 0) + (t.def.upAtkAura || 0) * upg + (t.def.ascAtkAura || 0) * asc) * (1 + 0.5 * t.points);
+        let atk = ((t.def.atkAura || 0) + (t.def.upAtkAura || 0) * upg + (t.def.ascAtkAura || 0) * asc) * (1 + 0.5 * t.points);
+        // Power Plants feed both damage and attack speed through the network
+        // tier. Other aura towers retain their own stat mix.
+        if (t.def.id === "plant") {
+          bonus *= plantNetwork;
+          atk *= plantNetwork;
+        }
         // War Anthem / Overclock / Bulwark Field: the aura's own awakenings
         const aw = auraAwk(t);
         bonus *= aw;
         const atkAw = atk * aw;
-        const nbs = [
-          [t.cell.c + 1, t.cell.r],
-          [t.cell.c - 1, t.cell.r],
-          [t.cell.c, t.cell.r + 1],
-          [t.cell.c, t.cell.r - 1],
-        ];
-        for (const [c, r] of nbs) {
+        const isPlant = t.def.id === "plant";
+        for (let dc = -1; dc <= 1; dc++) for (let dr = -1; dr <= 1; dr++) {
+          if (dc === 0 && dr === 0) continue;
+          if (!isPlant && Math.abs(dc) + Math.abs(dr) !== 1) continue;
+          const c = t.cell.c + dc;
+          const r = t.cell.r + dr;
           const nb = g.towers.find((x) => x.cell && x.cell.c === c && x.cell.r === r);
           if (nb && nb.def.target === "front") {
             aspdA.set(nb.uid, (aspdA.get(nb.uid) || 0) + bonus);
             atkA.set(nb.uid, (atkA.get(nb.uid) || 0) + atkAw);
+            if (isPlant) nb.plantGlow = Math.max(nb.plantGlow || 0, plantNetwork);
           }
         }
       }
@@ -3907,7 +4093,7 @@ export default function Battle({
         if (!g.enemies.some((e) => !e.dead)) continue;
         t.skillCd = sk.cd;
         const p = cellCenter(t.cell.c, t.cell.r);
-        const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul() * killStackMul(t) * sk.mult;
+        const base = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * globalMul(t) * killStackMul(t) * sk.mult;
         addText(p.x, p.y - 52, sk.name.toUpperCase(), sk.color, 14, true);
         glow(p.x, p.y, sk.color, 60, 0.4);
         const living = g.enemies.filter((e) => !e.dead);
@@ -3981,11 +4167,10 @@ export default function Battle({
           }
           case "teleport": {
             // a shard blinking through every target at once
-            front.slice(0, sk.hits).forEach((e, i) => {
+            front.slice(0, sk.hits).forEach((e) => {
               const ep = enemyPos(e);
-              schedule(i * 0.05, () => {
-                if (!e.dead) dealDamage(e, base, { tw: t, color: sk.color });
-              });
+              // all shards land together - no 50ms trickle of damage
+              if (!e.dead) dealDamage(e, base, { tw: t, color: sk.color });
               stars(ep.x, ep.y, sk.color, 6, 60);
               if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, sk.color, 2, 0.18, now2));
             });
@@ -4089,6 +4274,16 @@ export default function Battle({
         if (!t.cell || t.def.target === "none") continue;
         const p = cellCenter(t.cell.c, t.cell.r);
         t.flash = Math.max(0, t.flash - dt);
+        if (t.def.id === "demon") {
+          // Execution lightning is a fixed-cadence ability, not a tower shot:
+          // ignore ATK, ATK speed, points, auras, run buffs, haste and debuffs.
+          t.cd -= dt;
+          if (t.cd <= 0) {
+            t.cd = t.def.execCd || 5;
+            demonStrike(t);
+          }
+          continue;
+        }
         if (t.def.rapid) {
           t.rapidCool -= dt;
           if (t.rapidCool <= 0 && t.rapidT <= 0) {
@@ -4099,15 +4294,9 @@ export default function Battle({
           t.rapidT = Math.max(0, t.rapidT - dt);
         }
         let rate = Math.max(0.06, t.def.rate - t.def.upRate * (t.menuLv - 1) - t.def.ascRate * (t.bLv - 1));
-        // Demon Execution: the strike cadence is its own ladder — 5s bare, 2.5s
-        // once Rapid Strike is awakened (attack-speed bonuses still apply below)
-        if (t.def.execCd) {
-          const d1 = saveRef.current.awn["demon"]?.[0] || 0;
-          rate = d1 > 0 ? t.def.awk1!.mult2![d1 - 1] : t.def.execCd;
-        }
         let aspdSelf = (t.def.aspd || 0) + (t.def.upAspd || 0) * (t.menuLv - 1) + (t.def.ascAspd || 0) * (t.bLv - 1);
         if (t.def.id === "lightning") aspdSelf = 0;
-        rate /= 1 + aspdSelf + (aspdA.get(t.uid) || 0);
+        rate /= 1 + aspdSelf + (aspdA.get(t.uid) || 0) + t.superBuff;
         rate /= 1 + POINT_STEP * t.points;
         rate /= 1 + g.bonusAspd; // run-shop attack speed
         if (g.odT > 0) rate /= 1 + OVERDRIVE_ASPD; // Overdrive hero buff
@@ -4362,7 +4551,7 @@ export default function Battle({
         ctx.stroke();
       }
       if (t.def.aura) {
-        const rr = 60 + Math.sin(now / 300) * 4;
+        const rr = (t.def.id === "plant" ? 72 : 60) + Math.sin(now / (t.def.id === "plant" ? 210 : 300)) * 4;
         ctx.globalAlpha *= 0.9;
         ctx.fillStyle = t.def.id === "plant" ? "rgba(61,255,142,0.10)" : "rgba(53,224,255,0.10)";
         ctx.beginPath();
@@ -4371,13 +4560,49 @@ export default function Battle({
         ctx.globalAlpha = 0.55;
         ctx.strokeStyle = t.def.id === "plant" ? "#3dff8e" : "#35e0ff";
         ctx.lineWidth = 1.5;
-        for (let i = 0; i < 4; i++) {
-          const a = now / 700 + (i * Math.PI) / 2;
+        const auraArcs = t.def.id === "plant" ? 6 : 4;
+        for (let i = 0; i < auraArcs; i++) {
+          const a = now / (t.def.id === "plant" ? 430 : 700) + (i * Math.PI * 2) / auraArcs;
           ctx.beginPath();
-          ctx.arc(x, y, rr, a, a + 0.9);
+          ctx.arc(x, y, rr, a, a + (t.def.id === "plant" ? 0.54 : 0.9));
           ctx.stroke();
         }
         if (ghost) ctx.globalAlpha = 0.65;
+      }
+      if (!ghost && (t.plantGlow || 0) > 0) {
+        const intensity = Math.min(1, 0.4 + (t.plantGlow! - 1) * 0.28);
+        const phase = now / 145;
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = intensity;
+        ctx.strokeStyle = "#8effc4";
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(x, y, 38 + Math.sin(phase) * 2, phase * 0.7, phase * 0.7 + 4.6);
+        ctx.stroke();
+        // little live arcs orbit buffed towers so the plant's benefit reads on
+        // the board even before the player inspects their stat panel
+        for (let i = 0; i < 3; i++) {
+          const a = phase + (i * Math.PI * 2) / 3;
+          const sx = x + Math.cos(a) * 36;
+          const sy = y + Math.sin(a) * 36;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(sx + Math.cos(a + 0.7) * 7, sy + Math.sin(a + 0.7) * 7);
+          ctx.lineTo(sx + Math.cos(a - 0.5) * 12, sy + Math.sin(a - 0.5) * 12);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      if (!ghost && t.superBuff > 0) {
+        ctx.save();
+        ctx.globalAlpha = Math.min(0.75, 0.18 + t.superBuff * 0.25);
+        ctx.strokeStyle = "#ff315c";
+        ctx.lineWidth = 2 + Math.min(2, t.superBuff);
+        ctx.beginPath();
+        ctx.arc(x, y, 34 + Math.sin(now / 130 + t.uid) * 2, now / 350, now / 350 + 4.8);
+        ctx.stroke();
+        ctx.restore();
       }
       ctx.save();
       ctx.translate(x, y);
@@ -4410,7 +4635,7 @@ export default function Battle({
           ctx.arc(x, y, 20, 0, Math.PI * 2);
           ctx.fill();
           ctx.fillStyle = col;
-          ctx.font = "bold 20px system-ui";
+          ctx.font = `bold 20px ${canvasUiFont}`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText("✕", x, y + 1);
@@ -4894,45 +5119,6 @@ export default function Battle({
           ctx.fill();
           break;
         // ---------- 12-tower arsenal ----------
-        case "sling":
-          ctx.rotate(a);
-          ctx.strokeStyle = acc;
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.moveTo(-4, 14);
-          ctx.lineTo(-4 - rec * 0.4, -12);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(-16, -8);
-          ctx.lineTo(-4, 2);
-          ctx.lineTo(8, -8);
-          ctx.stroke();
-          ctx.fillStyle = acc;
-          ctx.beginPath();
-          ctx.arc(-4 - rec * 0.4, -14, 5, 0, Math.PI * 2);
-          ctx.fill();
-          break;
-        case "flame":
-          ctx.rotate(a);
-          ctx.fillStyle = "#2b1f66";
-          ctx.strokeStyle = acc;
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.roundRect(-14, -10, 24, 20, 6);
-          ctx.fill();
-          ctx.stroke();
-          ctx.fillStyle = acc;
-          ctx.beginPath();
-          ctx.moveTo(10 - rec * 0.3, -8);
-          ctx.lineTo(30 + rec, 0);
-          ctx.lineTo(10 - rec * 0.3, 8);
-          ctx.closePath();
-          ctx.fill();
-          ctx.globalAlpha *= 0.55;
-          ctx.beginPath();
-          ctx.arc(14 + rec * 0.6, 0, 9 + Math.sin(now / 90) * 2, 0, Math.PI * 2);
-          ctx.fill();
-          break;
         case "spike":
           ctx.fillStyle = "#2b1f66";
           ctx.strokeStyle = acc;
@@ -4984,63 +5170,6 @@ export default function Battle({
           ctx.arc(24 - rec * 0.5, 0, 5, 0, Math.PI * 2);
           ctx.fill();
           break;
-        case "beam":
-          ctx.fillStyle = "#2b1f66";
-          ctx.strokeStyle = acc;
-          ctx.lineWidth = 2.5;
-          ctx.beginPath();
-          ctx.roundRect(-18, 6, 36, 16, 6);
-          ctx.fill();
-          ctx.stroke();
-          ctx.save();
-          ctx.rotate(now / 700);
-          ctx.strokeStyle = acc;
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(0, 0, 15, 0.3, 2.4);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.arc(0, 0, 15, 3.4, 5.6);
-          ctx.stroke();
-          ctx.restore();
-          ctx.fillStyle = t.flash > 0 ? "#ffffff" : acc;
-          ctx.beginPath();
-          ctx.arc(0, 0, 7 + rec * 0.5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.globalAlpha *= 0.5;
-          ctx.beginPath();
-          ctx.arc(0, 0, 12 + rec, 0, Math.PI * 2);
-          ctx.fill();
-          break;
-        case "scythe": {
-          // Reaper's Toll: a hooked blade on a shaft, spinning slowly
-          const spin = now / 900;
-          ctx.fillStyle = "#5b4a86";
-          ctx.strokeStyle = "#2a1a4a";
-          ctx.lineWidth = 1.6;
-          ctx.beginPath();
-          ctx.roundRect(-4, -6, 8, 30, 3);
-          ctx.fill();
-          ctx.stroke();
-          ctx.save();
-          ctx.rotate(spin);
-          ctx.fillStyle = rc.color;
-          ctx.beginPath();
-          ctx.moveTo(0, -34);
-          ctx.quadraticCurveTo(30, -26, 24, -2);
-          ctx.quadraticCurveTo(12, -18, 0, -18);
-          ctx.closePath();
-          ctx.fill();
-          ctx.strokeStyle = "#fff";
-          ctx.lineWidth = 1.4;
-          ctx.stroke();
-          ctx.restore();
-          ctx.fillStyle = "#e6dcff";
-          ctx.beginPath();
-          ctx.arc(0, -6, 5, 0, Math.PI * 2);
-          ctx.fill();
-          break;
-        }
         case "prism": {
           // Prism Array: a faceted crystal that spins and throws split beams
           ctx.save();
@@ -5114,38 +5243,6 @@ export default function Battle({
           ctx.restore();
           break;
         }
-        case "gate": {
-          // Hellgate: a torn portal with fire licking out of the arch
-          const gfl = Math.sin(now / 130) * 3;
-          ctx.fillStyle = "#2b1206";
-          ctx.strokeStyle = rc.color;
-          ctx.lineWidth = 2.6;
-          ctx.beginPath();
-          ctx.moveTo(-22, 22);
-          ctx.lineTo(-22, -6);
-          ctx.quadraticCurveTo(0, -34, 22, -6);
-          ctx.lineTo(22, 22);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-          const gg = ctx.createRadialGradient(0, 6, 2, 0, 6, 20);
-          gg.addColorStop(0, "#fff2b0");
-          gg.addColorStop(0.4, "#ff8c3d");
-          gg.addColorStop(1, "transparent");
-          ctx.fillStyle = gg;
-          ctx.beginPath();
-          ctx.ellipse(0, 6, 15, 17 + gfl, 0, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = "#ff7a3d";
-          ctx.beginPath();
-          ctx.moveTo(-10, -4 - gfl);
-          ctx.quadraticCurveTo(-2, -18, 0, -26 - gfl);
-          ctx.quadraticCurveTo(2, -18, 10, -4 - gfl);
-          ctx.quadraticCurveTo(0, 2, -10, -4 - gfl);
-          ctx.fill();
-          break;
-        }
-        // ---------- mythic arsenal II ----------
         case "nova": {
           // a three-barrel shell launcher with a starburst core
           const spin = now / 1600;
@@ -5573,6 +5670,36 @@ export default function Battle({
           ctx.fillRect(8, 7, 5, 5);
           break;
         }
+        case "supervisor": {
+          const pulse = 1 + Math.sin(now / 110) * 0.08;
+          ctx.save();
+          ctx.scale(pulse, pulse);
+          ctx.fillStyle = "#260812";
+          ctx.strokeStyle = "#ff315c";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(0, -28);
+          ctx.lineTo(21, -18);
+          ctx.lineTo(19, 7);
+          ctx.quadraticCurveTo(12, 20, 0, 27);
+          ctx.quadraticCurveTo(-12, 20, -19, 7);
+          ctx.lineTo(-21, -18);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = "#ff315c";
+          ctx.beginPath();
+          ctx.moveTo(3, -21);
+          ctx.lineTo(-11, 1);
+          ctx.lineTo(-2, 1);
+          ctx.lineTo(-5, 20);
+          ctx.lineTo(12, -5);
+          ctx.lineTo(3, -5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
         case "clone": {
           // two offset diamonds — the tower and the copy it keeps promising
           const wob = Math.sin(now / 400) * 2;
@@ -5661,9 +5788,10 @@ export default function Battle({
     const drawEnemy = (e: Enemy, now: number) => {
       // glide between sim steps when frame interpolation is on — path distance
       // and the lateral singularity offset are interpolated independently
-      const dDraw = e.pd === undefined ? e.d : e.pd + (e.d - e.pd) * renderAlpha;
-      const oxDraw = e.pox === undefined ? e.ox : e.pox + (e.ox - e.pox) * renderAlpha;
-      const oyDraw = e.poy === undefined ? e.oy : e.poy + (e.oy - e.poy) * renderAlpha;
+      const hermite = saveRef.current.interpolationMethod === "hermite" && saveRef.current.frameInterp && !saveRef.current.powerSaver;
+      const dDraw = e.pd === undefined ? e.d : hermite ? hermiteLerp(e.ppd, e.pd, e.d, rawRenderAlpha) : e.pd + (e.d - e.pd) * renderAlpha;
+      const oxDraw = e.pox === undefined ? e.ox : hermite ? hermiteLerp(e.ppox, e.pox, e.ox, rawRenderAlpha) : e.pox + (e.ox - e.pox) * renderAlpha;
+      const oyDraw = e.poy === undefined ? e.oy : hermite ? hermiteLerp(e.ppoy, e.poy, e.oy, rawRenderAlpha) : e.poy + (e.oy - e.poy) * renderAlpha;
       const p = enemyPos({ d: dDraw, ox: oxDraw, oy: oyDraw });
       const et = ENEMY_TYPES[e.type];
       // facing: sample a point slightly ahead on the path
@@ -6516,41 +6644,6 @@ export default function Battle({
         ctx.fill();
         ctx.globalAlpha = 1;
       }
-      if (e.bleedT > 0) {
-        // Demon Ritual: dark blood sheeting off the wound
-        ctx.globalAlpha = 0.5 + Math.sin(now / 70 + e.wob) * 0.15;
-        ctx.strokeStyle = "#c4243a";
-        ctx.lineWidth = 2.5;
-        for (let i = 0; i < 3; i++) {
-          const dx = (i - 1) * (et.r * 0.5);
-          ctx.beginPath();
-          ctx.moveTo(dx, et.r * 0.4);
-          ctx.lineTo(dx + Math.sin(now / 240 + i) * 3, et.r * 0.4 + 9 + ((now / 90 + i * 30) % 12));
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-      }
-      if (e.imprisonT > 0) {
-        // Demon Ritual: a rune cage holding the boss's skills shut
-        ctx.save();
-        ctx.globalAlpha = 0.75;
-        ctx.strokeStyle = "#ff4fd8";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([6, 6]);
-        ctx.beginPath();
-        ctx.arc(0, 0, et.r + 12, now / 400, now / 400 + Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.rotate(-now / 900);
-        for (let i = 0; i < 4; i++) {
-          ctx.rotate(Math.PI / 2);
-          ctx.beginPath();
-          ctx.moveTo(et.r + 2, 0);
-          ctx.lineTo(et.r + 12, 0);
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
       if (e.slowT > 0 && e.frozen <= 0) {
         ctx.strokeStyle = "#7fe9ff";
         ctx.lineWidth = 2;
@@ -6573,10 +6666,24 @@ export default function Battle({
       }
       ctx.restore();
       // health bar: rounded, outlined, with a lighter cap so it reads at speed
-      const w3 = Math.max(26, et.r * 2);
+      const boss = isBossType(e.type);
+      const w3 = Math.max(28, et.r * 2);
       const hpPct = Math.max(0, Math.min(1, e.hp / e.max));
-      const by = p.y - et.r - (isBossType(e.type) ? 22 : 15) + bob;
-      const bh = isBossType(e.type) ? 6 : 5;
+      const by = p.y - et.r - (boss ? 22 : 15) + bob;
+      const bh = boss ? 7 : 5;
+      // current/max readout: sits just above the bar, outlined for contrast
+      const hpLabel = `${shortHp(e.hp)}/${shortHp(e.max)}`;
+      ctx.save();
+      const fs = boss ? 12 : 10;
+      ctx.font = `800 ${fs}px ${canvasUiFont}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "alphabetic";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgba(0,0,0,0.88)";
+      ctx.strokeText(hpLabel, p.x, by - 4);
+      ctx.fillStyle = hpPct > 0.25 ? "#eafff2" : "#ffd7db";
+      ctx.fillText(hpLabel, p.x, by - 4);
+      ctx.restore();
       ctx.fillStyle = "rgba(0,0,0,0.72)";
       ctx.beginPath();
       ctx.roundRect(p.x - w3 / 2 - 1, by - 1, w3 + 2, bh + 2, 3);
@@ -6589,6 +6696,11 @@ export default function Battle({
       ctx.fillStyle = hpGrad;
       ctx.beginPath();
       ctx.roundRect(p.x - w3 / 2, by, Math.max(1, w3 * hpPct), bh, 2);
+      ctx.fill();
+      // a thin cap line on top keeps the fill edge readable at max health
+      ctx.fillStyle = "#ffffff55";
+      ctx.beginPath();
+      ctx.roundRect(p.x - w3 / 2, by, Math.max(1, w3 * hpPct), 1.5, 1);
       ctx.fill();
     };
 
@@ -6789,6 +6901,8 @@ export default function Battle({
 
     const draw = () => {
       const now = performance.now();
+      let shakeX = 0;
+      let shakeY = 0;
       ctx.clearRect(0, 0, W, H);
 
       // ================= BATTLEFIELD =================
@@ -6821,8 +6935,14 @@ export default function Battle({
 
       // camera shake/punch move the arena content but never the sky
       ctx.save();
-      if (g.shake > 0.3 && fxOn() && !saveRef.current.powerSaver)
-        ctx.translate((Math.random() - 0.5) * g.shake, (Math.random() - 0.5) * g.shake);
+      if (g.shake > 0.3 && fxOn() && !saveRef.current.powerSaver) {
+        // A smooth, high-frequency rumble gives the temporal smear a real
+        // direction instead of flickering randomly between unrelated offsets.
+        const shakePhase = now * 0.058;
+        shakeX = Math.sin(shakePhase) * g.shake;
+        shakeY = Math.cos(shakePhase * 1.17) * g.shake * 0.72;
+        ctx.translate(shakeX, shakeY);
+      }
       if (g.punch > 0.01) {
         const sc = 1 + g.punch * 0.045;
         ctx.translate(W / 2, H / 2);
@@ -7143,6 +7263,49 @@ export default function Battle({
           ctx.beginPath();
           ctx.arc(z.x, z.y, r * 0.22 * (1 + Math.sin(tt * 9) * 0.06), 0, Math.PI * 2);
           ctx.fill();
+        } else if (z.kind === "hell") {
+          // Hell Dimensions impact scar: an obsidian portal surrounded by deep
+          // crimson fissures that branch outward and pulse with hot light.
+          const age = 1 - life;
+          const grow = Math.min(1, age * 8);
+          const r = z.r * (0.35 + grow * 0.65);
+          ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = fade * 0.68;
+          const heat = ctx.createRadialGradient(z.x, z.y, 2, z.x, z.y, r * 1.2);
+          heat.addColorStop(0, "#ff5666aa");
+          heat.addColorStop(0.32, "#a60025aa");
+          heat.addColorStop(1, "transparent");
+          ctx.fillStyle = heat;
+          ctx.beginPath();
+          ctx.ellipse(z.x, z.y, r * 1.2, r * 0.58, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalCompositeOperation = "source-over";
+          // branching cracks are drawn in the ground plane, not as a floating ring
+          ctx.globalAlpha = fade * 0.9;
+          ctx.lineCap = "round";
+          for (let arm = 0; arm < 12; arm++) {
+            const a = (arm / 12) * Math.PI * 2 + z.seed * 0.2;
+            const reach = r * (0.72 + ((arm * 17) % 5) * 0.07);
+            const bend = ((arm % 2) ? 1 : -1) * (8 + arm % 4 * 3);
+            ctx.strokeStyle = arm % 3 === 0 ? "#ff4b5e" : "#6f0018";
+            ctx.lineWidth = arm % 3 === 0 ? 3.2 : 2;
+            ctx.beginPath();
+            ctx.moveTo(z.x, z.y);
+            ctx.lineTo(z.x + Math.cos(a) * reach * 0.45 + bend, z.y + Math.sin(a) * reach * 0.23);
+            ctx.lineTo(z.x + Math.cos(a + 0.07) * reach * 0.72 - bend * 0.35, z.y + Math.sin(a + 0.07) * reach * 0.37);
+            ctx.lineTo(z.x + Math.cos(a) * reach, z.y + Math.sin(a) * reach * 0.5);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = fade;
+          ctx.strokeStyle = "#ff9aa7";
+          ctx.lineWidth = 2 + Math.sin(tt * 9) * 0.8;
+          ctx.beginPath();
+          ctx.ellipse(z.x, z.y, r * 0.53, r * 0.22, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.fillStyle = "#160008";
+          ctx.beginPath();
+          ctx.ellipse(z.x, z.y, r * 0.4, r * 0.17, 0, 0, Math.PI * 2);
+          ctx.fill();
         } else if (z.kind === "lava") {
           // molten pool: a wobbling blob with a bright crust and rising heat
           ctx.globalAlpha = fade * 0.75;
@@ -7222,19 +7385,28 @@ export default function Battle({
       for (const st of g.strikes) {
         const k = Math.max(0, Math.min(1, st.life / st.max)); // 1 -> 0
         const top = st.top ?? -70;
-        const w = st.width * (0.72 + k * 0.5);
+        const w = st.width * (0.34 + k * 0.18);
         const detailed = pillarIdx++ < 10 && fxQ() >= 0.7;
-        const segs = 12;
+        const segs = 16;
         const span = Math.max(40, st.y - top);
-        const sway = w * 1.25;
+        const sway = w * 1.9;
+        // Reuse a compact typed offset buffer and the point list. The bolt changes
+        // shape at 100 Hz (10ms) rather than burning RNG and allocating per frame.
+        if (!st.jitter || st.jitter.length !== segs + 1) st.jitter = new Float32Array(segs + 1);
+        if (!st.points || st.points.length !== segs + 1) st.points = Array.from({ length: segs + 1 }, () => ({ x: 0, y: 0 }));
+        if (now - (st.lastJit || 0) >= 10 || !st.lastJit) {
+          for (let i = 0; i <= segs; i++) st.jitter[i] = i === 0 || i === segs ? 0 : Math.random() * 2 - 1;
+          st.lastJit = now;
+        }
         const channel = (salt: number, spread: number, from: number, to: number) => {
-          const out: { x: number; y: number }[] = [];
+          const out = st.points!;
           for (let i = 0; i <= segs; i++) {
             const t = i / segs;
             // taper the wobble at both ends so the bolt is anchored
-            const env = Math.sin(Math.PI * t) * 0.9 + 0.1;
-            const jx = (hash(st.seed * 3.7 + i * 1.93 + salt) - 0.5) * 2 * spread * env;
-            out.push({ x: st.x + jx, y: top + span * (from + (to - from) * t) });
+            const env = Math.sin(Math.PI * t) * 0.92;
+            const jx = (st.jitter![i] + (salt ? hash(st.seed * 3.7 + i * 1.93 + salt) - 0.5 : 0)) * spread * env;
+            out[i].x = st.x + jx;
+            out[i].y = top + span * (from + (to - from) * t);
           }
           return out;
         };
@@ -7617,6 +7789,37 @@ export default function Battle({
         ctx.fillRect(0, 0, W, H);
         ctx.restore();
       }
+
+      // Directional temporal smear only while the camera is actually shaking.
+      // It uses a downsampled prior frame, fades quickly, and is disabled by
+      // reduced effects, power saving, or the user's screen-shake preference.
+      const shakeVelocity = Math.hypot(shakeX - lastShakeX, shakeY - lastShakeY);
+      const blurStrength = Math.min(0.28, shakeVelocity * 0.024);
+      const useMotionBlur =
+        hasPreviousFrame && blurStrength > 0.025 && g.shake > 1.5 && fxOn() && fxQ() >= 0.7 &&
+        saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver;
+      const tw = trailCanvas.width;
+      const th = trailCanvas.height;
+      currentCtx.clearRect(0, 0, tw, th);
+      currentCtx.drawImage(canvas, 0, 0, tw, th);
+      if (useMotionBlur) {
+        trailCtx.clearRect(0, 0, tw, th);
+        trailCtx.globalAlpha = 1;
+        trailCtx.drawImage(currentCanvas, 0, 0, tw, th);
+        trailCtx.globalAlpha = blurStrength;
+        trailCtx.drawImage(previousCanvas, -(shakeX - lastShakeX) * 1.5, -(shakeY - lastShakeY) * 1.5, tw, th);
+        trailCtx.globalAlpha = 1;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, W, H);
+        ctx.drawImage(trailCanvas, 0, 0, tw, th, 0, 0, W, H);
+        ctx.restore();
+      }
+      previousCtx.clearRect(0, 0, tw, th);
+      previousCtx.drawImage(currentCanvas, 0, 0, tw, th);
+      lastShakeX = shakeX;
+      lastShakeY = shakeY;
+      hasPreviousFrame = true;
     };
 
     // ---------- loop ----------
@@ -7674,12 +7877,12 @@ export default function Battle({
       // fell too far behind: drop the backlog and draw the true state
       const dropped = acc >= STEP;
       if (dropped) acc = 0;
-      renderAlpha =
-        saveRef.current.frameInterp && !ps
-          ? dropped
-            ? 1
-            : Math.max(0, Math.min(1, acc / STEP))
-          : 1;
+      rawRenderAlpha = dropped ? 1 : Math.max(0, Math.min(1, acc / STEP));
+      renderAlpha = saveRef.current.frameInterp && !ps
+        ? saveRef.current.interpolationMethod === "smoothstep"
+          ? rawRenderAlpha * rawRenderAlpha * (3 - 2 * rawRenderAlpha)
+          : rawRenderAlpha
+        : 1;
       fxUserLevel = ps ? 2 : saveRef.current.fxq || 0;
       const drawStart = performance.now();
       draw();
@@ -7726,7 +7929,13 @@ export default function Battle({
       }
     };
     raf = requestAnimationFrame(loop);
-    // canvas pointer: drag placed towers / merge
+    // Canvas gestures: tower drags, one-finger scroll-pan when zoomed, wheel
+    // zoom, and two-finger pinch. Pinch persists once on release, not on every
+    // pointermove, so localStorage and React stay out of the hot path.
+    const cameraPointers = new Map<number, { x: number; y: number }>();
+    let pinchStart: { distance: number; zoom: number } | null = null;
+    let panStart: { id: number; x: number; y: number; left: number; top: number } | null = null;
+    const distance = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(a.x - b.x, a.y - b.y);
     const toCanvas = (e: PointerEvent) => canvasPoint(canvas, e.clientX, e.clientY);
     const cellAt = (x: number, y: number) => {
       if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
@@ -7736,31 +7945,69 @@ export default function Battle({
       return { c, r };
     };
     const down = (e: PointerEvent) => {
+      cameraPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (cameraPointers.size >= 2) {
+        const pts = [...cameraPointers.values()];
+        pinchStart = { distance: Math.max(1, distance(pts[0], pts[1])), zoom: zoomRef.current };
+        dragRef.current = null;
+        panStart = null;
+        try { canvas.setPointerCapture(e.pointerId); } catch { /* old WebViews */ }
+        e.preventDefault();
+        return;
+      }
       const p = toCanvas(e);
       const cell = cellAt(p.x, p.y);
-      if (!cell) return;
-      const t = g.towers.find((x) => x.cell && x.cell.c === cell.c && x.cell.r === cell.r);
-      if (t) {
-        dragRef.current = { kind: "field", uid: t.uid, x: p.x, y: p.y, moved: false };
-        canvas.setPointerCapture(e.pointerId);
+      const tower = cell ? g.towers.find((x) => x.cell && x.cell.c === cell.c && x.cell.r === cell.r) : undefined;
+      if (tower) {
+        dragRef.current = { kind: "field", uid: tower.uid, x: p.x, y: p.y, moved: false };
+        try { canvas.setPointerCapture(e.pointerId); } catch { /* old WebViews */ }
         sfx.hover();
+      } else if (zoomRef.current > 1.01) {
+        panStart = { id: e.pointerId, x: e.clientX, y: e.clientY, left: wrap.scrollLeft, top: wrap.scrollTop };
+        try { canvas.setPointerCapture(e.pointerId); } catch { /* old WebViews */ }
       }
     };
     const move = (e: PointerEvent) => {
-      const d = dragRef.current;
-      if (!d || d.kind !== "field") return;
+      if (cameraPointers.has(e.pointerId)) cameraPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinchStart && cameraPointers.size >= 2) {
+        const pts = [...cameraPointers.values()];
+        const nextZoom = clampZoom(pinchStart.zoom * distance(pts[0], pts[1]) / pinchStart.distance);
+        if (nextZoom !== zoomRef.current) {
+          zoomRef.current = nextZoom;
+          setZoom(nextZoom);
+          fit();
+        }
+        e.preventDefault();
+        return;
+      }
+      const activePan = panStart;
+      if (activePan && activePan.id === e.pointerId) {
+        wrap.scrollLeft = activePan.left - (e.clientX - activePan.x);
+        wrap.scrollTop = activePan.top - (e.clientY - activePan.y);
+        e.preventDefault();
+        return;
+      }
+      const drag = dragRef.current;
+      if (!drag || drag.kind !== "field") return;
       const p = toCanvas(e);
-      d.x = p.x;
-      d.y = p.y;
-      d.moved = true;
+      drag.x = p.x;
+      drag.y = p.y;
+      drag.moved = true;
     };
     const up = (e: PointerEvent) => {
-      const d = dragRef.current;
+      cameraPointers.delete(e.pointerId);
+      if (pinchStart && cameraPointers.size < 2) {
+        pinchStart = null;
+        mutateRef.current((s) => { s.zoom = zoomRef.current; });
+      }
+      if (panStart?.id === e.pointerId) panStart = null;
+      if (cameraPointers.size > 0 && !dragRef.current) return;
+      const drag = dragRef.current;
       dragRef.current = null;
-      if (!d || !d.moved) return;
+      if (!drag || !drag.moved) return;
       const p = toCanvas(e);
       const cell = cellAt(p.x, p.y);
-      const src = g.towers.find((x) => x.uid === d.uid);
+      const src = g.towers.find((x) => x.uid === drag.uid);
       if (!src || !cell) return;
       if (cell.c === src.cell?.c && cell.r === src.cell?.r) return;
       const occ = g.towers.find((x) => x.cell && x.cell.c === cell.c && x.cell.r === cell.r && x.uid !== src.uid);
@@ -7780,10 +8027,22 @@ export default function Battle({
       }
       onPlaced(src, cell.c, cell.r);
     };
+    const wheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const nextZoom = clampZoom(zoomRef.current * Math.exp(-e.deltaY * 0.0015));
+      if (nextZoom !== zoomRef.current) {
+        zoomRef.current = nextZoom;
+        setZoom(nextZoom);
+        fit();
+        mutateRef.current((s) => { s.zoom = nextZoom; });
+      }
+    };
     canvas.addEventListener("pointerdown", down);
     canvas.addEventListener("pointermove", move);
     canvas.addEventListener("pointerup", up);
     canvas.addEventListener("pointercancel", up);
+    canvas.addEventListener("wheel", wheel, { passive: false });
 
     return () => {
       cancelAnimationFrame(raf);
@@ -7793,13 +8052,13 @@ export default function Battle({
       canvas.removeEventListener("pointermove", move);
       canvas.removeEventListener("pointerup", up);
       canvas.removeEventListener("pointercancel", up);
+      canvas.removeEventListener("wheel", wheel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   const g = gRef.current;
   const cost = g ? spCost(g.spSpend) : SP_BASE_COST;
-  const ascentCost = g ? ascSpCost(g.ascSpend) : ASC_BASE_COST;
 
   /**
    * ASCENT is a button on the tower itself now — no dragging.
@@ -7816,7 +8075,7 @@ export default function Battle({
       push(`${t.def.name} is already at battle level ${MAX_BATTLE_LEVEL}`, "#ff4d5e");
       return;
     }
-    const cost = ascSpCost(gg.ascSpend);
+    const cost = ascSpCost(Math.max(0, t.bLv - 1));
     if (gg.sp < cost) {
       sfx.error();
       push("Not enough SP", "#ff4d5e");
@@ -8070,6 +8329,30 @@ export default function Battle({
           <span className="wave-strip-hp">HP ×{Math.pow(HP_GROWTH, Math.max(0, g.round - 1)).toFixed(1)}</span>
           {g.round % 4 === 0 && <span className="wave-strip-boss">BOSS</span>}
           {save.powerSaver && <span className="wave-strip-saver" title="Power Saving Mode is on">SAVER</span>}
+          {mode !== "battle" && (() => {
+            const uses = save.mail.autoWeek === weekStr() ? save.mail.autoUses : 0;
+            const deployed = g.towers.filter((t) => !!t.cell && t.downT <= 0 && t.hexT <= 0);
+            const dps = deployed.reduce((sum, t) => {
+              const upg = t.menuLv - 1;
+              let personalSpeed = (t.def.aspd || 0) + (t.def.upAspd || 0) * upg + (t.def.ascAspd || 0) * (t.bLv - 1);
+              if (t.def.id === "lightning") personalSpeed = 0;
+              let rate = t.def.rate / (1 + personalSpeed + t.superBuff);
+              rate /= 1 + POINT_STEP * t.points;
+              rate /= 1 + g.bonusAspd;
+              if (g.odT > 0) rate /= 1 + OVERDRIVE_ASPD;
+              rate = Math.max(0.08, rate);
+              let damage = towerDamage(t.def, t.menuLv, t.bLv, t.points, t.atkMul) * (1 + g.dmgBonus) * (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1);
+              if (isLightningTower(t.def)) damage *= 1 + g.lightningBonus;
+              damage *= 1 + t.honorMul;
+              if (t.surgeT > 0) damage *= 1 + t.surgeMul;
+              if (t.def.killStack) { const tier = save.awn[t.def.id]?.[1] || 0; const cap = tier > 0 ? t.def.awk2?.mult[tier - 1] || 0 : 0; damage *= 1 + Math.min(cap, t.streak) * t.def.killStack; }
+              const targetFactor = t.def.target === "all" ? WAVE_ENEMY_COUNT : 1;
+              const chainFactor = t.def.chain ? Math.min(2.5, 1 + t.def.chain * 0.22) : 1;
+              const splashFactor = t.def.splash ? Math.min(1.6, 1 + t.def.splash / 180) : 1;
+              return sum + damage / rate * targetFactor * chainFactor * splashFactor;
+            }, 0);
+            return <button type="button" disabled={!!g.final || uses >= 3} className="ml-auto rounded-md border border-[#ff4fd8]/50 bg-black/70 px-2 py-1 text-[10px] font-bold text-[#ff9be9] disabled:opacity-40" data-testid="auto-resolve" onClick={() => onAutoBattle?.(mode, dps, deployed.length, g.phase === "inter" || g.phase === "boon" ? g.round + 1 : g.round, g.gold, g.goldMul, g.boons.length)}>{uses >= 3 ? "AUTO LIMIT · 3/3" : `AUTO-RESOLVE · ${Math.max(0, 3 - uses)}/3`}</button>;
+          })()}
         </div>
       )}
 
@@ -8160,8 +8443,8 @@ export default function Battle({
                   </span>
                   {e.enraged && <span className="rounded bg-[#ff4d5e] px-1 text-[9px] font-bold leading-tight text-black">ENRAGED</span>}
                   {e.ward > 0 && <span className="rounded bg-[#8fb0ff] px-1 text-[9px] font-bold leading-tight text-black">WARD {e.ward.toFixed(1)}s</span>}
-                  <span className="ml-auto text-[10px] font-bold text-[var(--dim)]">
-                    {bosses.length > 1 ? `${bosses.length} BOSSES` : `${Math.ceil(frac * 100)}%`}
+                  <span className="num ml-auto text-[10px] font-bold text-[var(--dim)]">
+                    {bosses.length > 1 ? `${bosses.length} BOSSES` : `${shortHp(e.hp)} / ${shortHp(e.max)} · ${Math.ceil(frac * 100)}%`}
                   </span>
                 </div>
                 <div className="mt-1.5 h-3 overflow-hidden rounded-full border border-black/60 bg-black/70">
@@ -8310,6 +8593,12 @@ export default function Battle({
             ZOOM {Math.round(zoom * 100)}%
           </span>
           <button
+            className="rounded-md bg-black/40 px-1.5 py-1 text-[9px] font-bold tracking-wider text-[var(--dim)] hover:text-white"
+            onClick={() => changeZoom(1)}
+            aria-label="Fit arena"
+            title="Fit arena"
+          >FIT</button>
+          <button
             className="grid h-7 w-7 place-items-center rounded-lg bg-black/40 text-[17px] font-bold leading-none text-[var(--txt)] transition hover:bg-black/70"
             onClick={() => changeZoom(zoom + 0.1)}
             aria-label="Zoom in"
@@ -8427,7 +8716,7 @@ export default function Battle({
           COMPACT: a 40px strip instead of a three-row card, so the arena keeps
           its height on a phone. The ascent button is the only tall element. */}
       {g && (
-        <div className="flex shrink-0 items-stretch gap-1 px-1.5 pb-1" data-testid="ascent-bar">
+        <div className="ascent-strip flex shrink-0 items-stretch gap-1 overflow-x-auto px-1.5 pb-1" data-testid="ascent-bar">
           {lineupIds.map((id, i) => {
             const def = TOWER_BY_ID[id];
             const copies = g.towers.filter((x) => x.def.id === id);
@@ -8435,6 +8724,7 @@ export default function Battle({
             const bLv = lead ? lead.bLv : 1;
             const pts = lead ? Math.max(...copies.map((x) => x.points)) : 0;
             const maxed = !!lead && bLv >= MAX_BATTLE_LEVEL;
+            const ascentCost = lead ? ascSpCost(Math.max(0, lead.bLv - 1)) : ASC_BASE_COST;
             const canAscend = !!lead && !maxed && g.sp >= ascentCost;
             const rc = RARITY[def.rarity];
             return (
@@ -8442,7 +8732,7 @@ export default function Battle({
                 key={id}
                 data-slot={i}
                 data-tower={id}
-                className="tile flex min-w-0 flex-1 items-center gap-1 px-1 py-0.5"
+                className="tile ascent-slot flex min-w-0 flex-1 items-center gap-1 px-1 py-0.5"
                 style={{ opacity: lead ? 1 : 0.4, borderColor: lead ? rc.color : undefined }}
               >
                 <TowerIcon def={def} size={16} />
@@ -8473,7 +8763,7 @@ export default function Battle({
                     ascendTower(lead.uid);
                   }}
                   className={`ascend-btn ascend-btn-compact shrink-0 ${canAscend ? "on" : ""}`}
-                  title={lead ? `Ascend ${def.name} for ${ascentCost} SP` : `${def.name} is not deployed`}
+                  title={lead ? `Ascend ${def.name} family for ${ascentCost} SP · cost scales with this family’s battle level` : `${def.name} is not deployed`}
                 >
                   {!lead ? (
                     "NOT DEPLOYED"
@@ -8621,8 +8911,9 @@ export default function Battle({
                   <span className="num">{g.cut.locked ? "!" : Math.max(1, Math.ceil(g.cut.t))}</span>
                 </div>
                 <span className="text-[11px] font-bold tracking-[0.25em] text-[var(--dim)]">
-                  {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "TAP TO SKIP"}
+                  {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "CUTSCENE"}
                 </span>
+                <button type="button" className="btn btn-cyan px-3 py-1.5 text-xs" aria-label="Skip boss cutscene" onClick={(e) => { e.stopPropagation(); sfx.bossSkip(); if (g) g.cut = null; }}>SKIP BOSS INTRO</button>
               </div>
             </div>
           </div>
@@ -8722,13 +9013,14 @@ function RunShop({
   onClose: () => void;
 }) {
   return (
+    <ViewportPortal>
     <div
       className="fixed inset-0 z-[95] flex items-center justify-center bg-black/80 p-4"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="panel anim-pop max-h-[88vh] w-[560px] overflow-y-auto scroll-thin p-5" data-testid="run-shop">
+      <div className="panel anim-pop max-h-[88dvh] w-[min(560px,94vw)] overflow-y-auto scroll-thin p-3 sm:p-5" data-testid="run-shop">
         <div className="flex items-center justify-between">
           <div>
             <div className="font-disp text-2xl text-[#8effc4]">Battle Shop</div>
@@ -8775,6 +9067,7 @@ function RunShop({
         </button>
       </div>
     </div>
+    </ViewportPortal>
   );
 }
 

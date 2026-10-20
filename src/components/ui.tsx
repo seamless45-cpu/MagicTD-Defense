@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { sfx } from "../game/audio";
 import type { ChipId, TowerDef } from "../game/data";
 import { HERO_BY_ID, RARITY, TOWER_BY_ID, leagueFor, towerArt } from "../game/data";
 import type { RewardLine } from "../game/save";
+
+/** Escape fixed overlays from transformed/scrolling app panels into the viewport. */
+export function ViewportPortal({ children }: { children: ReactNode }) {
+  if (typeof document === "undefined") return <>{children}</>;
+  const root = document.documentElement;
+  const classes = [
+    root.dataset.reducedMotion === "on" ? "calm" : "",
+    root.dataset.powerSaver === "on" ? "power-saver" : "",
+  ].filter(Boolean).join(" ");
+  return createPortal(<div className={classes} style={{ display: "contents" }}>{children}</div>, document.body);
+}
 
 export function CoinIcon({ size = 18 }: { size?: number }) {
   return (
@@ -417,6 +429,14 @@ export function TowerIcon({
             <path d="M10 29h28" stroke={a} strokeWidth="1.6" opacity="0.6" />
           </g>
         );
+      case "supervisor":
+        return (
+          <g>
+            <path d="M24 5 40 12v12c0 10-7 16-16 20C15 40 8 34 8 24V12z" fill="#260812" stroke="#ff315c" strokeWidth="2.5" />
+            <path d="M26 10 15 26h8l-2 12 12-18h-8z" fill="#ff315c" stroke="#ffdbe2" strokeWidth="1.2" />
+            <path d="M11 16h5M32 34h5" stroke="#ff9aaa" strokeWidth="2" strokeLinecap="round" />
+          </g>
+        );
       case "honor":
         return (
           <g>
@@ -445,23 +465,6 @@ export function TowerIcon({
             <circle cx="33" cy="32" r="3.4" fill={a} />
           </g>
         );
-      case "flame":
-        return (
-          <g>
-            <path d="M24 5c4 9 13 12 13 22a13 13 0 0 1-26 0c0-7 4-9 7-15 2 4 4 5 6-7z" fill={c} />
-            <path d="M24 17c2 5 7 6 7 12a7 7 0 0 1-14 0c0-4 3-5 5-10 1 2 2 3 2-2z" fill="#fff2b0" />
-            <path d="M10 40h28" stroke={c} strokeWidth="3" strokeLinecap="round" opacity="0.5" />
-          </g>
-        );
-      case "gate":
-        return (
-          <g>
-            <path d="M10 42V22a14 14 0 0 1 28 0v20h-7V22a7 7 0 0 0-14 0v20z" fill={c} />
-            <path d="M18 42V24a6 6 0 0 1 12 0v18z" fill="#1a0b0b" />
-            <circle cx="24" cy="30" r="3" fill={a} />
-            <path d="M8 12l4 6M40 12l-4 6" stroke={c} strokeWidth="2.6" strokeLinecap="round" />
-          </g>
-        );
       case "ion":
         return (
           <g>
@@ -476,23 +479,6 @@ export function TowerIcon({
             <path d="M24 8l8 12-8 20-8-20z" fill={c} opacity="0.9" />
             <path d="M24 8l8 12-8 4-8-4z" fill="#fff" opacity="0.85" />
             <path d="M8 24h8M32 24h8M14 14l5 5M34 34l-5-5" stroke={a} strokeWidth="2.6" strokeLinecap="round" />
-          </g>
-        );
-      case "scythe":
-        return (
-          <g>
-            <path d="M34 8c-14 2-24 12-26 26l5 5c2-12 10-20 21-23z" fill={c} />
-            <path d="M12 38l-4 6h8z" fill={a} />
-            <path d="M34 8l4-3 2 6z" fill="#fff" opacity="0.8" />
-          </g>
-        );
-      case "sling":
-        return (
-          <g>
-            <path d="M12 10c8 4 8 12 8 20" stroke={c} strokeWidth="3" strokeLinecap="round" fill="none" />
-            <path d="M36 10c-8 4-8 12-8 20" stroke={c} strokeWidth="3" strokeLinecap="round" fill="none" />
-            <ellipse cx="24" cy="34" rx="8" ry="6" fill={a} />
-            <path d="M6 40c6-2 12-2 18 0s12 2 18 0" stroke={c} strokeWidth="2.4" strokeLinecap="round" fill="none" opacity="0.7" />
           </g>
         );
       case "spire":
@@ -633,17 +619,13 @@ export function TowerIcon({
             <path d="M18 32h12" stroke={a} strokeWidth="3" strokeLinecap="round" />
           </g>
         );
-      case "beam":
+      default:
         return (
           <g>
-            <rect x="14" y="30" width="20" height="12" rx="4" fill="#2b1f66" stroke={a} strokeWidth="2.4" />
-            <circle cx="24" cy="24" r="10" fill="none" stroke={a} strokeWidth="3" />
-            <circle cx="24" cy="24" r="5" fill={a} />
-            <path d="M24 4v8M8 24h6M40 24h-6M12 12l5 5M36 12l-5 5" stroke={a} strokeWidth="2.4" strokeLinecap="round" />
+            <circle cx="24" cy="24" r="16" fill="#11102a" stroke={c} strokeWidth="2.5" />
+            <text x="24" y="31" textAnchor="middle" fontSize="20" fontWeight="900" fill={a}>{id.slice(0, 1).toUpperCase()}</text>
           </g>
         );
-      default:
-        return <circle cx="24" cy="24" r="14" fill={c} />;
     }
   };
   return (
@@ -759,6 +741,7 @@ export function useToasts() {
 
 export function Toasts({ toasts }: { toasts: { id: number; msg: string; color?: string }[] }) {
   return (
+    <ViewportPortal>
     <div className="pointer-events-none fixed left-1/2 top-16 z-[90] flex -translate-x-1/2 flex-col items-center gap-2">
       {toasts.map((t) => (
         <div
@@ -775,6 +758,7 @@ export function Toasts({ toasts }: { toasts: { id: number; msg: string; color?: 
         </div>
       ))}
     </div>
+    </ViewportPortal>
   );
 }
 
@@ -793,9 +777,10 @@ export interface CeremonyData {
  * Rings expand, runes spin, confetti rains and the tower lands with a slam.
  */
 export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () => void }) {
+  const mysticalUnlock = data.kind === "unlock" && data.tower.rarity === "mystical";
   const confetti = useMemo(
     () =>
-      Array.from({ length: 48 }, (_, i) => ({
+      Array.from({ length: mysticalUnlock ? 64 : 32 }, (_, i) => ({
         id: i,
         left: Math.random() * 100,
         top: 40 + Math.random() * 20,
@@ -807,7 +792,7 @@ export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () =>
         delay: Math.random() * 0.7,
         round: i % 3 === 0,
       })),
-    [data.color]
+    [data.color, mysticalUnlock]
   );
 
   useEffect(() => {
@@ -821,12 +806,14 @@ export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () =>
   const title = data.kind === "awaken" ? "CONGRATULATIONS!" : data.kind === "unlock" ? "TOWER UNLOCKED!" : "TOWER ASCENDED!";
 
   return (
-    <div
-      className="fixed inset-0 z-[98] flex items-center justify-center overflow-hidden bg-black/85"
+    <ViewportPortal>
+      <div
+      className={`fixed inset-0 z-[98] flex items-center justify-center overflow-hidden bg-black/85 ${mysticalUnlock ? "ceremony-mystical" : ""}`}
       style={{ animation: "cerBackdrop 0.35s ease both" }}
       onPointerDown={onClose}
       data-testid="ceremony"
     >
+      {mysticalUnlock && <div className="mystical-unlock-aura pointer-events-none absolute inset-0" aria-hidden="true"><i /><i /><i /><span>MYSTICAL ARRIVAL</span></div>}
       {/* expanding rings + spinning runes */}
       <div className="pointer-events-none absolute inset-0">
         {[0, 0.35, 0.7, 1.05].map((d, i) => (
@@ -880,7 +867,7 @@ export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () =>
         >
           {title}
         </div>
-        <div className="cer-tower mt-6" style={{ color: data.color }}>
+        <div className={`cer-tower mt-6 ${mysticalUnlock ? "cer-tower-mystical" : ""}`} style={{ color: data.color }}>
           <TowerIcon def={data.tower} size={168} />
         </div>
         <div className="cer-banner mt-5" style={{ animationDelay: "0.55s" }}>
@@ -911,7 +898,8 @@ export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () =>
           Continue
         </button>
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   );
 }
 
@@ -1121,10 +1109,12 @@ export function Modal({
   children,
   onClose,
   w = 520,
+  closing = false,
 }: {
   children: React.ReactNode;
   onClose?: () => void;
   w?: number;
+  closing?: boolean;
 }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === "Escape" && onClose?.();
@@ -1132,16 +1122,18 @@ export function Modal({
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
   return (
+    <ViewportPortal>
     <div
       className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget) onClose?.();
       }}
     >
-      <div className="panel anim-pop max-h-[88vh] overflow-y-auto scroll-thin p-5" style={{ width: w }}>
+      <div className={`panel modal-slide ${closing ? "modal-slide-out" : "modal-slide-in"} max-h-[88dvh] max-w-[calc(100vw-2rem)] overflow-y-auto scroll-thin p-5`} style={{ width: w, maxWidth: "calc(100vw - 2rem)" }}>
         {children}
       </div>
     </div>
+    </ViewportPortal>
   );
 }
 
@@ -1514,7 +1506,8 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
   const shaking = phase === "rattle" || phase === "crack";
 
   return (
-    <div
+    <ViewportPortal>
+      <div
       className={`claim-root fixed inset-0 z-[90] flex items-center justify-center p-4 ${shaking ? "claim-quake" : ""} ${phase === "wind" ? "claim-vacuum" : ""}`}
       data-testid="reward-claim"
       onPointerDown={onClose}
@@ -1692,7 +1685,8 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
           {opening ? "Opening…" : "Collect"}
         </button>
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   );
 }
 
@@ -1753,7 +1747,8 @@ export function UpgradeCeremony({ data, onClose }: { data: UpgradeData; onClose:
   }, [onClose]);
 
   return (
-    <div className="upg-root fixed inset-0 z-[95] flex items-center justify-center p-4" data-testid="upgrade-ceremony" onPointerDown={onClose}>
+    <ViewportPortal>
+      <div className="upg-root fixed inset-0 z-[95] flex items-center justify-center p-4" data-testid="upgrade-ceremony" onPointerDown={onClose}>
       <div className="relative flex flex-col items-center" onPointerDown={(e) => e.stopPropagation()}>
         {/* rays + burst rings behind the art */}
         <div className="relative grid place-items-center" style={{ width: 240, height: 240 }}>
@@ -1842,6 +1837,7 @@ export function UpgradeCeremony({ data, onClose }: { data: UpgradeData; onClose:
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </ViewportPortal>
   );
 }
