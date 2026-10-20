@@ -4994,3 +4994,402 @@ input[type="range"]:disabled { opacity:.35; cursor:not-allowed; }
   .boss-cut-stage-content .mt-5 { margin-top: 10px; }
   .boss-cut-stage-content .boss-chip-cut { padding: 3px 6px; }
 }
+
+/* =====================================================================
+   UI MOTION 2.0 — a second pass over the shell: spring entrances, depth
+   on hover, a light sweep on cards, tactile presses and a proper easing
+   vocabulary shared by every control.
+   ===================================================================== */
+:root {
+  --ease-out-soft: cubic-bezier(.22, 1, .28, 1);
+  --ease-spring: cubic-bezier(.2, 1.45, .3, 1);
+  --ease-press: cubic-bezier(.3, .7, .2, 1);
+}
+
+/* screens come in with a short depth move; tabs feel like they slide in */
+.screen-enter {
+  animation: screenRise .46s var(--ease-out-soft) both;
+  transform-origin: 50% 12%;
+}
+@keyframes screenRise {
+  0% { opacity: 0; transform: translateY(18px) scale(.984); filter: blur(7px) saturate(.9); }
+  55% { filter: blur(0) saturate(1.03); }
+  100% { opacity: 1; transform: none; filter: none; }
+}
+.screen-enter > * { animation: screenFade .5s var(--ease-out-soft) both; }
+@keyframes screenFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* the tower grid lands cell by cell instead of as one block */
+.tw-cell { animation: cellPop .34s var(--ease-spring) both; }
+.tw-cell:nth-child(3n) { animation-delay: .03s; }
+.tw-cell:nth-child(3n + 1) { animation-delay: .06s; }
+.tw-cell:nth-child(3n + 2) { animation-delay: .09s; }
+@keyframes cellPop {
+  0% { opacity: 0; transform: translateY(10px) scale(.94); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* cards get a real light sweep (masked so it never washes out text) */
+.tile, .panel, .row-card, .awk-card, .upg-block, .boss-hud {
+  position: relative;
+  isolation: isolate;
+}
+.tile::before,
+.panel::before,
+.awk-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, .16) 46%, transparent 62%);
+  transform: translateX(-60%);
+  transition: opacity .2s ease, transform .7s var(--ease-out-soft);
+  z-index: 0;
+}
+.tile:hover::before,
+.panel:hover::before,
+.awk-card:hover::before {
+  opacity: 1;
+  transform: translateX(60%);
+}
+.tile > *, .panel > *, .awk-card > * { position: relative; z-index: 1; }
+
+/* tactile press: every interactive chip dips and snaps back */
+.btn:active:not(:disabled),
+.chip-btn:active,
+.tab-btn:active,
+.tile-hover:active,
+.upg-cta:active:not(:disabled),
+.boss-chip:active {
+  transform: translateY(2px) scale(.972);
+  transition-duration: .06s;
+}
+.btn:disabled, .upg-cta:disabled {
+  filter: saturate(.55) brightness(.82);
+  cursor: not-allowed;
+}
+
+/* toasts drift up from the bottom-left, matching the HUD */
+.toast { animation: toastRise .44s var(--ease-spring) both; }
+@keyframes toastRise {
+  0% { opacity: 0; transform: translateX(-18px) translateY(8px) scale(.96); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+
+/* modals: a crisp spring without the old blur halo overshoot */
+.anim-pop { animation: panelSpring .38s var(--ease-spring) both; }
+@keyframes panelSpring {
+  0% { opacity: 0; transform: translateY(16px) scale(.96); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* ---------- tower upgrade panel ---------- */
+.upg-block {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 207, 77, .07), rgba(0, 0, 0, .34));
+  padding: 10px 12px;
+  animation: panelSpring .4s var(--ease-spring) both;
+}
+.upg-ladder { display: flex; gap: 3px; height: 7px; }
+.upg-ladder i {
+  flex: 1;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05);
+  transition: background .3s ease, box-shadow .3s ease;
+}
+.upg-ladder i.on { box-shadow: 0 0 8px rgba(255, 207, 77, .55); }
+.cost-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  border: 1px solid #ff4d5e66;
+  background: rgba(255, 77, 94, .1);
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffb3ba;
+}
+.cost-chip[data-ok="true"] {
+  border-color: #3dff8e66;
+  background: rgba(61, 255, 142, .1);
+  color: #8effc4;
+}
+.upg-cta { border-radius: 9px; font-weight: 800; letter-spacing: .04em; }
+
+/* ---------- awakening cards ---------- */
+.awk-block {
+  border: 1px solid #ff4fd855;
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 79, 216, .08), rgba(0, 0, 0, .36));
+  padding: 10px 12px;
+  animation: panelSpring .46s var(--ease-spring) both;
+}
+.awk-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 79, 216, .32);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, .34);
+  padding: 8px;
+  transition: border-color .22s ease, box-shadow .22s ease, transform .22s var(--ease-out-soft), background .22s ease;
+}
+.awk-card:hover { transform: translateY(-2px); border-color: rgba(255, 79, 216, .66); background: rgba(24, 4, 32, .5); }
+.awk-card.on { border-color: rgba(255, 79, 216, .8); box-shadow: 0 0 20px rgba(255, 79, 216, .18), inset 0 1px 0 rgba(255, 255, 255, .08); }
+.awk-card.locked { opacity: .62; }
+.awk-card.locked:hover { transform: none; }
+.awk-num {
+  display: grid;
+  place-items: center;
+  width: 16px; height: 16px;
+  border-radius: 5px;
+  background: rgba(255, 79, 216, .18);
+  border: 1px solid rgba(255, 79, 216, .5);
+  font-size: 9.5px;
+  font-weight: 900;
+  color: #ff9be9;
+}
+.awk-pips { display: flex; gap: 3px; }
+.awk-pips i {
+  height: 4px;
+  flex: 1;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .12);
+  transition: background .3s ease, box-shadow .3s ease;
+}
+.awk-pips i.on {
+  background: linear-gradient(90deg, #ff4fd8, #ffcf4d);
+  box-shadow: 0 0 8px rgba(255, 79, 216, .6);
+}
+.awk-max {
+  margin-top: 6px;
+  border-radius: 8px;
+  border: 1px solid #ff4fd877;
+  padding: 4px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 800;
+  color: #ff9be9;
+  letter-spacing: .08em;
+}
+
+/* ---------- compact boss HUD ---------- */
+.boss-hud {
+  border: 1px solid;
+  border-radius: 11px;
+  padding: 5px 8px 6px;
+  background: linear-gradient(180deg, rgba(10, 6, 24, .92), rgba(10, 6, 24, .74));
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: hudDrop .34s var(--ease-spring) both;
+}
+@keyframes hudDrop {
+  0% { opacity: 0; transform: translateY(-10px) scale(.97); }
+  100% { opacity: 1; transform: none; }
+}
+.boss-hud-dot {
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  animation: hudDot 1.4s ease-in-out infinite;
+}
+@keyframes hudDot { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+.boss-hud-tag {
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 8.5px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  line-height: 1.4;
+}
+.boss-chip-sm { padding: 0 4px; font-size: 8.5px; border-radius: 5px; }
+.boss-chip-sm .boss-chip-label {
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: .9;
+}
+@media (max-width: 520px) {
+  .boss-chip-sm .boss-chip-label { display: none; }
+}
+
+/* ---------- compact cutscene card ---------- */
+.boss-cut-card {
+  border: 1px solid rgba(255, 255, 255, .16);
+  background: linear-gradient(180deg, rgba(14, 8, 30, .97), rgba(8, 4, 18, .94));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .65), 0 0 40px rgba(255, 79, 216, .12), inset 0 1px 0 rgba(255, 255, 255, .12);
+  animation: cutCardIn .42s var(--ease-spring) both;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+@keyframes cutCardIn {
+  0% { opacity: 0; transform: translateY(22px) scale(.95); }
+  100% { opacity: 1; transform: none; }
+}
+.boss-cut-stripe {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  opacity: .95;
+}
+.boss-cut-portrait-sm {
+  position: relative;
+  top: auto; left: auto;
+  transform: none;
+  opacity: 1;
+  flex-shrink: 0;
+  width: 96px; height: 96px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  background: radial-gradient(circle at 50% 40%, rgba(255, 255, 255, .08), rgba(0, 0, 0, .35));
+  overflow: hidden;
+  animation: portraitPop .5s var(--ease-spring) both;
+}
+.boss-cut-portrait-sm svg { width: 92px; height: 92px; }
+@keyframes portraitPop {
+  0% { opacity: 0; transform: scale(.72) rotate(-6deg); }
+  100% { opacity: 1; transform: none; }
+}
+.boss-cut-portrait-sm.locked { animation: portraitLock .4s ease-out both; }
+@keyframes portraitLock {
+  0% { filter: brightness(1); }
+  40% { filter: brightness(2.1) drop-shadow(0 0 26px #fff); }
+  100% { filter: brightness(1.1); }
+}
+.boss-cut-count-sm {
+  width: 22px; height: 22px;
+  font-size: 12px;
+  border-width: 1.5px;
+  animation: none;
+}
+.boss-cut-card .boss-chip-cut { font-size: 9px; padding: 2px 6px; }
+
+/* =====================================================================
+   LIQUID GLASS 2.0 — a genuine layered material: refraction tint,
+   specular rim, inner caustic sheen and a slow moving highlight.
+   ===================================================================== */
+html[data-ui-glass="on"] {
+  --glass-edge: rgba(214, 244, 255, .52);
+  --glass-sheen: rgba(255, 255, 255, .3);
+  --glass-shadow: rgba(2, 8, 20, .34);
+  --glass-blur: blur(22px) saturate(1.65) brightness(1.05);
+}
+html[data-ui-glass="on"] .panel,
+html[data-ui-glass="on"] .tile,
+html[data-ui-glass="on"] .row-card,
+html[data-ui-glass="on"] .hud-pill,
+html[data-ui-glass="on"] .mail-row,
+html[data-ui-glass="on"] .modal-card,
+html[data-ui-glass="on"] .claim-card,
+html[data-ui-glass="on"] .upg-statrow,
+html[data-ui-glass="on"] .awk-card,
+html[data-ui-glass="on"] .upg-block,
+html[data-ui-glass="on"] .awk-block,
+html[data-ui-glass="on"] .boss-hud,
+html[data-ui-glass="on"] [data-testid="hud"],
+html[data-ui-glass="on"] [data-testid="ascent-bar"] > .tile {
+  background-color: color-mix(in srgb, var(--panel2) 55%, transparent) !important;
+  background-image:
+    /* top specular band */
+    linear-gradient(168deg, rgba(255, 255, 255, .3), rgba(255, 255, 255, .04) 22%, transparent 46%),
+    /* caustic tint pooling at the bottom edge */
+    radial-gradient(120% 70% at 50% 118%, color-mix(in srgb, var(--cyan) 22%, transparent), transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--cyan) 9%, transparent), rgba(0, 0, 0, .1)) !important;
+  border-color: var(--glass-edge) !important;
+  box-shadow:
+    inset 0 1px 0 var(--glass-sheen),
+    inset 0 0 0 1px rgba(255, 255, 255, .045),
+    inset 0 -18px 26px -22px rgba(120, 230, 255, .55),
+    0 1px 0 rgba(255, 255, 255, .06),
+    0 14px 38px var(--glass-shadow),
+    0 0 22px color-mix(in srgb, var(--cyan) 10%, transparent) !important;
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+/* a slow caustic highlight that drifts across every glass surface */
+html[data-ui-glass="on"] .panel::after,
+html[data-ui-glass="on"] .tile::after {
+  background:
+    linear-gradient(116deg, rgba(255, 255, 255, .26), transparent 20%, transparent 74%, rgba(255, 255, 255, .07)) !important;
+  animation: glassDrift 9s ease-in-out infinite alternate;
+}
+@keyframes glassDrift {
+  0% { opacity: .85; transform: translateX(-2%); }
+  100% { opacity: 1; transform: translateX(2%); }
+}
+html[data-ui-glass="on"] .btn,
+html[data-ui-glass="on"] .nav-btn,
+html[data-ui-glass="on"] .tab-btn,
+html[data-ui-glass="on"] .chip-btn,
+html[data-ui-glass="on"] .upg-cta {
+  border-color: color-mix(in srgb, var(--line2) 55%, white) !important;
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .02) 55%, rgba(0, 0, 0, .12));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .34),
+    inset 0 -1px 0 rgba(0, 0, 0, .2),
+    0 6px 18px rgba(0, 0, 0, .22) !important;
+  backdrop-filter: blur(14px) saturate(1.4);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+}
+html[data-ui-glass="on"] .btn:active:not(:disabled) {
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, .38), 0 2px 8px rgba(0, 0, 0, .2) !important;
+}
+html[data-ui-glass="on"] .boss-cut-card {
+  background: linear-gradient(180deg, rgba(18, 12, 38, .8), rgba(8, 4, 18, .72));
+  border-color: rgba(214, 244, 255, .3);
+  backdrop-filter: blur(20px) saturate(1.5);
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+}
+html[data-ui-glass="on"] .screen-enter { filter: none; }
+
+/* reduced motion / power saver kill the new loops too */
+.calm .tw-cell,
+.calm .toast,
+.calm .boss-hud,
+.calm .boss-cut-card,
+.calm .boss-cut-portrait-sm,
+.calm .awk-block,
+.calm .upg-block,
+.power-saver .tw-cell,
+.power-saver .boss-hud,
+.power-saver .boss-cut-portrait-sm {
+  animation: none !important;
+}
+.calm .tile::before,
+.calm .panel::before,
+.calm .awk-card::before { display: none; }
+
+/* hero awakening tier badges on the battle hero card */
+.hero-awk-badges {
+  display: inline-flex;
+  gap: 3px;
+  margin-top: 1px;
+}
+.hero-awk-badges i {
+  display: grid;
+  place-items: center;
+  min-width: 15px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 4px;
+  border: 1px solid rgba(124, 231, 255, .28);
+  background: rgba(0, 0, 0, .4);
+  font-size: 8.5px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1;
+  color: rgba(255, 255, 255, .35);
+}
+.hero-awk-badges i.on {
+  border-color: rgba(255, 79, 216, .8);
+  background: linear-gradient(180deg, rgba(255, 79, 216, .32), rgba(124, 231, 255, .18));
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 79, 216, .45);
+}

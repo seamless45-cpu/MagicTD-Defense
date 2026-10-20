@@ -65,6 +65,8 @@ import {
   BOSS_SKILLS,
   BOSS_KITS,
   TITAN_TYPE,
+  HERALD_TYPE,
+  BOSS_TYPES,
   GAUNTLET_BOONS,
   HOUND_TYPE,
   WRAITH_TYPE,
@@ -84,6 +86,16 @@ import {
   towerArt,
   towerUpgradeCount,
   critAfterUpgrade,
+  HERO_AWAKENING_MAX_TIER,
+  HERO_AWAKENINGS,
+  heroAwakenCost,
+  heroAwkSpec,
+  heroAwkText,
+  inductionShieldCut,
+  inductionBonus,
+  boltThreshold,
+  boltResetChance,
+  boltResetInterval,
 } from "../game/data";
 import { SKILLS } from "../game/skills";
 import { critBonus as critBonusFromSave, critMul } from "../game/save";
@@ -123,6 +135,8 @@ import {
   unclaimedMail,
   claimMail,
   UI_THEMES,
+  awakenHero,
+  heroAwkTier,
 } from "../game/save";
 import { FONTS, FONT_BY_ID, DEFAULT_FONT, fontStack, fontDisplayStack, applyFont } from "../game/fonts";
 import { estimateAutoBattle } from "../game/autobattle";
@@ -834,7 +848,8 @@ describe("bosses", () => {
       expect(BOSS_SKILLS.map((s) => s.id), id).toContain(id);
     }
     expect(BOSS_SKILLS.map((s) => s.id).sort()).toEqual([
-      "blink", "chains", "devour", "enrage", "meteor", "nullfield", "summon", "ward", "warp",
+      "banner", "blink", "chains", "cleave", "devour", "enrage", "maelstrom", "meteor",
+      "nullfield", "overcharge", "quake", "siphon", "summon", "undertow", "warcry", "ward", "warp",
     ]);
     for (const sk of BOSS_SKILLS) {
       expect(sk.name.length).toBeGreaterThan(2);
@@ -1254,8 +1269,8 @@ describe("reworked enemies", () => {
   });
 
   it("keeps the boss indices intact after the rework", () => {
-    // 7 launch enemies + Rift Hound, Cinder Wraith, Shard Golem, Abyss Leviathan
-    expect(ENEMY_TYPES).toHaveLength(11);
+    // 7 launch enemies + Hound, Wraith, Golem, Leviathan, Storm Herald
+    expect(ENEMY_TYPES).toHaveLength(12);
     expect(isBossType(4)).toBe(true);
     expect(isBossType(3)).toBe(false);
     expect(ENEMY_TYPES[5].name).toBe("Rift Overlord");
@@ -1263,13 +1278,18 @@ describe("reworked enemies", () => {
     expect(ENEMY_TYPES[LEVIATHAN_TYPE].name).toBe("Abyss Leviathan");
     expect(ENEMY_TYPES[LEVIATHAN_TYPE].shape).toBe("leviathan");
     expect(isBossType(LEVIATHAN_TYPE)).toBe(true);
-    expect(BOSS_KITS[LEVIATHAN_TYPE]).toHaveLength(9);
+    expect(BOSS_KITS[LEVIATHAN_TYPE]).toEqual(["devour", "chains", "undertow"]);
     // the Void Titan keeps its own index and kit
     expect(ENEMY_TYPES[TITAN_TYPE].name).toBe("Void Titan");
     expect(ENEMY_TYPES[TITAN_TYPE].shape).toBe("titan");
     expect(isBossType(TITAN_TYPE)).toBe(true);
-    expect(BOSS_KITS[TITAN_TYPE]).toHaveLength(9);
-    expect(BOSS_KITS[4]).toHaveLength(6);
+    expect(BOSS_KITS[TITAN_TYPE]).toEqual(["quake", "meteor", "enrage"]);
+    expect(BOSS_KITS[4]).toEqual(["warcry", "cleave", "banner"]);
+    // the Storm Herald closes the roster with its exclusive sky kit
+    expect(ENEMY_TYPES[HERALD_TYPE].name).toBe("Storm Herald");
+    expect(ENEMY_TYPES[HERALD_TYPE].shape).toBe("herald");
+    expect(isBossType(HERALD_TYPE)).toBe(true);
+    expect(BOSS_KITS[HERALD_TYPE]).toEqual(["siphon", "overcharge", "maelstrom"]);
   });
 
   it("introduces the three new mobs with their own silhouettes and stats", () => {
@@ -1473,7 +1493,7 @@ describe("hero skills", () => {
 // ---------- chest pricing & legendary unlocks ----------
 describe("chest economy", () => {
   it("prices every headline chest in gems at the new rates", () => {
-    const want: Record<string, number> = { common: 80, silver: 200, hero: 500, epic: 800, legendary: 2000, mystical: 5000 };
+    const want: Record<string, number> = { common: 80, silver: 200, hero: 500, epic: 800, legendary: 2000, mystical: 4000 };
     Object.entries(want).forEach(([id, cost]) => {
       const c = CHEST_BY_ID[id];
       expect(c, id).toBeTruthy();
@@ -1486,7 +1506,7 @@ describe("chest economy", () => {
     expect(CHEST_BY_ID.mystical.special).toBe("mystical");
     const random = vi.spyOn(Math, "random");
     try {
-      random.mockReturnValueOnce(0.70);
+      random.mockReturnValueOnce(0.60);
       for (let i = 0; i < 5; i++) random.mockReturnValueOnce(0.1);
       const legendary = rollChest("mystical");
       expect(legendary.frags.reduce((sum, f) => sum + f.n, 0)).toBe(5);
@@ -1494,7 +1514,7 @@ describe("chest economy", () => {
       expect(legendary.gold).toBe(0);
 
       random.mockReset();
-      random.mockReturnValueOnce(0.71);
+      random.mockReturnValueOnce(0.70);
       random.mockReturnValueOnce(0.99);
       const mystical = rollChest("mystical");
       expect(mystical.frags).toHaveLength(1);
@@ -1657,12 +1677,18 @@ describe("boss skills", () => {
   it("gives each boss a distinct kit taken from the shared skill table", () => {
     const ids = BOSS_SKILLS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
+    // every boss runs its own three-skill kit, and no skill is reused
+    const seen = new Set<string>();
     for (const [type, kit] of Object.entries(BOSS_KITS) as [string, string[]][]) {
-      expect(kit.length, type).toBeGreaterThanOrEqual(6);
-      for (const id of kit) expect(ids, `${type}/${id}`).toContain(id);
+      expect(kit.length, type).toBe(3);
+      for (const id of kit) {
+        expect(ids, `${type}/${id}`).toContain(id);
+        expect(seen.has(id), `${id} reused by boss ${type}`).toBe(false);
+        seen.add(id);
+      }
     }
-    // only the Overlord gets the full court
-    expect(BOSS_KITS[5].length).toBeGreaterThan(BOSS_KITS[4].length);
+    // every boss in the game has a kit
+    for (const type of BOSS_TYPES) expect(BOSS_KITS[type], String(type)).toBeTruthy();
   });
 
   it("falls back to the first boss kit for unknown types", () => {
@@ -1835,5 +1861,135 @@ describe("auto-battle expeditions", () => {
     expect(deliverAutoBattleReport(save, "endless", 1, 1)).not.toBe("");
     expect(deliverAutoBattleReport(save, "endless", 1, 1)).toBe("");
     expect(save.mail.autoUses).toBe(3);
+  });
+});
+
+
+// ---------- hero awakenings ----------
+describe("hero awakenings", () => {
+  it("ships the Thunder God's two token-bought paths", () => {
+    const pair = HERO_AWAKENINGS.thunder;
+    expect(pair).toHaveLength(2);
+    expect(pair[0].name).toBe("Electrical Induction");
+    expect(pair[1].name).toBe("Bolt from the Blue");
+    expect(pair[1].passive).toBe(true);
+    // only the Thunder God has a track so far
+    expect(heroAwkSpec("nova", 0)).toBeNull();
+    expect(heroAwkText("thunder", 0, 1)).toContain("120% shield cut");
+    expect(heroAwkText("thunder", 1, 1)).toContain("80% HP");
+  });
+
+  it("scales every tier exactly like the card promises", () => {
+    expect(inductionShieldCut(1)).toBeCloseTo(1.2);
+    expect(inductionShieldCut(2)).toBeCloseTo(1.4);
+    expect(inductionBonus(1)).toBeCloseTo(0.5);
+    expect(inductionBonus(2)).toBeCloseTo(0.55);
+    // -1% threshold, +2% reset chance, -0.01s interval per tier
+    expect(boltThreshold(1)).toBeCloseTo(0.8);
+    expect(boltThreshold(3)).toBeCloseTo(0.78);
+    expect(boltResetChance(1)).toBeCloseTo(0.4);
+    expect(boltResetChance(3)).toBeCloseTo(0.44);
+    expect(boltResetInterval(1)).toBeCloseTo(0.5);
+    expect(boltResetInterval(3)).toBeCloseTo(0.48);
+    // and the token price climbs every tier
+    for (let t = 2; t <= HERO_AWAKENING_MAX_TIER; t++) {
+      expect(heroAwakenCost(t)).toBeGreaterThan(heroAwakenCost(t - 1));
+    }
+  });
+
+  it("buys tiers with Magic Tokens and clamps at the cap", () => {
+    const s = defaultSave();
+    s.tokens = 100000;
+    expect(heroAwkTier(s, "thunder", 0)).toBe(0);
+    expect(awakenHero(s, "thunder", 0)).toBe(1);
+    expect(s.heroAwn.thunder[0]).toBe(1);
+    expect(heroAwkTier(s, "thunder", 0)).toBe(1);
+    // the tokens were actually spent
+    expect(s.tokens).toBeLessThan(100000);
+    // an unknown path is refused
+    expect(awakenHero(s, "nova", 0)).toBe(0);
+    // and the track caps out
+    for (let i = 1; i < HERO_AWAKENING_MAX_TIER; i++) awakenHero(s, "thunder", 0);
+    expect(heroAwkTier(s, "thunder", 0)).toBe(HERO_AWAKENING_MAX_TIER);
+    expect(awakenHero(s, "thunder", 0)).toBe(0);
+  });
+
+  it("refuses a purchase the player cannot afford", () => {
+    const s = defaultSave();
+    s.tokens = 0;
+    expect(awakenHero(s, "thunder", 1)).toBe(0);
+    expect(heroAwkTier(s, "thunder", 1)).toBe(0);
+  });
+
+  it("persists hero awakening tiers, the auto-skip flag and clamps junk", () => {
+    const s = defaultSave();
+    expect(s.heroAwn).toEqual({});
+    expect(s.autoSkipBossCut).toBe(false);
+    s.tokens = 5000;
+    awakenHero(s, "thunder", 0);
+    awakenHero(s, "thunder", 1);
+    s.autoSkipBossCut = true;
+    persistSave(s);
+    const back = loadSave();
+    expect(back.heroAwn.thunder).toEqual([1, 1]);
+    expect(back.autoSkipBossCut).toBe(true);
+
+    // junk tier values are clamped rather than trusted
+    const junk = importSave(JSON.stringify({ heroAwn: { thunder: [99, -4] } }));
+    expect(junk.heroAwn.thunder).toEqual([HERO_AWAKENING_MAX_TIER, 0]);
+  });
+});
+
+// ---------- mystical chest odds ----------
+describe("mystical chest odds", () => {
+  it("prices at 4,000 gems with 65/35 odds", () => {
+    expect(CHEST_BY_ID.mystical.cost).toBe(4000);
+    expect(CHEST_BY_ID.mystical.gem).toBe(1);
+    expect(CHEST_BY_ID.mystical.blurb).toContain("65%");
+    expect(CHEST_BY_ID.mystical.blurb).toContain("35%");
+  });
+
+  it("rolls the 35% mystical branch on any roll above 0.65", () => {
+    const random = vi.spyOn(Math, "random");
+    try {
+      random.mockReturnValueOnce(0.64);
+      for (let i = 0; i < 5; i++) random.mockReturnValueOnce(0.2);
+      const legend = rollChest("mystical");
+      expect(legend.frags.reduce((n, f) => n + f.n, 0)).toBe(5);
+
+      random.mockReset();
+      random.mockReturnValueOnce(0.66);
+      random.mockReturnValueOnce(0.5);
+      const mystic = rollChest("mystical");
+      expect(mystic.frags).toHaveLength(1);
+      expect(TOWER_BY_ID[mystic.frags[0].id].rarity).toBe("mystical");
+    } finally {
+      random.mockRestore();
+    }
+  });
+});
+
+// ---------- auto-resolve accuracy ----------
+describe("auto-resolve simulation", () => {
+  it("reports the life pool it consumed and where the wall is", () => {
+    const plan = estimateAutoBattle(defaultSave(), "endless", 4000, 6, 5);
+    expect(plan.livesLost).toBeGreaterThanOrEqual(0);
+    expect(plan.livesLost).toBeLessThanOrEqual(15);
+    expect(plan.safestWave).toBeGreaterThanOrEqual(4);
+    expect(plan.breaksAtWave).toBe(plan.safestWave + 1);
+    expect(plan.squadDps).toBeGreaterThan(0);
+  });
+
+  it("scales with the measured squad DPS instead of a fixed table", () => {
+    const weak = estimateAutoBattle(defaultSave(), "endless", 300, 3, 4);
+    const strong = estimateAutoBattle(defaultSave(), "endless", 60000, 12, 4);
+    expect(strong.waves).toBeGreaterThan(weak.waves);
+    expect(strong.safestWave).toBeGreaterThan(weak.safestWave);
+  });
+
+  it("gives the gauntlet more room as boons stack", () => {
+    const noBoons = estimateAutoBattle(defaultSave(), "gauntlet", 4000, 6, 5, 0);
+    const manyBoons = estimateAutoBattle(defaultSave(), "gauntlet", 4000, 6, 5, 20);
+    expect(manyBoons.waves).toBeGreaterThanOrEqual(noBoons.waves);
   });
 });

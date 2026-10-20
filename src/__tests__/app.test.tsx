@@ -476,13 +476,19 @@ describe("Gauntlet content", () => {
       20000
     );
     const text = (cut.textContent || "").toUpperCase();
-    // several bosses share wave 24 — the card introduces the marquee one
-    expect(text).toContain("ABYSS LEVIATHAN");
+    // several bosses share wave 24 — the card introduces the marquee one, and
+    // the Storm Herald is the deepest boss on the board (highest HP multiplier)
+    expect(text).toContain("STORM HERALD");
     expect(text).toContain("WAVE 24");
-    // its nine-skill kit is advertised on the card
-    for (const skill of ["Rift Call", "Void Step", "Bulwark", "Blood Frenzy", "Null Field", "Devour", "Meteor Fall", "Rift Chains", "Warp"]) {
+    // it advertises its OWN three-skill kit — nothing borrowed from another boss
+    for (const skill of ["Soul Siphon", "Overcharge", "Maelstrom"]) {
       expect(text, skill).toContain(skill.toUpperCase());
     }
+    for (const skill of ["Rift Call", "Void Step", "Bulwark", "Meteor Fall", "Rift Chains", "Warp", "Foundation Quake"]) {
+      expect(text, skill).not.toContain(skill.toUpperCase());
+    }
+    // the kit chips are exactly the three exclusive skills
+    expect(cut.querySelectorAll(".boss-chip").length).toBe(3);
 
     // the canvas keeps painting through the new silhouettes
     await waitFor(() => canvasStats.calls > 0, "canvas painting");
@@ -581,7 +587,7 @@ describe("Shop", () => {
     noErrors();
   });
 
-  it("opens the 5000-gem Mystical Chest and banks its rarity-tier reward", async () => {
+  it("opens the 4000-gem Mystical Chest and banks its rarity-tier reward", async () => {
     persistSave({ ...defaultSave(), gems: 20000 });
     await mountApp();
     click(byText("button", "Shop")!);
@@ -589,7 +595,7 @@ describe("Shop", () => {
     const fragmentsBefore = fragTotal(saved());
     const gemsBefore = saved().gems;
     const card = document.querySelector('[data-chest="mystical"]')!;
-    expect(card.textContent).toContain("71% · 5 Legendary / 29% · 1 Mystical");
+    expect(card.textContent).toContain("65% · 5 Legendary / 35% · 1 Mystical");
     const buy = card.querySelector("button") as HTMLButtonElement;
     expect(buy.disabled).toBe(false);
     click(buy);
@@ -1264,7 +1270,8 @@ describe("Battle", () => {
     // bosses arrive from round 16; the kit is data-driven, so assert on the table
     const kit = document.querySelector('[data-testid="boss-kit"]');
     if (kit) {
-      expect(kit.children.length).toBeGreaterThanOrEqual(6);
+      // every boss runs exactly its own three exclusive skills
+      expect(kit.children.length).toBe(3);
     }
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
@@ -1316,11 +1323,11 @@ describe("Battle", () => {
     const text = cut.textContent || "";
     expect(text).toContain("WARNING");
     // The automatic roulette may select any boss; verify that the reveal is one of the live roster.
-    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN"].some((name) => text.includes(name))).toBe(true);
+    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN", "STORM HERALD"].some((name) => text.includes(name))).toBe(true);
     expect(text).toContain("ROUND 4");
     expect(text).toContain("SKIP BOSS INTRO");
     // The roulette reveal carries a title, live stats, and the selected boss's own kit.
-    expect(["CRIMSON WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN"].some((name) => text.includes(name))).toBe(true);
+    expect(["CRIMSON WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN", "STORM HERALD"].some((name) => text.includes(name))).toBe(true);
     expect(text).toContain("HEALTH");
     expect(text).toContain("ARMOUR");
     expect(text).toContain("LIVES");
@@ -1334,7 +1341,7 @@ describe("Battle", () => {
 
     // the boss then walks onto the path and the bar appears
     const bar = await waitFor(() => document.querySelector('[data-testid="boss-bar"]'), "boss health bar", 15000);
-    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN"].some((name) => (bar.textContent || "").includes(name))).toBe(true);
+    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN", "STORM HERALD"].some((name) => (bar.textContent || "").includes(name))).toBe(true);
 
     // a skill eventually fires and the callout banner names it
     const cast = await waitFor(
@@ -1343,12 +1350,39 @@ describe("Battle", () => {
       25000
     );
     // the banner shouts the skill name and explains what it does
-    expect(cast.textContent || "").toMatch(/RIFT CALL|VOID STEP|BULWARK|BLOOD FRENZY/);
-    expect(cast.textContent || "").toMatch(/warlord|overlord|titan|leviathan/i);
+    expect(cast.textContent || "").toMatch(/RIFT CALL|WAR CRY|SHIELD CLEAVE|IRON BANNER|FOUNDATION QUAKE|BLOOD FRENZY|SOUL SIPHON|OVERCHARGE|MAELSTROM|UNDERTOW|METEOR|RIFT CHAINS|SOUL DEVOUR|NULL FIELD|WARP SURGE/);
+    expect(cast.textContent || "").toMatch(/warlord|overlord|titan|leviathan|herald/i);
 
     unmountApp();
     noErrors();
   }, 60000);
+
+  it("skips the cutscene entirely when auto-skip is on", async () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const s = defaultSave();
+    s.autoSkipBossCut = true;
+    root.render(
+      <StrictMode>
+        <Battle mode="battle" save={s} mutate={() => {}} onExit={() => {}} debugRound={4} />
+      </StrictMode>
+    );
+
+    // the banner names the boss and its signature skill ...
+    const cast = await waitFor(
+      () => document.querySelector('[data-testid="boss-cast"]') as HTMLElement,
+      "auto-skip callout",
+      20000
+    );
+    const text = cast.textContent || "";
+    expect(text).toMatch(/ROUND 4|WAVE 4/);
+    expect(text).toMatch(/RIFT CALL|WAR CRY|SHIELD CLEAVE|SOUL SIPHON|OVERCHARGE|MAELSTROM|FOUNDATION QUAKE|METEOR FALL|SOUL DEVOUR|RIFT CHAINS|UNDERTOW/i);
+    // ... and the card never mounts
+    expect(document.querySelector('[data-testid="boss-cutscene"]')).toBeNull();
+
+    unmountApp();
+  }, 40000);
 
   it("zooms the arena in and out", async () => {
     await mountApp();

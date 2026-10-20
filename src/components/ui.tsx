@@ -939,6 +939,7 @@ export type SetIconName =
   | "interp"
   | "fps"
   | "bolt"
+  | "boss"
   | "download"
   | "expand"
   | "backup"
@@ -992,6 +993,14 @@ const SET_PATHS: Record<SetIconName, ReactNode> = {
       <path d="M16 4l-1.5 16" />
       <path d="M4.6 9h15" />
       <path d="M3.9 15h15" />
+    </>
+  ),
+  boss: (
+    <>
+      <path d="M4 8.5 8 4v4h8V4l4 4.5v7L16 20v-4H8v4l-4-4.5z" />
+      <path d="M10 11h4" />
+      <circle cx="8.5" cy="9.4" r="0.9" fill="currentColor" />
+      <circle cx="15.5" cy="9.4" r="0.9" fill="currentColor" />
     </>
   ),
   shake: (

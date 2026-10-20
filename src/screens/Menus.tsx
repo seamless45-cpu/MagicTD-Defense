@@ -46,6 +46,8 @@ import {
   questProgress,
   resetCountdown,
   upgradeHero,
+  awakenHero,
+  heroAwkTier,
   weekStr,
   buyGuildItem,
   claimCompetition,
@@ -103,6 +105,10 @@ import {
   guildLevel,
   heroCooldown,
   heroPower,
+  heroAwakenCost,
+  heroAwkSpec,
+  heroAwkText,
+  HERO_AWAKENING_MAX_TIER,
   heroUpgradeCost,
   leagueFor,
   nextLeague,
@@ -490,17 +496,20 @@ export function Home({
       sfx.error();
       return push(`${hero.name} is already max level`, "#ff4d5e");
     }
-    const ok = mutate((s) => {
-      upgradeHero(s, hero.id);
-    });
+    // affordability is checked BEFORE the mutation — otherwise the hero levelled
+    // up for free and only the toast complained about the missing gold
     if (save.gold < cost) {
       sfx.error();
-      return push(`Need ${cost} gold to upgrade ${hero.name}`, "#ff4d5e");
+      return push(`Need ${cost.toLocaleString("en-US")} gold to upgrade ${hero.name}`, "#ff4d5e");
     }
+    mutate((s) => {
+      // upgradeHero re-checks the price on the cloned save, so two taps in the
+      // same frame can never buy the same level twice
+      upgradeHero(s, hero.id);
+    });
     sfx.awaken();
     setUpg(heroUpgData(lv, "LEVEL UP"));
     push(`${hero.name} reached Lv ${lv + 1}`, hero.color);
-    return ok;
   };
 
   /**
@@ -580,6 +589,28 @@ export function Home({
     push(`${hero.name} reached Lv ${lv + 1} with shards`, hero.color);
   };
 
+  /** hero awakening tier + purchase (Magic Tokens) */
+  const awkTierOf = (slot: 0 | 1) => heroAwkTier(save, hero.id, slot);
+  const doHeroAwaken = (slot: 0 | 1) => {
+    const spec = heroAwkSpec(hero.id, slot);
+    if (!spec) return;
+    const cur = awkTierOf(slot);
+    if (cur >= HERO_AWAKENING_MAX_TIER) {
+      sfx.error();
+      return push(`${spec.name} is already maxed`, "#ff4d5e");
+    }
+    const cost = heroAwakenCost(cur + 1);
+    if (save.tokens < cost) {
+      sfx.error();
+      return push(`Need ${cost} Magic Tokens for ${spec.name}`, "#ff4d5e");
+    }
+    mutate((s) => {
+      awakenHero(s, hero.id, slot);
+    });
+    sfx.ceremony();
+    push(`${hero.name} · ${spec.name} ${["", "I", "II", "III", "IV", "V", "VI"][cur + 1]}`, "#ff4fd8");
+  };
+
   return (
     <div className="scroll-thin relative flex h-full flex-col gap-3 overflow-y-auto py-1 pr-1">
       <div className="anim-slideup text-center">
@@ -635,6 +666,69 @@ export function Home({
             )}
           </button>
         </div>
+
+        {/* HERO AWAKENING — two exclusive token-bought paths per hero */}
+        {heroAwkSpec(hero.id, 0) && (
+          <div className="mt-3 rounded-xl border border-[#7ce7ff44] bg-[#04181f]/60 p-2.5" data-testid="hero-awakening">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-disp text-[15px] text-[#7ce7ff]">AWAKENING</span>
+              <span className="text-[10.5px] font-bold tracking-[0.18em] text-[var(--dim)]">MAGIC TOKENS</span>
+              <span className="pill-dark ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-[#ff4fd8]">
+                <TokenIcon size={12} />
+                <b className="num">{save.tokens}</b>
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {([0, 1] as const).map((slot) => {
+                const spec = heroAwkSpec(hero.id, slot)!;
+                const tier = awkTierOf(slot);
+                const maxed = tier >= HERO_AWAKENING_MAX_TIER;
+                const cost = heroAwakenCost(tier + 1);
+                const afford = save.tokens >= cost;
+                return (
+                  <div
+                    key={slot}
+                    data-testid={`hero-awakening-${slot}`}
+                    className="rounded-lg border border-[#7ce7ff33] bg-black/35 p-2"
+                    style={tier > 0 ? { borderColor: "#ff4fd88c", boxShadow: "0 0 16px #ff4fd826" } : undefined}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11.5px] font-bold text-[#ff9be9]">
+                        {slot === 0 ? "1" : "2"}. {spec.name}
+                      </span>
+                      {spec.passive && <span className="rounded bg-[#7ce7ff] px-1 text-[8.5px] font-black leading-tight text-black">PASSIVE</span>}
+                    </div>
+                    <div className="mt-1 flex gap-1">
+                      {Array.from({ length: HERO_AWAKENING_MAX_TIER }, (_, i) => (
+                        <i
+                          key={i}
+                          className="h-1.5 flex-1 rounded-full"
+                          style={{ background: i < tier ? "linear-gradient(90deg,#7ce7ff,#ff4fd8)" : "rgba(255,255,255,0.12)" }}
+                        />
+                      ))}
+                    </div>
+                    <p className="mt-1 text-[10.5px] font-semibold leading-snug text-[var(--dim)]">{spec.desc}</p>
+                    <div className="mt-1 text-[10.5px] font-bold" style={{ color: tier > 0 ? "#8effc4" : "var(--line2)" }}>
+                      {heroAwkText(hero.id, slot, tier)}
+                    </div>
+                    <button
+                      className={`btn mt-1.5 w-full py-1 text-[11px] ${!maxed && afford ? "btn-cyan" : ""}`}
+                      data-testid={`hero-awaken-${slot}`}
+                      disabled={maxed || !afford}
+                      onClick={() => doHeroAwaken(slot)}
+                    >
+                      {maxed ? "MAX TIER" : (
+                        <span className="inline-flex items-center gap-1">
+                          <TokenIcon size={11} /> {cost} · TIER {["", "I", "II", "III", "IV", "V", "VI"][tier + 1]}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* hero switcher */}
         <div className="mt-3 flex gap-2 overflow-x-auto scroll-thin pb-1">
@@ -2470,6 +2564,7 @@ export function SettingsModal({
     ["Damage Numbers", "dmgNums", "Floating damage values over every hit", "dmg", "#ffcf4d"],
     ["Battlefield Guides", "guides", "Grid, buildable-cell and range circles", "guides", "#8effc4"],
     ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves", "fast", "#b98bff"],
+    ["Auto-Skip Boss Cutscene", "autoSkipBossCut", "Bosses engage immediately — a one-line callout replaces the cutscene card", "boss", "#ff8a3d"],
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
     ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],

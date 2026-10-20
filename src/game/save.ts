@@ -18,6 +18,9 @@ import {
   HERO_BY_ID,
   HERO_MAX_LEVEL,
   HERO_SHARD_COST,
+  HERO_AWAKENING_MAX_TIER,
+  heroAwakenCost,
+  heroAwkSpec,
   MAIL,
   MAIL_BY_ID,
   RARITY,
@@ -133,6 +136,8 @@ export interface SaveData {
   /** owned cosmetic battlefield scenes; no gameplay bonuses */
   scenes: string[];
   awn: Record<string, [number, number]>; // tower id -> [awk1Tier, awk2Tier] 0..5
+  /** hero id -> [awk1Tier, awk2Tier], bought with Magic Tokens */
+  heroAwn: Record<string, [number, number]>;
   hero: string; // selected hero id
   heroLv: Record<string, number>; // hero id -> level (1..HERO_MAX_LEVEL)
   /** hero id -> shards banked from Heroes Chests */
@@ -219,6 +224,8 @@ export interface SaveData {
   shakeFx: boolean;
   /** camera shake strength multiplier, 0 = off, 1 = 100%, 2 = 200% */
   shakeIntensity: number;
+  /** skip the boss cutscene card and jump straight into the fight */
+  autoSkipBossCut: boolean;
   /** internal canvas resolution multiplier (0.75..2) */
   pixelRatio: number;
   bloomFx: boolean;
@@ -279,6 +286,7 @@ export function defaultSave(): SaveData {
     lineup: ["arrow", "cannon", "ice"],
     scenes: [],
     awn: {},
+    heroAwn: {},
     hero: "nova",
     heroLv: {},
     heroShards: {},
@@ -330,6 +338,7 @@ export function defaultSave(): SaveData {
     fxq: 0,
     shakeFx: true,
     shakeIntensity: 1,
+    autoSkipBossCut: false,
     pixelRatio: 1,
     bloomFx: true,
     shadowFx: true,
@@ -391,6 +400,17 @@ function normalise(s: SaveData): SaveData {
   s.shadowFx = s.shadowFx !== false;
   s.antiAlias = s.antiAlias !== false;
   if (!UI_THEMES.some((theme) => theme.id === s.uiTheme)) s.uiTheme = "rift";
+  s.autoSkipBossCut = s.autoSkipBossCut === true;
+  s.heroAwn = s.heroAwn && typeof s.heroAwn === "object" ? s.heroAwn : {};
+  // clamp every hero awakening pair into 0..HERO_AWAKENING_MAX_TIER
+  for (const id of Object.keys(s.heroAwn)) {
+    const pair = s.heroAwn[id];
+    if (!Array.isArray(pair)) { delete s.heroAwn[id]; continue; }
+    s.heroAwn[id] = [
+      Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, Math.floor(Number(pair[0]) || 0))),
+      Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, Math.floor(Number(pair[1]) || 0))),
+    ];
+  }
   s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
   s.heroShards = s.heroShards && typeof s.heroShards === "object" ? s.heroShards : {};
   s.chips = { ...emptyChips(), ...(s.chips && typeof s.chips === "object" ? s.chips : {}) };
@@ -734,6 +754,28 @@ export function levelHeroWithShards(s: SaveData, id: string): boolean {
   return true;
 }
 
+/** hero awakening tier for one path (0 = not awakened) */
+export function heroAwkTier(s: SaveData, id: string, slot: 0 | 1): number {
+  return Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, s.heroAwn?.[id]?.[slot] || 0));
+}
+
+/**
+ * Buy one hero awakening tier with Magic Tokens. Returns the new tier, or 0
+ * when the purchase was refused (no path, maxed, or not enough tokens).
+ */
+export function awakenHero(s: SaveData, id: string, slot: 0 | 1): number {
+  if (!heroAwkSpec(id, slot)) return 0;
+  const cur = heroAwkTier(s, id, slot);
+  if (cur >= HERO_AWAKENING_MAX_TIER) return 0;
+  const cost = heroAwakenCost(cur + 1);
+  if (s.tokens < cost) return 0;
+  s.tokens -= cost;
+  const pair = s.heroAwn[id] || [0, 0];
+  pair[slot] = cur + 1;
+  s.heroAwn[id] = pair as [number, number];
+  return cur + 1;
+}
+
 export function addHeroShards(s: SaveData, id: string, n: number) {
   if (!HERO_BY_ID[id]) return;
   s.heroShards[id] = (s.heroShards[id] || 0) + n;
@@ -788,7 +830,8 @@ export function rollChest(chestId: string, fragBonus = 0, biasBonus = 0): ChestL
   const loot = emptyLoot();
   if (!c) return loot;
   if (c.special === "mystical") {
-    if (Math.random() < 0.71) {
+    // 65% five legendary fragments, 35% one mystical fragment
+    if (Math.random() < 0.65) {
       const legendaryIds = Object.keys(TOWER_BY_ID).filter((id) => TOWER_BY_ID[id].rarity === "legendary");
       for (let i = 0; i < 5; i++) {
         const id = legendaryIds[Math.floor(Math.random() * legendaryIds.length)];

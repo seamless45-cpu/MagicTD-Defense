@@ -47,7 +47,6 @@ import {
   BOSS_SUMMON_CD,
   BOSS_BLINK_CD,
   BOSS_WARD_CD,
-  BOSS_WARD_TIME,
   BOSS_ENRAGE_AT,
   BOSS_NULL_CD,
   BOSS_NULL_RADIUS,
@@ -64,6 +63,33 @@ import {
   BOSS_CHAINS_DR,
   BOSS_WARP_CD,
   BOSS_WARP_DIST,
+  BOSS_WARCRY_CD,
+  BOSS_WARCRY_RADIUS,
+  BOSS_WARCRY_TIME,
+  BOSS_WARCRY_HASTE,
+  BOSS_CLEAVE_CD,
+  BOSS_CLEAVE_DOWN,
+  BOSS_BANNER_CD,
+  BOSS_BANNER_TIME,
+  BOSS_BANNER_ARMOR,
+  BOSS_QUAKE_CD,
+  BOSS_QUAKE_RADIUS,
+  BOSS_QUAKE_DOWN,
+  BOSS_UNDERTOW_CD,
+  BOSS_UNDERTOW_PULL,
+  BOSS_SIPHON_CD,
+  BOSS_SIPHON_SP,
+  BOSS_SIPHON_HEAL,
+  BOSS_OVERCHARGE_CD,
+  BOSS_OVERCHARGE_TARGETS,
+  BOSS_OVERCHARGE_DOWN,
+  BOSS_MAELSTROM_CD,
+  BOSS_MAELSTROM_DIST,
+  inductionBonus,
+  heroAwkSpec,
+  boltThreshold,
+  boltResetChance,
+  boltResetInterval,
   bossKit,
   CRIT_CHANCE,
   critBonusFrom,
@@ -231,6 +257,8 @@ interface Enemy {
   meteorCd: number;
   chainsCd: number;
   warpCd: number;
+  /** boss-exclusive skill timers (3 per kit, staggered on spawn) */
+  exCd: [number, number, number];
   /** damage reduction from Rift Chains (minions shielded by their boss) */
   link: number;
   /** seconds of damage reduction left on the Bulwark skill */
@@ -238,11 +266,25 @@ interface Enemy {
   enraged: boolean;
   /** boss bar flash timer when a skill fires */
   cast: number;
+  /** the boss has already announced its signature skill on arrival */
+  barked?: boolean;
   /** ---------- skill state ---------- */
   /** Absolute Zero: seconds left encased in ice (doubles damage taken) */
   encased: number;
   /** Storm Sovereign: seconds left marked with static (re-arcs on death) */
   mark: number;
+  /** Electrical Induction: shield cut multiplier (1.2 = 120%) */
+  shieldCut?: number;
+  /** seconds left of the shield cut */
+  shieldCutT?: number;
+  /** Bolt from the Blue already fired at this enemy */
+  boltHit?: boolean;
+  /** the killing blow came from lightning (pays induction bonuses) */
+  lightKill?: boolean;
+  /** War Cry / Maelstrom: seconds left sprinting */
+  rage?: number;
+  /** Iron Banner: seconds left with the armour plate */
+  plating?: number;
   /** Singularity: seconds left being dragged toward the rift */
   pulled: number;
   /** lateral offset from the path, used by the singularity pull */
@@ -1566,9 +1608,13 @@ export default function Battle({
       }
       // sp payout: 10 base, elites x5, bosses x10, then the monthly modifier and
       // whatever Mana Conduit share the run has bought
-      g.sp += spGain(e.spv);
+      // Electrical Induction: lightning kills pay +50% SP and run gold (and
+      // +5% more of each per awakening tier)
+      const induction = g.heroId === "thunder" ? saveRef.current.heroAwn?.thunder?.[0] || 0 : 0;
+      const inductionMul = induction > 0 && e.lightKill ? 1 + inductionBonus(induction) : 1;
+      g.sp += spGain(Math.round(e.spv * inductionMul));
       // run gold is 50% richer across the board (kills, bounties, wave clears)
-      g.gold += runGold(Math.round(e.gold * MONTH_BONUS.goldMul * g.goldMul));
+      g.gold += runGold(Math.round(e.gold * MONTH_BONUS.goldMul * g.goldMul * inductionMul));
       const p = enemyPos(e);
       const et = ENEMY_TYPES[e.type];
       if (e.elite) {
@@ -1603,15 +1649,43 @@ export default function Battle({
       }
     };
 
-    const dealDamage = (e: Enemy, raw: number, opt: { alwaysCrit?: boolean; tw?: BT; color?: string; noCrit?: boolean }) => {
+    /** enemies armed by Bolt from the Blue, resolved once per frame */
+    const boltQueue: Enemy[] = [];
+
+    /**
+     * Electrical Induction (Thunder God awakening 1): a lightning strike stuns
+     * and strips the target's shield. The cut is a multiplier applied by
+     * dealDamage; over 100% it flips armour negative and adds bonus damage.
+     */
+    const inductionStrike = (e: Enemy) => {
+      const tier = saveRef.current.heroAwn?.thunder?.[0] || 0;
+      if (tier <= 0 || e.dead) return;
+      const cut = 1.2 + 0.2 * (tier - 1);
+      e.shieldCut = Math.max(e.shieldCut || 0, cut);
+      e.shieldCutT = Math.max(e.shieldCutT || 0, 5);
+      e.stun = Math.max(e.stun, 1.2);
+      const p = enemyPos(e);
+      if (g.parts.length < 380) {
+        pushPart({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.34, max: 0.34, size: 30, color: "#7ce7ff", kind: "ring", add: true });
+        pushPart({ x: p.x, y: p.y, vx: 0, vy: -20, life: 0.5, max: 0.5, size: 34, color: "#c9f7ff", kind: "rune", add: true, rot: Math.random() * 6.28, spin: 2.4 });
+      }
+    };
+
+    const dealDamage = (e: Enemy, raw: number, opt: { alwaysCrit?: boolean; tw?: BT; color?: string; noCrit?: boolean; lightning?: boolean }) => {
       if (e.dead) return;
       let crit = opt.alwaysCrit ?? false;
       // executions and instant kills skip the crit roll: the number is the point
       if (!crit && !opt.noCrit) crit = Math.random() < CRIT_CHANCE + g.critRate;
       // note: tower/aura multipliers are already folded into `raw` by the caller
-      let dmg = raw * (1 - e.armor);
-      if (e.ward > 0) dmg *= 0.45; // boss Bulwark
-      if (e.link > 0) dmg *= 1 - BOSS_CHAINS_DR; // Rift Chains shield
+      // Electrical Induction: a stripped shield turns armour into a liability.
+      // A 120% cut on a 30%-armour boss leaves it at -6% armour (i.e. +6% damage).
+      const shieldCut = (e.shieldCutT || 0) > 0 ? (e.shieldCut || 0) : 0;
+      const plate = (e.plating || 0) > 0 ? BOSS_BANNER_ARMOR : 0;
+      let dmg = raw * (1 - (e.armor + plate) * (1 - shieldCut));
+      if (e.ward > 0) dmg *= 0.45 + 0.55 * Math.min(1, shieldCut); // boss Bulwark
+      if (e.link > 0) dmg *= 1 - BOSS_CHAINS_DR * (1 - Math.min(1, shieldCut)); // Rift Chains shield
+      // anything past a full strip is pure bonus damage
+      if (shieldCut > 1) dmg *= 1 + (shieldCut - 1) * 0.5;
       if (e.slowT > 0) dmg *= 1 + SLOW_VULN; // chilled enemies shatter easier
       if (e.encased > 0) dmg *= 2; // Absolute Zero: ice doubles everything that lands
       if (opt.tw?.def.id === "hellstorm") {
@@ -1644,6 +1718,18 @@ export default function Battle({
               : 1
         : 0;
       e.hp -= dmg;
+      if (opt.lightning) {
+        if (e.hp <= 0) e.lightKill = true;
+      }
+      // Bolt from the Blue: the first time an enemy crosses the health line a
+      // thin bolt comes out of nowhere (queued so we never recurse mid-hit)
+      if (!e.boltHit && e.hp > 0 && g.heroId === "thunder") {
+        const boltTier = saveRef.current.heroAwn?.thunder?.[1] || 0;
+        if (boltTier > 0 && e.hp / e.max <= boltThreshold(boltTier)) {
+          e.boltHit = true;
+          boltQueue.push(e);
+        }
+      }
       const p = enemyPos(e);
       if (crit) {
         critFx(e, p, critTier, runCritMul, dmg, opt.tw);
@@ -3360,6 +3446,12 @@ export default function Battle({
       const power = heroPower(lv);
       g.heroCd = heroCooldown(hero.cd, lv);
       g.skillCasts++;
+      // Bolt from the Blue (Thunder God awakening 2): every cast has a chance
+      // to reset its own cooldown, leaving only a short interval before the
+      // next one. The chance climbs and the interval shrinks with every tier.
+      const boltTier = hero.id === "thunder" ? saveRef.current.heroAwn?.thunder?.[1] || 0 : 0;
+      const boltReset = boltTier > 0 && Math.random() < boltResetChance(boltTier);
+      if (boltReset) g.heroCd = boltResetInterval(boltTier);
       sfx.hero();
       const kind: HeroKind = hero.kind;
       const alive = () => g.enemies.filter((e) => !e.dead);
@@ -3405,6 +3497,13 @@ export default function Battle({
       shock(spot.x, spot.y, "#ffffff", 24, 0.5);
       glow(spot.x, spot.y, hero.color, 120, 0.7);
       stars(spot.x, spot.y, hero.color2, 16, 140);
+      if (boltReset) {
+        // Bolt from the Blue: the cooldown comes straight back, with a marker
+        // so the player knows the next cast is a fraction of a second away.
+        toastRef.current(`BOLT FROM THE BLUE · cooldown reset (${g.heroCd.toFixed(2)}s)`, "#7ce7ff");
+        if (g.strikes.length < 24) g.strikes.push({ x: spot.x, y: spot.y, life: 0.3, max: 0.3, width: 4, color: "#c9f7ff", seed: Math.random() * 90, forks: 2, top: -160 });
+        addText(spot.x, spot.y - 96, "BOLT FROM THE BLUE", "#c9f7ff", 18, true);
+      }
 
       if (kind === "nuke") {
         // ===== SINGULARITY: open a rift, drag the field in, then collapse it =====
@@ -3607,7 +3706,8 @@ export default function Battle({
         hit.slice(0, chains + 4).forEach((e) => {
           e.stun = Math.max(e.stun, 0.5);
           e.mark = Math.max(e.mark, 6);
-          dealDamage(e, dmg, { alwaysCrit: true, color: hero.color });
+          inductionStrike(e);
+          dealDamage(e, dmg, { alwaysCrit: true, color: hero.color, lightning: true });
         });
         for (let k = 1; k < Math.min(hit.length, chains + 1); k++) {
           const a = enemyPos(hit[k - 1]);
@@ -3633,7 +3733,8 @@ export default function Battle({
         const ep = enemyPos(e);
         if (Math.hypot(ep.x - sp.x, ep.y - sp.y) > 200) return;
         e.mark = Math.max(e.mark, 6);
-        dealDamage(e, dmg * 2.4, { alwaysCrit: true, color: hero.color2 });
+        inductionStrike(e);
+        dealDamage(e, dmg * 2.4, { alwaysCrit: true, color: hero.color2, lightning: true });
       });
       addText(sp.x, sp.y - 70, "SOVEREIGN STRIKE", hero.color2, 22, true);
       addText(W / 2, H / 2 - 110, "STORM SOVEREIGN", hero.color, 30, true);
@@ -3893,6 +3994,7 @@ export default function Battle({
             summonCd: BOSS_SUMMON_CD, blinkCd: BOSS_BLINK_CD, wardCd: BOSS_WARD_CD, ward: 0,
             nullCd: BOSS_NULL_CD, devourCd: BOSS_DEVOUR_CD, meteorCd: BOSS_METEOR_CD,
             chainsCd: BOSS_CHAINS_CD, warpCd: BOSS_WARP_CD, link: 0,
+            exCd: [4.5, 7.5, 10.5],
             enraged: false, cast: 0,
             encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
           });
@@ -3907,9 +4009,24 @@ export default function Battle({
               if (isBossType(q.type) && ENEMY_TYPES[q.type].hpMul > ENEMY_TYPES[marquee].hpMul) marquee = q.type;
             }
             const met = ENEMY_TYPES[marquee];
-            g.cut = { type: marquee, name: met.name, sub: `${mode === "battle" ? "ROUND" : "WAVE"} ${g.round} · BOSS INCOMING`, t: 3.4, total: 3.4 };
-            g.shake = fxShake(10);
-            sfx.boss();
+            if (saveRef.current.autoSkipBossCut) {
+              // the player asked for no cutscenes: a one-line callout on the
+              // boss cast banner replaces the card and the world never stops
+              const sig = BOSS_SKILL_BY_ID[bossKit(marquee)[0]];
+              g.bossCast = {
+                skill: sig.name,
+                tell: `${met.name} — ${met.title} · ${mode === "battle" ? "ROUND" : "WAVE"} ${g.round}`,
+                color: sig.color,
+                t: 2.2,
+              };
+              g.shake = fxShake(10);
+              g.strikes.push({ x: W / 2, y: H * 0.4, life: 0.4, max: 0.4, width: 8, color: met.color, seed: Math.random() * 90, forks: 3, top: -160 });
+              sfx.boss();
+            } else {
+              g.cut = { type: marquee, name: met.name, sub: `${mode === "battle" ? "ROUND" : "WAVE"} ${g.round} · BOSS INCOMING`, t: 3.4, total: 3.4 };
+              g.shake = fxShake(10);
+              sfx.boss();
+            }
           }
         }
         if (!g.spawnQ.length && g.enemies.length === 0) {
@@ -3966,6 +4083,10 @@ export default function Battle({
       for (const e of g.enemies) {
         if (e.dead) continue;
         // ---------- boss skills ----------
+        // Every boss runs ITS OWN three-skill kit (see BOSS_KITS). No skill is
+        // shared between two bosses, so each fight has a different shape: the
+        // Warlord rallies and cleaves, the Overlord bends the rift, the Titan
+        // breaks the ground, the Leviathan coils, and the Herald owns the sky.
         if (isBossType(e.type)) {
           const kit = bossKit(e.type);
           const ep0 = enemyPos(e);
@@ -3978,9 +4099,23 @@ export default function Battle({
           };
           e.cast = Math.max(0, e.cast - dt);
           e.ward = Math.max(0, e.ward - dt);
+          for (let i = 0; i < 3; i++) e.exCd[i] = Math.max(0, e.exCd[i] - dt);
 
+          // Every boss opens with a bark naming the first skill in OWN kit — a
+          // pure callout (no damage) so the player always learns which kit is
+          // walking at them, even when the board is quiet and none of that
+          // kit's conditions are met yet. It waits for the cutscene banner to
+          // clear so the two callouts never talk over each other.
+          if (!e.barked && !g.bossCast) {
+            const sig = BOSS_SKILL_BY_ID[kit[0]];
+            if (sig) {
+              e.barked = true;
+              e.cast = 1.15;
+              g.bossCast = { skill: sig.name, tell: `${NAME} ${sig.tell}`, color: sig.color, t: 2.4 };
+            }
+          }
 
-          // --- Blood Frenzy: one-shot, below 45% health
+          // --- Blood Frenzy (Void Titan): one-shot, below 45% health
           if (kit.includes("enrage") && !e.enraged && e.hp / e.max <= BOSS_ENRAGE_AT) {
             e.enraged = true;
             e.speed *= 1.45;
@@ -3991,7 +4126,49 @@ export default function Battle({
             sfx.leak();
           }
 
-          // --- Rift Call
+          // ================= WARLORD: warcry · cleave · banner =================
+          if (kit.includes("warcry") && e.exCd[0] <= 0) {
+            const herd = g.enemies.filter((o) => !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= BOSS_WARCRY_RADIUS);
+            if (herd.length) {
+              e.exCd[0] = BOSS_WARCRY_CD;
+              for (const m of herd) {
+                m.rage = Math.max(m.rage || 0, BOSS_WARCRY_TIME);
+                const mp = enemyPos(m);
+                ring(mp.x, mp.y, "#ff9d4d", 26);
+              }
+              castSkill("warcry", `${NAME} drives ${herd.length} minion${herd.length > 1 ? "s" : ""} into a frenzy`);
+              shock(ep0.x, ep0.y, "#ff9d4d", BOSS_WARCRY_RADIUS, 0.6);
+              sfx.leak();
+            }
+          }
+          if (kit.includes("cleave") && e.exCd[1] <= 0) {
+            const near = g.towers
+              .filter((t) => t.cell)
+              .map((t) => ({ t, p: cellCenter(t.cell!.c, t.cell!.r) }))
+              .filter((x) => Math.hypot(x.p.x - ep0.x, x.p.y - ep0.y) <= 340)
+              .sort((a, b) => Math.hypot(a.p.x - ep0.x, a.p.y - ep0.y) - Math.hypot(b.p.x - ep0.x, b.p.y - ep0.y))[0];
+            if (near) {
+              e.exCd[1] = BOSS_CLEAVE_CD;
+              near.t.downT = Math.max(near.t.downT, BOSS_CLEAVE_DOWN);
+              if (g.bolts.length < 44) g.bolts.push(randBolt(ep0.x, ep0.y, near.p.x, near.p.y, "#ff5d5d", 3.4, 0.3, performance.now()));
+              shards(near.p.x, near.p.y, "#ff8f8f", 12, 240);
+              ring(near.p.x, near.p.y, "#ff5d5d", 42);
+              castSkill("cleave", `${NAME} cleaves a tower offline for ${BOSS_CLEAVE_DOWN}s`);
+              g.shake = fxShake(7);
+              sfx.explosion();
+            }
+          }
+          if (kit.includes("banner") && e.exCd[2] <= 0) {
+            e.exCd[2] = BOSS_BANNER_CD;
+            e.plating = Math.max(e.plating || 0, BOSS_BANNER_TIME);
+            e.ward = Math.max(e.ward, BOSS_BANNER_TIME * 0.5);
+            castSkill("banner", `${NAME} raises its banner (+${Math.round(BOSS_BANNER_ARMOR * 100)}% armour)`);
+            glow(ep0.x, ep0.y, "#ffd23f", 90, 0.55);
+            shock(ep0.x, ep0.y, "#ffd23f", 70, 0.5);
+            sfx.hover();
+          }
+
+          // ================= OVERLORD: summon · nullfield · warp =================
           if (kit.includes("summon")) {
             e.summonCd -= dt;
             if (e.summonCd <= 0) {
@@ -4007,45 +4184,16 @@ export default function Battle({
                   spv: killSp(false, false), dead: false, wob: Math.random() * 7,
                   slow: 0, slowT: 0, burnT: 0, burnDps: 0,
                   summonCd: 0, blinkCd: 0, wardCd: 0, ward: 0,
-                  nullCd: 0, devourCd: 0, meteorCd: 0, chainsCd: 0, warpCd: 0, link: 0,
+                  nullCd: 0, devourCd: 0, meteorCd: 0, chainsCd: 0, warpCd: 0, link: 0, exCd: [0, 0, 0],
                   enraged: false, cast: 0,
                   encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
-                      });
+                });
                 ring(ep0.x, ep0.y, "#c44dff", 30 + i * 8);
               }
               castSkill("summon");
               sfx.summon();
             }
           }
-
-          // --- Void Step
-          if (kit.includes("blink")) {
-            e.blinkCd -= dt;
-            if (e.blinkCd <= 0) {
-              e.blinkCd = BOSS_BLINK_CD;
-              ring(ep0.x, ep0.y, "#35e0ff", 26);
-              e.d = Math.min(e.d + 120, PATH_LEN - 4);
-              e.pd = e.d; // teleports must never interpolate across the arena
-              const to = enemyPos(e);
-              ring(to.x, to.y, "#35e0ff", 34);
-              burst(to.x, to.y, "#35e0ff", 14, 200);
-              castSkill("blink");
-              sfx.hover();
-            }
-          }
-
-          // --- Bulwark
-          if (kit.includes("ward")) {
-            e.wardCd -= dt;
-            if (e.wardCd <= 0 && e.hp / e.max < 0.85) {
-              e.wardCd = BOSS_WARD_CD;
-              e.ward = BOSS_WARD_TIME;
-              castSkill("ward");
-              shock(ep0.x, ep0.y, "#8fb0ff", 70, 0.5);
-            }
-          }
-
-          // --- Null Field: hex the towers guarding the lane
           if (kit.includes("nullfield")) {
             e.nullCd -= dt;
             if (e.nullCd <= 0) {
@@ -4067,65 +4215,6 @@ export default function Battle({
               }
             }
           }
-
-          // --- Soul Devour: eat its own minions to heal
-          if (kit.includes("devour")) {
-            e.devourCd -= dt;
-            if (e.devourCd <= 0 && e.hp / e.max < 0.92) {
-              const snacks = g.enemies.filter((o) => o !== e && !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= 300).slice(0, 3);
-              if (snacks.length) {
-                e.devourCd = BOSS_DEVOUR_CD;
-                for (const m of snacks) {
-                  const mp = enemyPos(m);
-                  m.dead = true;
-                  e.hp = Math.min(e.max, e.hp + e.max * BOSS_DEVOUR_HEAL);
-                  if (g.bolts.length < 44) g.bolts.push(randBolt(mp.x, mp.y, ep0.x, ep0.y, "#ff8c3d", 3, 0.3, performance.now()));
-                  burst(mp.x, mp.y, "#ff8c3d", 12, 160);
-                  stars(ep0.x, ep0.y, "#ffd23f", 6, 40);
-                }
-                castSkill("devour", `${NAME} devours ${snacks.length} minion${snacks.length > 1 ? "s" : ""} (+${Math.round(BOSS_DEVOUR_HEAL * snacks.length * 100)}% HP)`);
-                sfx.explosion();
-              }
-            }
-          }
-
-          // --- Meteor Fall: burning rocks knock towers offline
-          if (kit.includes("meteor")) {
-            e.meteorCd -= dt;
-            if (e.meteorCd <= 0) {
-              const targets = g.towers.filter((t) => t.cell && t.downT <= 0);
-              if (targets.length) {
-                e.meteorCd = BOSS_METEOR_CD;
-                for (let i = 0; i < BOSS_METEOR_COUNT; i++) {
-                  const t = targets[(i + Math.floor(g.t * 3)) % targets.length];
-                  const tp = cellCenter(t.cell!.c, t.cell!.r);
-                  g.meteors.push({ x: tp.x, y: tp.y, t: 0.75 + i * 0.12, total: 0.75 + i * 0.12, uid: t.uid, color: "#ff7a3d" });
-                }
-                castSkill("meteor");
-                sfx.hover();
-              }
-            }
-          }
-
-          // --- Rift Chains: shield every minion around it
-          if (kit.includes("chains")) {
-            e.chainsCd -= dt;
-            if (e.chainsCd <= 0) {
-              const herd = g.enemies.filter((o) => !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= BOSS_CHAINS_RADIUS);
-              if (herd.length) {
-                e.chainsCd = BOSS_CHAINS_CD;
-                for (const m of herd) {
-                  m.link = Math.max(m.link, BOSS_CHAINS_TIME);
-                  ring(enemyPos(m).x, enemyPos(m).y, "#4de8ff", 34);
-                }
-                castSkill("chains", `${NAME} shields ${herd.length} minion${herd.length > 1 ? "s" : ""}`);
-                shock(ep0.x, ep0.y, "#4de8ff", BOSS_CHAINS_RADIUS, 0.7);
-                sfx.freeze();
-              }
-            }
-          }
-
-          // --- Warp Surge: wrench the whole horde down the lane
           if (kit.includes("warp")) {
             e.warpCd -= dt;
             if (e.warpCd <= 0) {
@@ -4150,6 +4239,152 @@ export default function Battle({
               }
             }
           }
+
+          // ================= VOID TITAN: quake · meteor · enrage =================
+          if (kit.includes("quake") && e.exCd[0] <= 0) {
+            const near = g.towers.filter((t) => t.cell && Math.hypot(cellCenter(t.cell.c, t.cell.r).x - ep0.x, cellCenter(t.cell.c, t.cell.r).y - ep0.y) <= BOSS_QUAKE_RADIUS);
+            if (near.length) {
+              e.exCd[0] = BOSS_QUAKE_CD;
+              for (const t of near) {
+                t.downT = Math.max(t.downT, BOSS_QUAKE_DOWN);
+                const tp = cellCenter(t.cell!.c, t.cell!.r);
+                shards(tp.x, tp.y, "#22d3ee", 10, 220);
+                ring(tp.x, tp.y, "#22d3ee", 46);
+              }
+              castSkill("quake", `${NAME} shatters the ground under ${near.length} tower${near.length > 1 ? "s" : ""}`);
+              g.shake = fxShake(12);
+              flash("#22d3ee", 0.16);
+              sfx.explosion();
+            }
+          }
+          if (kit.includes("meteor")) {
+            e.meteorCd -= dt;
+            if (e.meteorCd <= 0) {
+              const targets = g.towers.filter((t) => t.cell && t.downT <= 0);
+              if (targets.length) {
+                e.meteorCd = BOSS_METEOR_CD;
+                for (let i = 0; i < BOSS_METEOR_COUNT; i++) {
+                  const t = targets[(i + Math.floor(g.t * 3)) % targets.length];
+                  const tp = cellCenter(t.cell!.c, t.cell!.r);
+                  g.meteors.push({ x: tp.x, y: tp.y, t: 0.75 + i * 0.12, total: 0.75 + i * 0.12, uid: t.uid, color: "#ff7a3d" });
+                }
+                castSkill("meteor");
+                sfx.hover();
+              }
+            }
+          }
+
+          // ================= LEVIATHAN: devour · chains · undertow =================
+          if (kit.includes("devour")) {
+            e.devourCd -= dt;
+            if (e.devourCd <= 0 && e.hp / e.max < 0.92) {
+              const snacks = g.enemies.filter((o) => o !== e && !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= 300).slice(0, 3);
+              if (snacks.length) {
+                e.devourCd = BOSS_DEVOUR_CD;
+                for (const m of snacks) {
+                  const mp = enemyPos(m);
+                  m.dead = true;
+                  e.hp = Math.min(e.max, e.hp + e.max * BOSS_DEVOUR_HEAL);
+                  if (g.bolts.length < 44) g.bolts.push(randBolt(mp.x, mp.y, ep0.x, ep0.y, "#ff8c3d", 3, 0.3, performance.now()));
+                  burst(mp.x, mp.y, "#ff8c3d", 12, 160);
+                  stars(ep0.x, ep0.y, "#ffd23f", 6, 40);
+                }
+                castSkill("devour", `${NAME} devours ${snacks.length} minion${snacks.length > 1 ? "s" : ""} (+${Math.round(BOSS_DEVOUR_HEAL * snacks.length * 100)}% HP)`);
+                sfx.explosion();
+              }
+            }
+          }
+          if (kit.includes("chains")) {
+            e.chainsCd -= dt;
+            if (e.chainsCd <= 0) {
+              const herd = g.enemies.filter((o) => !o.dead && !isBossType(o.type) && Math.hypot(enemyPos(o).x - ep0.x, enemyPos(o).y - ep0.y) <= BOSS_CHAINS_RADIUS);
+              if (herd.length) {
+                e.chainsCd = BOSS_CHAINS_CD;
+                for (const m of herd) {
+                  m.link = Math.max(m.link, BOSS_CHAINS_TIME);
+                  ring(enemyPos(m).x, enemyPos(m).y, "#4de8ff", 34);
+                }
+                castSkill("chains", `${NAME} shields ${herd.length} minion${herd.length > 1 ? "s" : ""}`);
+                shock(ep0.x, ep0.y, "#4de8ff", BOSS_CHAINS_RADIUS, 0.7);
+                sfx.freeze();
+              }
+            }
+          }
+          if (kit.includes("undertow") && e.exCd[0] <= 0) {
+            let dragged = 0;
+            for (const m of g.enemies) {
+              if (m.dead || isBossType(m.type)) continue;
+              if (Math.abs(m.d - e.d) > 420) continue;
+              if (m.d < e.d - 8) continue;
+              const before = enemyPos(m);
+              m.d = Math.max(0, m.d - BOSS_UNDERTOW_PULL);
+              m.pd = m.d;
+              const after = enemyPos(m);
+              if (g.bolts.length < 44) g.bolts.push(randBolt(before.x, before.y, after.x, after.y, "#2ee6c8", 2.2, 0.24, performance.now()));
+              dragged++;
+            }
+            if (dragged) {
+              e.exCd[0] = BOSS_UNDERTOW_CD;
+              castSkill("undertow", `${NAME} drags ${dragged} enem${dragged > 1 ? "ies" : "y"} back into its coils`);
+              shock(ep0.x, ep0.y, "#2ee6c8", 260, 0.7);
+              g.shake = fxShake(5);
+              sfx.freeze();
+            }
+          }
+
+          // ================= STORM HERALD: siphon · overcharge · maelstrom =================
+          if (kit.includes("siphon") && e.exCd[0] <= 0) {
+            e.exCd[0] = BOSS_SIPHON_CD;
+            const stolen = Math.min(g.sp, BOSS_SIPHON_SP + 10 * g.round);
+            g.sp = Math.max(0, g.sp - stolen);
+            e.hp = Math.min(e.max, e.hp + e.max * BOSS_SIPHON_HEAL);
+            castSkill("siphon", `${NAME} siphons ${Math.round(stolen)} SP and heals ${Math.round(BOSS_SIPHON_HEAL * 100)}%`);
+            for (let i = 0; i < 6; i++) {
+              const a = Math.random() * Math.PI * 2;
+              const pp = { x: ep0.x + Math.cos(a) * 50, y: ep0.y + Math.sin(a) * 40 };
+              if (g.bolts.length < 44) g.bolts.push(randBolt(pp.x, pp.y, ep0.x, ep0.y, "#c98cff", 2.4, 0.3, performance.now()));
+            }
+            stars(ep0.x, ep0.y, "#c98cff", 8, 60);
+            sfx.zap();
+          }
+          if (kit.includes("overcharge") && e.exCd[1] <= 0) {
+            const near = g.towers
+              .filter((t) => t.cell)
+              .map((t) => ({ t, p: cellCenter(t.cell!.c, t.cell!.r) }))
+              .filter((x) => Math.hypot(x.p.x - ep0.x, x.p.y - ep0.y) <= 300)
+              .slice(0, BOSS_OVERCHARGE_TARGETS);
+            if (near.length) {
+              e.exCd[1] = BOSS_OVERCHARGE_CD;
+              for (const { t, p } of near) {
+                t.downT = Math.max(t.downT, BOSS_OVERCHARGE_DOWN);
+                if (g.bolts.length < 44) g.bolts.push(randBolt(ep0.x, ep0.y, p.x, p.y, "#7ce7ff", 3.2, 0.3, performance.now()));
+                ring(p.x, p.y, "#7ce7ff", 40);
+                glow(p.x, p.y, "#c9f7ff", 60, 0.45);
+              }
+              castSkill("overcharge", `${NAME} arcs through ${near.length} tower${near.length > 1 ? "s" : ""}`);
+              g.shake = fxShake(8);
+              sfx.zap();
+            }
+          }
+          if (kit.includes("maelstrom") && e.exCd[2] <= 0) {
+            e.exCd[2] = BOSS_MAELSTROM_CD;
+            let moved = 0;
+            for (const m of g.enemies) {
+              if (m.dead || isBossType(m.type)) continue;
+              m.d = Math.min(m.d + BOSS_MAELSTROM_DIST, PATH_LEN - 4);
+              m.pd = m.d;
+              m.rage = Math.max(m.rage || 0, 3.5);
+              const after = enemyPos(m);
+              ring(after.x, after.y, "#4de8ff", 24);
+              moved++;
+            }
+            if (moved) {
+              castSkill("maelstrom", `${NAME} hurls ${moved} enem${moved > 1 ? "ies" : "y"} down the lane`);
+              g.shake = fxShake(9);
+              flash("#4de8ff", 0.16);
+              sfx.summon();
+            }
+          }
         }
         if (e.slowT > 0) e.slowT -= dt;
         // ---------- skill status effects ----------
@@ -4162,6 +4397,17 @@ export default function Battle({
         }
         e.encased = Math.max(0, e.encased - dt);
         e.mark = Math.max(0, e.mark - dt);
+        // Electrical Induction / War Cry / Iron Banner timers
+        if (e.shieldCutT) {
+          e.shieldCutT = Math.max(0, e.shieldCutT - dt);
+          if (e.shieldCutT <= 0) e.shieldCut = 0;
+          if (Math.random() < dt * 6) {
+            const sp3 = enemyPos(e);
+            pushPart({ x: sp3.x, y: sp3.y, vx: (Math.random() - 0.5) * 60, vy: -40, life: 0.3, max: 0.3, size: 2.6, color: "#7ce7ff", kind: "spark", add: true });
+          }
+        }
+        if (e.rage) e.rage = Math.max(0, e.rage - dt);
+        if (e.plating) e.plating = Math.max(0, e.plating - dt);
         if (e.pulled > 0) {
           // Singularity: drag the enemy sideways toward the rift anchor
           e.pulled -= dt;
@@ -4224,9 +4470,10 @@ export default function Battle({
           e.slowT = 0;
         }
         const slowMul = e.slowT > 0 ? 1 - e.slow : 1;
+        const rageMul = (e.rage || 0) > 0 ? 1 + BOSS_WARCRY_HASTE : 1;
         if (e.frozen > 0) e.frozen -= dt;
         else if (e.stun > 0) e.stun -= dt;
-        else e.d += e.speed * slowMul * dt;
+        else e.d += e.speed * slowMul * rageMul * dt;
         if (e.d >= PATH_LEN - 2) {
           e.dead = true;
           g.lives -= e.lives;
@@ -4235,6 +4482,23 @@ export default function Battle({
           sfx.leak();
         }
       }
+      // Bolt from the Blue: resolve the thin bolts queued by this frame's hits
+      if (boltQueue.length) {
+        const pending = boltQueue.splice(0, 10);
+        const power = heroPower(g.heroLv);
+        for (const e of pending) {
+          if (e.dead) continue;
+          const p = enemyPos(e);
+          const now3 = performance.now();
+          if (g.strikes.length < 26) g.strikes.push({ x: p.x, y: p.y, life: 0.26, max: 0.26, width: 3, color: "#c9f7ff", seed: Math.random() * 90, forks: 1, top: -200 });
+          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y - 120, p.x, p.y, "#c9f7ff", 1.4, 0.16, now3));
+          shock(p.x, p.y, "#7ce7ff", 18, 0.3);
+          addText(p.x, p.y - 34, "BOLT", "#c9f7ff", 12, true);
+          inductionStrike(e);
+          dealDamage(e, (30 + 9 * g.round) * power, { lightning: true, color: "#c9f7ff", noCrit: true });
+        }
+      }
+
       // zones age out; the rift collapses with the Singularity timeline
       if (g.zones.length) {
         for (const z of g.zones) z.life -= dt;
@@ -6815,6 +7079,82 @@ export default function Battle({
           ctx.closePath();
           ctx.fill();
         }
+      } else if (et.shape === "herald") {
+        // Storm Herald: a robed sky-executioner riding its own thunderhead.
+        const float = Math.sin(cycle * 0.55) * 3;
+        ctx.translate(0, float);
+        // thunderhead under the robe
+        ctx.globalCompositeOperation = "lighter";
+        for (let i = 0; i < 3; i++) {
+          const cy2 = R * (0.62 + i * 0.14);
+          ctx.globalAlpha = 0.22 - i * 0.06;
+          ctx.fillStyle = et.color;
+          ctx.beginPath();
+          ctx.ellipse(0, cy2, R * (1.25 - i * 0.2), R * 0.24, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1;
+        // robe
+        ctx.fillStyle = bodyGrad(R);
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.62, R * 0.72);
+        ctx.quadraticCurveTo(-R * 0.5, -R * 0.35, 0, -R * 0.62);
+        ctx.quadraticCurveTo(R * 0.5, -R * 0.35, R * 0.62, R * 0.72);
+        ctx.quadraticCurveTo(0, R * 0.95, -R * 0.62, R * 0.72);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // lightning sigil down the robe
+        ctx.strokeStyle = et.accent;
+        ctx.lineWidth = 2.6;
+        ctx.beginPath();
+        ctx.moveTo(-R * 0.1, -R * 0.3);
+        ctx.lineTo(R * 0.12, R * 0.02);
+        ctx.lineTo(-R * 0.06, R * 0.2);
+        ctx.lineTo(R * 0.14, R * 0.52);
+        ctx.stroke();
+        // hood + void face
+        ctx.fillStyle = et.shade;
+        ctx.beginPath();
+        ctx.ellipse(0, -R * 0.7, R * 0.36, R * 0.42, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#04121a";
+        ctx.beginPath();
+        ctx.ellipse(0, -R * 0.66, R * 0.24, R * 0.3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // eyes
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowColor = et.color;
+        ctx.shadowBlur = saveRef.current.shadowFx ? 14 : 0;
+        ctx.beginPath();
+        ctx.arc(-R * 0.11, -R * 0.7, R * 0.055, 0, Math.PI * 2);
+        ctx.arc(R * 0.11, -R * 0.7, R * 0.055, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
+        // halo of storm rings
+        ctx.strokeStyle = et.color;
+        for (let i = 0; i < 2; i++) {
+          ctx.globalAlpha = 0.5 - i * 0.18;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(0, -R * 0.72, R * (0.62 + i * 0.22), R * (0.16 + i * 0.06), cycle * 0.5 + i, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        // crackling arcs
+        for (let i = 0; i < 3; i++) {
+          const a2 = cycle * 1.6 + i * 2.1;
+          const r1 = R * 0.8;
+          ctx.globalAlpha = 0.6;
+          ctx.strokeStyle = et.accent;
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(Math.cos(a2) * r1, Math.sin(a2) * r1 * 0.5 + R * 0.5);
+          ctx.lineTo(Math.cos(a2 + 0.4) * r1 * 1.1, Math.sin(a2 + 0.4) * r1 * 0.5 + R * 0.45);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
       } else {
         // overlord: a levitating rift sovereign — cloak, crown, orbiting shards
         const float = Math.sin(cycle * 0.5) * 3.5;
@@ -9117,7 +9457,9 @@ export default function Battle({
             </button>
           </div>
         )}
-        {/* boss health bar — appears while a boss is on the path */}
+        {/* boss health bar — compact single-strip HUD: name, %, two-line bar
+            and a row of tiny skill glyphs. It sits under the wave counter and
+            never eats more than 44px of the arena. */}
         {g && (() => {
           const bosses = g.enemies.filter((e) => !e.dead && isBossType(e.type));
           if (!bosses.length) return null;
@@ -9125,25 +9467,28 @@ export default function Battle({
           const et = ENEMY_TYPES[e.type];
           const frac = Math.max(0, e.hp / e.max);
           return (
-            <div data-testid="boss-bar" className="pointer-events-none absolute left-1/2 top-[62px] z-20 w-[430px] max-w-[92%] -translate-x-1/2">
-              <div className="panel panel-flat px-3 py-2" style={{ borderColor: `${et.color}88`, boxShadow: `0 0 22px ${et.color}44` }}>
-                <div className="flex items-center gap-2">
-                  <span className="font-disp text-[13px] leading-none" style={{ color: et.color }}>
+            <div data-testid="boss-bar" className="pointer-events-none absolute left-1/2 top-[54px] z-20 w-[440px] max-w-[94%] -translate-x-1/2">
+              <div className="boss-hud" style={{ borderColor: `${et.color}77`, boxShadow: `0 0 18px ${et.color}33` }}>
+                <div className="flex items-center gap-1.5">
+                  <span className="boss-hud-dot" style={{ background: et.color, boxShadow: `0 0 10px ${et.color}` }} />
+                  <span className="font-disp truncate text-[11.5px] leading-none" style={{ color: et.color }}>
                     {et.name.toUpperCase()}
                   </span>
-                  {e.enraged && <span className="rounded bg-[#ff4d5e] px-1 text-[9px] font-bold leading-tight text-black">ENRAGED</span>}
-                  {e.ward > 0 && <span className="rounded bg-[#8fb0ff] px-1 text-[9px] font-bold leading-tight text-black">WARD {e.ward.toFixed(1)}s</span>}
-                  <span className="num ml-auto text-[10px] font-bold text-[var(--dim)]">
+                  {e.enraged && <span className="boss-hud-tag" style={{ background: "#ff4d5e", color: "#180008" }}>RAGE</span>}
+                  {e.ward > 0 && <span className="boss-hud-tag" style={{ background: "#8fb0ff", color: "#080f22" }}>WARD</span>}
+                  {(e.plating || 0) > 0 && <span className="boss-hud-tag" style={{ background: "#ffd23f", color: "#1a1200" }}>PLATE</span>}
+                  {(e.shieldCutT || 0) > 0 && <span className="boss-hud-tag" style={{ background: "#7ce7ff", color: "#001a20" }}>STRIPPED</span>}
+                  <span className="num ml-auto text-[9.5px] font-bold text-[var(--dim)]">
                     {bosses.length > 1 ? `${bosses.length} BOSSES` : `${shortHp(e.hp)} / ${shortHp(e.max)} · ${Math.ceil(frac * 100)}%`}
                   </span>
                 </div>
-                <div className="mt-1.5 h-3 overflow-hidden rounded-full border border-black/60 bg-black/70">
+                <div className="mt-1 h-2 overflow-hidden rounded-full border border-black/60 bg-black/70">
                   <div
                     className={`h-full rounded-full ${e.enraged ? "boss-bar-rage" : "boss-bar"}`}
                     style={{ width: `${frac * 100}%`, background: `linear-gradient(90deg, ${et.color}, #ffcf4d)` }}
                   />
                 </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1" data-testid="boss-kit">
+                <div className="mt-1 flex flex-wrap items-center gap-1" data-testid="boss-kit">
                   {bossKit(e.type).map((id) => {
                     const sk = BOSS_SKILL_BY_ID[id];
                     const live = g.bossCast?.skill === sk.name;
@@ -9151,15 +9496,16 @@ export default function Battle({
                       <span
                         key={id}
                         data-skill={id}
-                        className={`boss-chip ${live ? "on boss-chip-fire" : ""}`}
+                        title={sk.name}
+                        className={`boss-chip boss-chip-sm ${live ? "on boss-chip-fire" : ""}`}
                         style={{
-                          background: live ? sk.color : "rgba(0,0,0,0.45)",
+                          background: live ? sk.color : "rgba(0,0,0,0.42)",
                           color: live ? "#160a2c" : sk.color,
                           borderColor: `${sk.color}66`,
                         }}
                       >
                         <i className="boss-chip-glyph">{sk.glyph}</i>
-                        {sk.name}
+                        <span className="boss-chip-label">{sk.name}</span>
                       </span>
                     );
                   })}
@@ -9251,6 +9597,21 @@ export default function Battle({
               <span className="font-disp mt-0.5 text-center text-[11px] leading-tight" style={{ color: heroReady ? heroDef.color : "#8a7a9a" }}>
                 {heroDef.name.toUpperCase()}
               </span>
+              {/* awakening tiers earned with Magic Tokens */}
+              {heroAwkSpec(heroDef.id, 0) && (() => {
+                const t1 = save.heroAwn?.[heroDef.id]?.[0] || 0;
+                const t2 = save.heroAwn?.[heroDef.id]?.[1] || 0;
+                if (!t1 && !t2) return null;
+                return (
+                  <span className="hero-awk-badges" data-testid="hero-awakening-badges">
+                    {[t1, t2].map((t, i) => (
+                      <i key={i} className={t > 0 ? "on" : ""} title={`Awakening ${i + 1}`}>
+                        {t > 0 ? ROMAN[t] : "·"}
+                      </i>
+                    ))}
+                  </span>
+                );
+              })()}
               {!heroReady ? (
                 <span className="text-[10px] font-bold leading-tight tracking-wider text-[var(--dim)]">COOLDOWN</span>
               ) : (
@@ -9536,79 +9897,89 @@ export default function Battle({
           aria-modal="true"
           aria-labelledby="boss-cutscene-title"
           tabIndex={-1}
-          className="boss-cutscene-overlay absolute inset-0 z-[98] flex items-center justify-center overflow-hidden"
+          className="boss-cutscene-overlay absolute inset-0 z-[98] flex items-center justify-center overflow-hidden p-3"
           onKeyDown={(e) => {
             if (e.key === "Escape" && g) { g.cut = null; sfx.bossSkip(); }
           }}
         >
           <div className="boss-backdrop absolute inset-0" />
-          <div className="boss-cut-stage relative flex h-full w-full flex-col items-center justify-center overflow-y-auto px-3 py-3 text-center sm:px-6">
-            {/* three rings sweep in at different speeds, then lock and snap off */}
-            <div className="boss-cut-ring absolute" style={{ width: 360, height: 360, borderColor: `${ENEMY_TYPES[g.cut.type].color}aa` }} />
-            <div className="boss-cut-ring absolute" style={{ width: 360, height: 360, borderColor: "#ffcf4d55", animationDelay: "0.45s" }} />
-            <div className="boss-cut-ring boss-cut-ring-lock absolute" style={{ width: 300, height: 300, borderColor: "#ffffff44" }} />
-            {/* scanning bars crossing the screen */}
+          {/* COMPACT CUTSCENE: one landscape card, portrait on the left, all the
+              numbers on the right. It never covers the whole arena and it never
+              needs a scroll bar, so the fight starts from a calm screen. */}
+          <div className="boss-cut-card relative w-[min(620px,96%)] overflow-hidden rounded-2xl">
             <div className="boss-cut-scan" />
-            <div className="boss-cut-scan boss-cut-scan-b" />
-            {/* the boss itself, drawn huge behind the name */}
-            <div className={`boss-cut-portrait ${g.cut.locked ? "locked" : ""}`}>
-              <div className="boss-cut-portrait-glow" style={{ background: `radial-gradient(circle, ${ENEMY_TYPES[g.cut.type].color}88, transparent 68%)` }} />
-              <BossPortrait type={g.cut.type} />
-            </div>
-            <div className="boss-cut-in relative">
-              <div className="boss-cut-warn text-[12px] font-bold tracking-[0.5em] text-[#ffcf4d]">WARNING</div>
-              <div
-                id="boss-cutscene-title"
-                className="font-disp boss-cut-name mt-1 text-5xl"
-                style={{ color: ENEMY_TYPES[g.cut.type].color, textShadow: `0 0 34px ${ENEMY_TYPES[g.cut.type].color}` }}
-              >
-                {g.cut.name.toUpperCase()}
+            <div className="boss-cut-stripe" style={{ background: `linear-gradient(90deg, ${ENEMY_TYPES[g.cut.type].color}, transparent)` }} />
+            <div className="relative flex items-center gap-3 p-3 sm:gap-4 sm:p-4">
+              <div className={`boss-cut-portrait boss-cut-portrait-sm ${g.cut.locked ? "locked" : ""}`}>
+                <div className="boss-cut-portrait-glow" style={{ background: `radial-gradient(circle, ${ENEMY_TYPES[g.cut.type].color}88, transparent 68%)` }} />
+                <BossPortrait type={g.cut.type} />
               </div>
-              <div className="boss-cut-title mt-1 text-[12px] font-bold tracking-[0.32em] text-[#ff9be9]">
-                {ENEMY_TYPES[g.cut.type].title.toUpperCase()}
-              </div>
-              <div className="mt-2 text-[13px] font-bold tracking-[0.3em] text-[var(--txt)]">{g.cut.sub}</div>
-              {/* live stat readout, so the cutscene tells you what you're facing */}
-              <div className="boss-cut-stats mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-[11px] font-bold">
-                <span className="text-[var(--dim)]">
-                  HEALTH{" "}
-                  <span className="num" style={{ color: "#ff8f9a" }}>
-                    ×{(ENEMY_TYPES[g.cut.type].hpMul * BOSS_HP_MUL).toFixed(1)}
+              <div className="relative min-w-0 flex-1 text-left">
+                <div className="flex items-center gap-2">
+                  <span className="boss-cut-warn text-[10px] font-bold tracking-[0.42em] text-[#ffcf4d]">WARNING</span>
+                  <span className="h-px flex-1 bg-gradient-to-r from-[#ffcf4d88] to-transparent" />
+                  <span className="boss-cut-count boss-cut-count-sm" aria-hidden="true">
+                    {g.cut.locked ? "!" : Math.max(1, Math.ceil(g.cut.t))}
                   </span>
-                </span>
-                <span className="text-[var(--dim)]">
-                  ARMOUR <span className="num text-[#8fb0ff]">{Math.round(ENEMY_TYPES[g.cut.type].armor * 100)}%</span>
-                </span>
-                <span className="text-[var(--dim)]">
-                  LIVES <span className="num text-[#ff4d5e]">{ENEMY_TYPES[g.cut.type].lives}</span>
-                </span>
-                <span className="text-[var(--dim)]">
-                  BOUNTY <span className="num text-[#ffcf4d]">{ENEMY_TYPES[g.cut.type].gold}</span>
-                </span>
-              </div>
-              <div className="mt-3 flex max-w-[560px] flex-wrap items-center justify-center gap-1.5">
-                {bossKit(g.cut.type).map((id, i) => {
-                  const sk = BOSS_SKILL_BY_ID[id];
-                  return (
-                    <span
-                      key={id}
-                      className="boss-chip boss-chip-cut"
-                      style={{ borderColor: `${sk.color}88`, color: sk.color, background: "rgba(0,0,0,0.45)", animationDelay: `${i * 70}ms` }}
-                    >
-                      <i className="boss-chip-glyph">{sk.glyph}</i>
-                      {sk.name}
-                    </span>
-                  );
-                })}
-              </div>
-              <div className="mt-5 flex items-center justify-center gap-3">
-                <div className={`boss-cut-count ${g.cut.locked ? "locked" : ""}`}>
-                  <span className="num">{g.cut.locked ? "!" : Math.max(1, Math.ceil(g.cut.t))}</span>
                 </div>
-                <span className="text-[11px] font-bold tracking-[0.25em] text-[var(--dim)]">
-                  {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "CUTSCENE"}
-                </span>
-                <button type="button" className="btn btn-cyan px-3 py-1.5 text-xs" aria-label="Skip boss cutscene" onClick={() => { sfx.bossSkip(); if (g) g.cut = null; }}>SKIP BOSS INTRO</button>
+                <div
+                  id="boss-cutscene-title"
+                  className="font-disp boss-cut-name truncate text-2xl leading-tight sm:text-3xl"
+                  style={{ color: ENEMY_TYPES[g.cut.type].color, textShadow: `0 0 24px ${ENEMY_TYPES[g.cut.type].color}` }}
+                >
+                  {g.cut.name.toUpperCase()}
+                </div>
+                <div className="boss-cut-title truncate text-[10.5px] font-bold tracking-[0.22em] text-[#ff9be9]">
+                  {ENEMY_TYPES[g.cut.type].title.toUpperCase()} · {g.cut.sub}
+                </div>
+                {/* live stat readout, compacted into one line */}
+                <div className="boss-cut-stats mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] font-bold">
+                  <span className="text-[var(--dim)]">HEALTH <span className="num" style={{ color: "#ff8f9a" }}>×{(ENEMY_TYPES[g.cut.type].hpMul * BOSS_HP_MUL).toFixed(1)}</span></span>
+                  <span className="text-[var(--dim)]">ARMOUR <span className="num text-[#8fb0ff]">{Math.round(ENEMY_TYPES[g.cut.type].armor * 100)}%</span></span>
+                  <span className="text-[var(--dim)]">LIVES <span className="num text-[#ff4d5e]">{ENEMY_TYPES[g.cut.type].lives}</span></span>
+                  <span className="text-[var(--dim)]">BOUNTY <span className="num text-[#ffcf4d]">{ENEMY_TYPES[g.cut.type].gold}</span></span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-1">
+                  {bossKit(g.cut.type).map((id, i) => {
+                    const sk = BOSS_SKILL_BY_ID[id];
+                    return (
+                      <span
+                        key={id}
+                        className="boss-chip boss-chip-cut"
+                        style={{ borderColor: `${sk.color}88`, color: sk.color, background: "rgba(0,0,0,0.45)", animationDelay: `${i * 70}ms` }}
+                      >
+                        <i className="boss-chip-glyph">{sk.glyph}</i>
+                        {sk.name}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-cyan px-3 py-1.5 text-[11px]"
+                    aria-label="Skip boss cutscene"
+                    onClick={() => { sfx.bossSkip(); if (g) g.cut = null; }}
+                  >
+                    SKIP BOSS INTRO
+                  </button>
+                  <button
+                    type="button"
+                    className="btn px-2.5 py-1.5 text-[10.5px] text-[var(--dim)]"
+                    data-testid="boss-cut-auto-skip"
+                    onClick={() => {
+                      sfx.uiTab();
+                      mutateRef.current((save) => { save.autoSkipBossCut = true; });
+                      toastRef.current("Boss cutscenes will be skipped from now on", "#7ce7ff");
+                      if (gRef.current) gRef.current.cut = null;
+                    }}
+                  >
+                    ALWAYS SKIP
+                  </button>
+                  <span className="ml-auto text-[10px] font-bold tracking-[0.2em] text-[var(--dim)]">
+                    {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "CUTSCENE"}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -9850,6 +10221,27 @@ function BossPortrait({ type }: { type: number }) {
           <circle cx={-19} cy={-21} r={5} fill={sh} />
           <circle cx={25} cy={-21} r={5} fill={sh} />
           <circle cy={14} r={16} fill="url(#bp-core)" />
+        </g>
+      )}
+      {et.shape === "herald" && (
+        <g stroke={sh} strokeWidth={3}>
+          {/* thunderhead */}
+          <ellipse cy={62} rx={78} ry={17} fill="none" stroke={c} strokeWidth={4} opacity={0.5} />
+          <ellipse cy={62} rx={52} ry={11} fill="none" stroke={a} strokeWidth={2} opacity={0.35} />
+          {/* robe */}
+          <path d="M-56 66 Q-46-26 0-58 Q46-26 56 66 Q0 88 -56 66 Z" fill={c} />
+          {/* sigil */}
+          <path d="M-8-24 L10 4 L-6 20 L12 48" stroke={a} strokeWidth={5} fill="none" strokeLinecap="round" />
+          {/* hood */}
+          <ellipse cy={-62} rx={32} ry={38} fill={sh} />
+          <ellipse cy={-58} rx={21} ry={27} fill="#04121a" stroke="none" />
+          <circle cx={-10} cy={-62} r={4.5} fill="#ffffff" stroke="none" />
+          <circle cx={10} cy={-62} r={4.5} fill="#ffffff" stroke="none" />
+          {/* storm halo */}
+          <ellipse cy={-64} rx={56} ry={14} fill="none" stroke={c} strokeWidth={3} opacity={0.6} transform="rotate(-12)" />
+          <ellipse cy={-64} rx={72} ry={19} fill="none" stroke={a} strokeWidth={2} opacity={0.35} transform="rotate(9)" />
+          {/* fork */}
+          <path d="M58-30 L44-6 L56 6 L42 34" stroke={a} strokeWidth={4} fill="none" strokeLinecap="round" />
         </g>
       )}
       {et.shape === "leviathan" && (
