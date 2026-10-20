@@ -260,7 +260,7 @@ describe("Settings", () => {
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
     // every new toggle is present and persisted
-    for (const label of ["Damage Numbers", "Screen Shake", "Battlefield Guides", "Auto-Start Waves", "Reduced Motion", "Performance HUD"]) {
+    for (const label of ["Damage Numbers", "Screen Shake", "Battlefield Guides", "Auto-Start Waves", "Reduced Motion", "Performance HUD", "Auto-Skip Boss Cutscene"]) {
       expect(document.body.textContent, label).toContain(label);
     }
     // the label sits in a wrapper div inside its option row — walk up to the row
@@ -278,6 +278,9 @@ describe("Settings", () => {
     await waitFor(() => saved().fastWaves === true, "auto-start on");
     click(rowFor("Performance HUD").querySelector("button")!);
     await waitFor(() => saved().perf === true, "perf hud on");
+    // boss cutscenes can be retired for good from settings
+    click(rowFor("Auto-Skip Boss Cutscene").querySelector("button")!);
+    await waitFor(() => saved().autoSkipBossCut === true, "auto-skip boss cutscenes on");
 
     // master volume slider
     const slider = document.querySelector('input[type="range"]') as HTMLInputElement;
@@ -1101,6 +1104,34 @@ describe("Guild", () => {
 });
 
 describe("Heroes", () => {
+  it("sells the Thunder God two token-bought awakening paths", async () => {
+    persistSave({ ...defaultSave(), hero: "thunder", tokens: 500 });
+    await mountApp();
+
+    const panel = await waitFor(
+      () => document.querySelector('[data-testid="hero-awakening"]') as HTMLElement,
+      "awakening panel"
+    );
+    const text = panel.textContent || "";
+    expect(text).toContain("Electrical Induction");
+    expect(text).toContain("Bolt from the Blue");
+    expect(text).toContain("PASSIVE");
+    // two independent tracks, each with its own token price
+    const first = panel.querySelector('[data-testid="hero-awaken-0"]') as HTMLButtonElement;
+    const second = panel.querySelector('[data-testid="hero-awaken-1"]') as HTMLButtonElement;
+    expect((first.textContent || "").toUpperCase()).toContain("TIER I");
+    expect(first.disabled).toBe(false);
+
+    const before = saved().tokens;
+    click(first);
+    await waitFor(() => saved().heroAwn?.thunder?.[0] === 1, "first tier bought");
+    expect(saved().tokens).toBeLessThan(before);
+    // the second path is still untouched and its button now asks for Tier I too
+    expect(saved().heroAwn?.thunder?.[1] || 0).toBe(0);
+    await waitFor(() => /TIER I/i.test(second.textContent || ""), "second path still at tier 0");
+    noErrors();
+  }, 30000);
+
   it("upgrades the equipped hero with gold", async () => {
     persistSave({ ...defaultSave(), gold: 5000 });
     await mountApp();
