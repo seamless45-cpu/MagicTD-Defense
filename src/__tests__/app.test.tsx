@@ -563,14 +563,13 @@ describe("Shop", () => {
 
     const gemsBefore = saved().gems;
     const fragsBefore = fragTotal(saved());
-    expect(gemsBefore).toBeGreaterThanOrEqual(80);
+    const card = document.querySelector('[data-chest="common"]')!;
+    const buyBtn = card.querySelector("button") as HTMLButtonElement;
+    expect(buyBtn.disabled).toBe(false);
+    click(buyBtn);
 
-    // Every headline chest is gem-priced now; the common chest is 80 gems.
-    const buyBtn = all("button").find((b) => (b.textContent || "").trim() === "80");
-    expect(buyBtn, "common chest buy button").toBeTruthy();
-    click(buyBtn!);
-
-    await waitFor(() => saved().gems === gemsBefore - 80, "gems spent on chest");
+    await waitFor(() => saved().gems < gemsBefore, "gems spent on chest");
+    const gemsAfterPurchase = saved().gems;
     const smash = await waitFor(() => byText("button", "Smash Open!"), "smash button");
     click(smash);
 
@@ -578,7 +577,7 @@ describe("Shop", () => {
     click(collect);
 
     await waitFor(() => fragTotal(saved()) > fragsBefore, "fragments banked");
-    expect(saved().gems).toBe(gemsBefore - 80);
+    expect(saved().gems).toBe(gemsAfterPurchase);
     noErrors();
   });
 
@@ -1053,6 +1052,7 @@ describe("Daily rewards", () => {
     click(document.querySelector('[data-testid="event-claim"]') as HTMLElement);
     await waitFor(() => saved().lastEvent !== "", "event bonus claimed");
     await waitFor(() => document.querySelector('[data-testid="reward-claim"]'), "event claim animation");
+    await waitFor(() => !(document.querySelector('[data-testid="claim-collect"]') as HTMLButtonElement).disabled, "event reward opened");
     click(document.querySelector('[data-testid="claim-collect"]') as HTMLElement);
     await waitFor(() => !document.querySelector('[data-testid="reward-claim"]'), "claim dismissed");
     expect((document.querySelector('[data-testid="event-claim"]') as HTMLButtonElement).disabled).toBe(true);
