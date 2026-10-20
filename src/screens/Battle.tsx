@@ -359,6 +359,10 @@ interface Proj {
   blast?: number;
   /** ground-slam shots throw a bigger shockwave on impact */
   shockwave?: boolean;
+  /** Eclipse Oracle: how far the implosion drags enemies back along the lane */
+  pull?: number;
+  /** Seraph / choir shots: secondary link colour */
+  chainColor?: string;
   /** armour shredded off the target on hit */
   shred?: number;
   /** a shot boosted by a Heavy-type awakening: drawn bigger */
@@ -399,7 +403,7 @@ interface Part {
   max: number;
   size: number;
   color: string;
-  kind: "spark" | "ring" | "smoke" | "glow" | "shard" | "shock" | "star" | "ember";
+  kind: "spark" | "ring" | "smoke" | "glow" | "shard" | "shock" | "star" | "ember" | "rune" | "wave" | "sparkle";
   /** rotation + spin, used by shards and stars */
   rot?: number;
   /** previous-frame rotation, interpolated alongside the position */
@@ -872,9 +876,15 @@ export default function Battle({
   const toastRef = useRef(push);
   toastRef.current = push;
 
-  // canvas text follows the picked UI/display font
+  // canvas text follows the picked UI/display font. The font vault can change
+  // the stack live (and Google faces finish loading later), so re-read the
+  // computed stacks on the font event and once the browser is done swapping.
   useEffect(() => {
-    refreshCanvasFonts();
+    const sync = () => refreshCanvasFonts();
+    sync();
+    document.addEventListener("magictd-font", sync);
+    document.fonts?.ready?.then(sync).catch(() => {});
+    return () => document.removeEventListener("magictd-font", sync);
   }, [save.font]);
 
   const zoomRef = useRef(zoom);
@@ -1066,8 +1076,20 @@ export default function Battle({
         if (g.parts.length > 380) g.parts.shift();
         const a = Math.random() * Math.PI * 2;
         const v = spd * (0.3 + Math.random() * 0.9);
-        g.parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 40, life: 0.5 + Math.random() * 0.4, max: 0.9, size: 2 + Math.random() * 3, color, kind: "spark" });
+        g.parts.push({
+          x, y,
+          vx: Math.cos(a) * v,
+          vy: Math.sin(a) * v - 40,
+          life: 0.45 + Math.random() * 0.5,
+          max: 0.95,
+          size: 1.8 + Math.random() * 3.2,
+          color: i % 4 === 0 ? "#ffffff" : color,
+          kind: "spark",
+          add: i % 3 === 0,
+          drag: 0.9,
+        });
       }
+      if (n > 6) sparkle(x, y, color, Math.min(6, Math.round(n / 3)), spd * 0.32);
     };
     const ring = (x: number, y: number, color: string, size: number) => {
       if (g.parts.length > 380) g.parts.shift();
@@ -1122,18 +1144,6 @@ export default function Battle({
       }
     };
 
-    /** Layered detonation: hot core, two readable rings, and outward debris. */
-    const impactBlast = (x: number, y: number, color: string, radius: number, heavy = false) => {
-      const r = Math.max(18, radius);
-      ring(x, y, color, r * 0.28);
-      glow(x, y, "#fff4d6", r * (heavy ? 0.58 : 0.36), heavy ? 0.22 : 0.14);
-      glow(x, y, color, r * 0.95, heavy ? 0.42 : 0.3);
-      shock(x, y, color, r * 0.78, heavy ? 0.62 : 0.44);
-      shock(x, y, "#fff8e8", r * 0.38, heavy ? 0.34 : 0.26);
-      burst(x, y, color, heavy ? 16 : 8, heavy ? 300 : 210);
-      shards(x, y, heavy ? "#fff4d6" : color, heavy ? 12 : 5, heavy ? 280 : 190);
-    };
-
     /** four-point sparkle stars that drift upward — the "magic" layer */
     const stars = (x: number, y: number, color: string, n: number, spread = 40) => {
       if (!fxOn()) n = Math.min(n, 3);
@@ -1176,6 +1186,62 @@ export default function Battle({
       }
     };
 
+    /** a rotating rune ring: the signature "magic" flourish for high-tier hits */
+    const rune = (x: number, y: number, color: string, size: number, life = 0.6) => {
+      pushPart({
+        x, y, vx: 0, vy: -8,
+        life, max: life, size, color, kind: "rune",
+        rot: Math.random() * Math.PI * 2,
+        spin: (Math.random() - 0.5) * 2.4,
+        add: true,
+      });
+    };
+
+    /** a ground-plane wave: reads as a shockwave rolling away from the impact */
+    const wave = (x: number, y: number, color: string, size: number, life = 0.5) => {
+      pushPart({ x, y, vx: 0, vy: 0, life, max: life, size, color, kind: "wave", add: true });
+    };
+
+    /** fine additive glints that hang in the air after a big cast */
+    const sparkle = (x: number, y: number, color: string, n: number, spread = 60) => {
+      if (!fxOn()) n = Math.min(n, 3);
+      for (let i = 0; i < n; i++) {
+        pushPart({
+          x: x + (Math.random() - 0.5) * spread,
+          y: y + (Math.random() - 0.5) * spread,
+          vx: (Math.random() - 0.5) * 22,
+          vy: -14 - Math.random() * 42,
+          life: 0.7 + Math.random() * 0.6,
+          max: 1.3,
+          size: 1.5 + Math.random() * 2.5,
+          color,
+          kind: "sparkle",
+          add: true,
+        });
+      }
+    };
+
+    /**
+     * REWORKED IMPACT: a layered detonation built from a white-hot core, a
+     * ground wave, two readable rings, rune glyphs, hot embers and debris.
+     * This one helper is the shared language of every heavy hit in the game.
+     */
+    const impactBlast = (x: number, y: number, color: string, radius: number, heavy = false) => {
+      const r = Math.max(18, radius);
+      wave(x, y, color, r * 1.15, heavy ? 0.55 : 0.42);
+      ring(x, y, color, r * 0.3);
+      ring(x, y, "#ffffff", r * 0.18);
+      glow(x, y, "#fff4d6", r * (heavy ? 0.62 : 0.4), heavy ? 0.24 : 0.16);
+      glow(x, y, color, r * 1.0, heavy ? 0.46 : 0.32);
+      shock(x, y, color, r * 0.8, heavy ? 0.66 : 0.48);
+      shock(x, y, "#fff8e8", r * 0.4, heavy ? 0.36 : 0.28);
+      rune(x, y, color, r * (heavy ? 1.15 : 0.9), heavy ? 0.7 : 0.5);
+      burst(x, y, color, heavy ? 20 : 10, heavy ? 320 : 220);
+      shards(x, y, heavy ? "#fff4d6" : color, heavy ? 14 : 6, heavy ? 300 : 200);
+      embers(x, y, color, heavy ? 10 : 4);
+      sparkle(x, y, "#fff8e8", heavy ? 16 : 8, r * 0.9);
+    };
+
     /** full-screen colour wash */
     const flash = (color: string, life = 0.3) => {
       if (!fxOn() || fxUserLevel >= 2) return;
@@ -1188,11 +1254,15 @@ export default function Battle({
       g.hitStop = Math.max(g.hitStop, sec);
     };
 
-    /** camera zoom punch + chromatic split, both decay on their own */
+    /** camera zoom punch + chromatic split, both decay on their own.
+     *  The Shake Intensity slider owns the whole camera language: at 0% the
+     *  arena stays perfectly still, punch and chroma included. */
     const punch = (n: number, chroma = 0) => {
-      if (!saveRef.current.shakeFx || fxUserLevel >= 2) return;
-      g.punch = Math.min(1, g.punch + n);
-      g.chroma = Math.min(1, g.chroma + chroma);
+      const intensity = Math.max(0, Math.min(2, saveRef.current.shakeIntensity ?? 1));
+      if (!saveRef.current.shakeFx || intensity <= 0 || fxUserLevel >= 2) return;
+      const scale = Math.min(1, intensity);
+      g.punch = Math.min(1, g.punch + n * scale);
+      g.chroma = Math.min(1, g.chroma + chroma * scale);
     };
 
     /** drop a persistent ground effect */
@@ -1210,10 +1280,13 @@ export default function Battle({
     const levelFlourish = (x: number, y: number, color: string, label: string, tier = 1) => {
       if (g.levelFx.length > 8) g.levelFx.shift();
       g.levelFx.push({ x, y, color, label, t: 0, total: 1.25, tier });
+      wave(x, y, color, 52 + tier * 14, 0.62);
       shock(x, y, color, 30, 0.7);
       shock(x, y, "#ffffff", 20, 0.45);
       glow(x, y, color, 70, 0.6);
+      rune(x, y, color, 46 + tier * 10, 0.8);
       stars(x, y, color, 10, 54);
+      sparkle(x, y, "#ffffff", 6 + tier * 3, 48);
       shards(x, y, color, tier >= 2 ? 14 : 8, 200);
       punch(tier >= 2 ? 0.5 : 0.3, tier >= 2 ? 0.4 : 0.2);
       hitStop(tier >= 2 ? 0.06 : 0.03);
@@ -2510,6 +2583,49 @@ export default function Battle({
           if (roar) addText(ep.x, ep.y - 46, "INFERNO ROAR", "#ff5d3d", 15, true);
           break;
         }
+        // ---------- the two new mystical towers ----------
+        case "eclipse": {
+          const radius = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          const pctHp = (t.def.pctHp || 0) + (t.def.upPctHp || 0) * upg + (t.def.ascPctHp || 0) * asc;
+          const slow = Math.min(0.8, (t.def.slow || 0) + (t.def.upSlow || 0) * upg + (t.def.ascSlow || 0) * asc);
+          push({
+            speed: 380,
+            kind: "eclipse",
+            splash: radius,
+            blast: radius,
+            blastDmg: 0.5,
+            pctHp,
+            slow,
+            slowDur: t.def.slowDur || 2.6,
+            pull: 42 + t.points * 4,
+          });
+          // the oracle never fires quietly: a dark halo folds open at the muzzle
+          glow(p.x, p.y, "#b06bff", 64, 0.3);
+          shock(p.x, p.y, "#6a2dff", 34, 0.35);
+          if (g.bolts.length < 40) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#c9a7ff", 1.8, 0.16, performance.now()));
+          break;
+        }
+        case "seraph": {
+          const pierce = Math.round((t.def.pierce || 0) + (t.def.upPierce || 0) * upg + (t.def.ascPierce || 0) * asc);
+          const chain = Math.round((t.def.chain || 0) + (t.def.upChain || 0) * upg + (t.def.ascChain || 0) * asc);
+          const t1 = saveRef.current.awn["seraph"]?.[0] || 0;
+          const ascend = t1 > 0 && Math.random() < t.def.awk1!.chance[t1 - 1];
+          push({
+            speed: 1250,
+            kind: "seraph",
+            pierce,
+            chain,
+            hitIds: [],
+            alwaysCrit: ascend,
+            chainColor: "#8ff0ff",
+            dmg: ascend ? dmg * 1.35 : dmg,
+          });
+          if (g.bolts.length < 40) g.bolts.push(randBolt(p.x, p.y, ep.x, ep.y, "#ffffff", 2.6, 0.18, performance.now()));
+          glow(p.x, p.y, "#c9fbff", 58, 0.28);
+          stars(p.x, p.y, "#8ff0ff", 5, 26);
+          if (ascend) addText(ep.x, ep.y - 44, "ASCENSION", "#ffffff", 13, true);
+          break;
+        }
       }
       // extra shots from a volley awakening, aimed at the enemies least shot at
       if (extraShots > 0) {
@@ -2558,6 +2674,68 @@ export default function Battle({
           g.strikes.push({ x: ep.x, y: ep.y, life: 0.22, max: 0.22, width: 6, color: "#fff3a0", seed: Math.random() * 100, forks: 2 });
           dealDamage(enemy, pr.dmg * 0.45, { alwaysCrit: pr.alwaysCrit, tw: pr.tw, color: "#fff3a0" });
         }
+      }
+
+      // ---------- Eclipse Oracle: the dark moon collapses inward ----------
+      if (pr.kind === "eclipse") {
+        const radius = pr.blast ?? 120;
+        const pull = pr.pull ?? 48;
+        const dur = 1.25;
+        addZone({ kind: "rift", x: pos.x, y: pos.y, r: radius * 0.55, life: dur, max: dur, dps: 0, slow: 0.4, color: "#b06bff" });
+        shock(pos.x, pos.y, "#b06bff", radius * 1.15, 0.62);
+        shock(pos.x, pos.y, "#3a0a6a", radius * 0.72, 0.46);
+        ring(pos.x, pos.y, "#ffffff", radius * 0.34);
+        stars(pos.x, pos.y, "#d8c2ff", 12, 74);
+        burst(pos.x, pos.y, "#8a4dff", 16, 230);
+        glow(pos.x, pos.y, "#b06bff", radius * 0.9, 0.32);
+        let caught = 0;
+        g.enemies.forEach((e) => {
+          if (e.dead) return;
+          const ep = enemyPos(e);
+          if (Math.hypot(ep.x - pos.x, ep.y - pos.y) > radius) return;
+          caught++;
+          // the singularity drags bodies back up the lane, not forward
+          e.d = Math.max(0, e.d - pull);
+          e.slow = Math.max(e.slow, 0.45);
+          e.slowT = Math.max(e.slowT, 2.4);
+          if (e.id !== target.id) dealDamage(e, pr.dmg * 0.35, { tw: pr.tw, color: "#b06bff" });
+          const np = enemyPos(e);
+          ring(np.x, np.y, "#b06bff", 22);
+        });
+        addText(pos.x, pos.y - 48, "IMPLOSION", "#d8c2ff", 14, true);
+        if (caught > 1) addText(pos.x, pos.y - 30, `${caught} PULLED`, "#b06bff", 11, false);
+        g.shake = fxShake(8);
+        punch(0.45, 0.3);
+        flash("#6a2dff", 0.1);
+        sfx.eclipseBurst();
+      }
+
+      // ---------- Astral Seraph: the choir answers every hit ----------
+      if (pr.kind === "seraph") {
+        const links = Math.max(0, pr.chain ?? 0);
+        const near = g.enemies
+          .filter((e) => !e.dead && e.id !== target.id)
+          .map((e) => ({ e, dist: Math.hypot(enemyPos(e).x - pos.x, enemyPos(e).y - pos.y) }))
+          .filter((x) => x.dist < 250)
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, links);
+        const nowS = performance.now();
+        let from = pos;
+        near.forEach(({ e }) => {
+          const ep = enemyPos(e);
+          if (g.bolts.length < 44) g.bolts.push(randBolt(from.x, from.y, ep.x, ep.y, "#8ff0ff", 1.9, 0.18, nowS));
+          g.strikes.push({ x: ep.x, y: ep.y, life: 0.2, max: 0.2, width: 5, color: "#eaffff", seed: Math.random() * 100, forks: 1 });
+          stars(ep.x, ep.y, "#8ff0ff", 3, 24);
+          glow(ep.x, ep.y, "#c9fbff", 30, 0.22);
+          dealDamage(e, pr.dmg * 0.5, { tw: pr.tw, color: "#8ff0ff" });
+          from = ep;
+        });
+        shock(pos.x, pos.y, "#8ff0ff", 92, 0.42);
+        stars(pos.x, pos.y, "#ffffff", 8, 56);
+        glow(pos.x, pos.y, "#c9fbff", 52, 0.24);
+        if (near.length) addText(pos.x, pos.y - 44, `CHOIR ×${near.length}`, "#8ff0ff", 12, false);
+        g.sp += spGain(1 + Math.floor(near.length / 2));
+        sfx.seraphHymn();
       }
 
       // ---------- Heavenly God: the laser punches straight through ----------
@@ -2733,7 +2911,7 @@ export default function Battle({
           return;
         }
       }
-      const blastR = pr.blast ?? (pr.splash !== undefined ? 92 : 0);
+      const blastR = pr.kind === "eclipse" || pr.kind === "seraph" ? 0 : (pr.blast ?? (pr.splash !== undefined ? 92 : 0));
       if (blastR > 0) {
         const blastBase =
           pr.blastDmg !== undefined
@@ -2773,7 +2951,7 @@ export default function Battle({
         if (target.hp <= 0 && !target.dead) killReward(target);
         return;
       }
-      if (pr.chain !== undefined) {
+      if (pr.chain !== undefined && pr.kind !== "seraph") {
         let from = pos;
         const now = performance.now();
         const others = g.enemies.filter((e) => !e.dead && e.id !== target.id).sort((a, b) => b.d - a.d).slice(0, pr.chain);
@@ -5785,6 +5963,113 @@ export default function Battle({
           ctx.restore();
           break;
         }
+        case "eclipse": {
+          // a black moon inside a violet crown, with a crescent blade orbiting
+          const spin = now / 900;
+          const breathe = 1 + Math.sin(now / 380) * 0.05;
+          ctx.save();
+          ctx.scale(breathe, breathe);
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          const halo = ctx.createRadialGradient(0, -4, 2, 0, -4, 30);
+          halo.addColorStop(0, "rgba(176,107,255,0.8)");
+          halo.addColorStop(0.55, "rgba(106,45,255,0.28)");
+          halo.addColorStop(1, "transparent");
+          ctx.fillStyle = halo;
+          ctx.beginPath();
+          ctx.arc(0, -4, 30, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          // the void itself
+          ctx.fillStyle = "#12032a";
+          ctx.strokeStyle = "#b06bff";
+          ctx.lineWidth = 2.6;
+          ctx.beginPath();
+          ctx.arc(0, -4, 17, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          // thin crescent
+          ctx.strokeStyle = "#e6d6ff";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(0, -4, 12, -0.6, 1.9);
+          ctx.stroke();
+          // orbiting shard
+          const ox = Math.cos(spin) * 25;
+          const oy = -4 + Math.sin(spin) * 9;
+          ctx.fillStyle = "#d8c2ff";
+          ctx.save();
+          ctx.translate(ox, oy);
+          ctx.rotate(spin * 2);
+          ctx.beginPath();
+          ctx.moveTo(0, -5);
+          ctx.lineTo(4, 0);
+          ctx.lineTo(0, 5);
+          ctx.lineTo(-4, 0);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+          // pedestal eyes
+          ctx.fillStyle = "#6a2dff";
+          ctx.fillRect(-16, 12, 8, 4);
+          ctx.fillRect(8, 12, 8, 4);
+          ctx.restore();
+          break;
+        }
+        case "seraph": {
+          // a winged spear of starlight; the halo counter-rotates
+          const hover = Math.sin(now / 420) * 2;
+          ctx.save();
+          ctx.translate(0, hover);
+          // wings
+          ctx.strokeStyle = "#8ff0ff";
+          ctx.lineWidth = 2.2;
+          for (const dir of [-1, 1]) {
+            ctx.beginPath();
+            ctx.moveTo(dir * 6, -4);
+            ctx.quadraticCurveTo(dir * 22, -18, dir * 30, -2);
+            ctx.quadraticCurveTo(dir * 22, 2, dir * 8, 4);
+            ctx.stroke();
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(dir * 10, -2);
+            ctx.quadraticCurveTo(dir * 22, -9, dir * 25, 0);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+          }
+          // halo
+          ctx.save();
+          ctx.rotate(now / 700);
+          ctx.strokeStyle = "#ffe9a8";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.ellipse(0, -22, 15, 4.5, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+          // spear
+          ctx.fillStyle = "#123244";
+          ctx.strokeStyle = "#c9fbff";
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.roundRect(-4, -6, 8, 26, 3);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.moveTo(0, -30);
+          ctx.lineTo(6, -8);
+          ctx.lineTo(0, -2);
+          ctx.lineTo(-6, -8);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#8ff0ff";
+          ctx.globalAlpha = 0.8;
+          ctx.beginPath();
+          ctx.arc(0, -10, 3.2 + Math.abs(Math.sin(now / 170)) * 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
         case "clone": {
           // two offset diamonds — the tower and the copy it keeps promising
           const wob = Math.sin(now / 400) * 2;
@@ -6799,6 +7084,67 @@ export default function Battle({
       ctx.translate(px, py);
       ctx.rotate(ang);
       switch (pr.kind) {
+        case "eclipse": {
+          // a collapsing dark moon with a violet corona and a trailing void wake
+          const wake = 34;
+          const tail = ctx.createLinearGradient(-wake, 0, 10, 0);
+          tail.addColorStop(0, "rgba(106,45,255,0)");
+          tail.addColorStop(0.6, "rgba(176,107,255,0.55)");
+          tail.addColorStop(1, "rgba(216,194,255,0.95)");
+          ctx.strokeStyle = tail;
+          ctx.lineWidth = 7;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(-wake, 0);
+          ctx.lineTo(6, 0);
+          ctx.stroke();
+          ctx.fillStyle = "#0b0218";
+          ctx.strokeStyle = "#b06bff";
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.arc(3, 0, 10, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.globalCompositeOperation = "lighter";
+          ctx.strokeStyle = "rgba(216,194,255,0.8)";
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.ellipse(3, 0, 15 + Math.sin(pr.age * 18) * 2, 6, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalCompositeOperation = "source-over";
+          break;
+        }
+        case "seraph": {
+          // a starlight lance: white core, cyan sheath, star at the tip
+          const tail = 54;
+          const grd = ctx.createLinearGradient(-tail, 0, 18, 0);
+          grd.addColorStop(0, "rgba(143,240,255,0)");
+          grd.addColorStop(0.45, "rgba(143,240,255,0.55)");
+          grd.addColorStop(1, "#ffffff");
+          ctx.globalCompositeOperation = "lighter";
+          ctx.strokeStyle = grd;
+          ctx.lineWidth = 8;
+          ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(-tail, 0);
+          ctx.lineTo(16, 0);
+          ctx.stroke();
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.moveTo(-tail * 0.5, 0);
+          ctx.lineTo(20, 0);
+          ctx.stroke();
+          ctx.fillStyle = "#eaffff";
+          ctx.beginPath();
+          ctx.moveTo(26, 0);
+          ctx.lineTo(18, -5);
+          ctx.lineTo(18, 5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalCompositeOperation = "source-over";
+          break;
+        }
         case "heavenly": {
           // the laser: a long white-hot core with a gold sheath behind it
           const tail = 46;
@@ -6984,6 +7330,35 @@ export default function Battle({
       ctx.restore();
     };
 
+    /**
+     * CAMERA SHAKE — high-frequency random offset on each axis, and nothing
+     * else. Each axis gets its own white-noise sample every 1/120 s (1/30 s in
+     * power-saving mode), so the camera jitters like a hard impact instead of
+     * swaying on a slow sine wave. Amplitude is `g.shake` scaled by the player's
+     * Shake Intensity slider; there is no rotation, zoom or drift mixed in.
+     */
+    let shakeStep = Number.NaN;
+    let shakeAxisX = 0;
+    let shakeAxisY = 0;
+    const shakeNoise = (step: number, salt: number) => {
+      const x = Math.sin((step + salt) * 12.9898 + salt * 0.017) * 43758.5453;
+      return (x - Math.floor(x)) * 2 - 1;
+    };
+    const sampleShake = (now: number) => {
+      const intensity = Math.max(0, Math.min(2, saveRef.current.shakeIntensity ?? 1));
+      if (!saveRef.current.shakeFx || intensity <= 0) return { x: 0, y: 0 };
+      const amp = Math.min(38, g.shake * intensity);
+      if (amp <= 0.25) return { x: 0, y: 0 };
+      const hz = saveRef.current.powerSaver ? 30 : 120;
+      const step = Math.floor(now / (1000 / hz));
+      if (step !== shakeStep) {
+        shakeStep = step;
+        shakeAxisX = shakeNoise(step, 11.7);
+        shakeAxisY = shakeNoise(step, 47.3);
+      }
+      return { x: shakeAxisX * amp, y: shakeAxisY * amp };
+    };
+
     const draw = () => {
       // Pixel Ratio changes the backing-store resolution, not the game world's
       // 1000×580 coordinate system. Reset this every frame because post-fx
@@ -7025,13 +7400,11 @@ export default function Battle({
 
       // camera shake/punch move the arena content but never the sky
       ctx.save();
-      if (g.shake > 0.3 && saveRef.current.shakeFx && !saveRef.current.powerSaver) {
-        // A smooth, high-frequency rumble gives the temporal smear a real
-        // direction instead of flickering randomly between unrelated offsets.
-        const shakePhase = now * 0.058;
-        shakeX = Math.sin(shakePhase) * g.shake;
-        shakeY = Math.cos(shakePhase * 1.17) * g.shake * 0.72;
-        ctx.translate(shakeX, shakeY);
+      {
+        const offset = sampleShake(now);
+        shakeX = offset.x;
+        shakeY = offset.y;
+        if (shakeX !== 0 || shakeY !== 0) ctx.translate(shakeX, shakeY);
       }
       if (g.punch > 0.01) {
         const sc = 1 + g.punch * 0.045;
@@ -7647,39 +8020,56 @@ export default function Battle({
         if (px < -140 || px > W + 140 || py < -140 || py > H + 140) return;
         ctx.save();
         ctx.translate(px - p.x, py - p.y);
+        const sprite = glowSprite(p.color);
+
         if (p.kind === "ring") {
-          ctx.globalAlpha = al * 0.8;
+          // a clean double ring: a fast outer edge and a hot inner hairline
+          const r = p.size * (1.5 - al * 0.5);
+          ctx.globalAlpha = al * 0.9;
           ctx.strokeStyle = p.color;
-          ctx.lineWidth = 3 * al;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * (1.6 - al * 0.6), 0, Math.PI * 2);
-          ctx.stroke();
-        } else if (p.kind === "shock") {
-          // thick leading edge that expands fast then eases out and thins
-          const ease = 1 - Math.pow(1 - t, 3);
-          const r = p.size * (0.35 + ease * 2.4);
-          ctx.globalAlpha = al * al * 0.95;
-          ctx.strokeStyle = p.color;
-          ctx.lineWidth = Math.max(0.6, 7 * al * al);
+          ctx.lineWidth = 3.2 * al;
           ctx.beginPath();
           ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
           ctx.stroke();
-          // inner hairline chasing the main ring
-          ctx.globalAlpha = al * 0.5;
-          ctx.lineWidth = Math.max(0.4, 2 * al);
+          ctx.globalAlpha = al * 0.55;
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 1.2 * al + 0.4;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, r * 0.78, 0, Math.PI * 2);
+          ctx.arc(p.x, p.y, r * 0.82, 0, Math.PI * 2);
+          ctx.stroke();
+        } else if (p.kind === "shock") {
+          // REWORKED: a gradient annulus that expands fast, thins out and
+          // leaves a hot white leading edge. Reads clearly on every background.
+          const ease = 1 - Math.pow(1 - t, 3);
+          const r = p.size * (0.3 + ease * 2.3);
+          const grad = ctx.createRadialGradient(p.x, p.y, r * 0.52, p.x, p.y, r);
+          grad.addColorStop(0, "transparent");
+          grad.addColorStop(0.62, p.color);
+          grad.addColorStop(0.86, "rgba(255,255,255,0.92)");
+          grad.addColorStop(1, "transparent");
+          ctx.globalAlpha = al * al * 0.9;
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = al * 0.85;
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = Math.max(0.7, 2.4 * al * al);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r * 0.86, 0, Math.PI * 2);
           ctx.stroke();
         } else if (p.kind === "glow") {
-          const r = p.size * (0.7 + t * 0.7);
-          const spr = glowSprite(p.color);
-          ctx.globalAlpha = al * 0.85;
-          if (spr) {
-            ctx.drawImage(spr, p.x - r, p.y - r, r * 2, r * 2);
+          const r = p.size * (0.65 + t * 0.75);
+          ctx.globalAlpha = al * 0.95;
+          if (sprite) {
+            ctx.drawImage(sprite, p.x - r, p.y - r, r * 2, r * 2);
+            ctx.globalAlpha = al * 0.65;
+            const core = r * 0.42;
+            ctx.drawImage(sprite, p.x - core, p.y - core, core * 2, core * 2);
           } else {
             const gr = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
-            gr.addColorStop(0, p.color);
-            gr.addColorStop(0.35, p.color + "88");
+            gr.addColorStop(0, "#ffffff");
+            gr.addColorStop(0.28, p.color);
             gr.addColorStop(1, "transparent");
             ctx.fillStyle = gr;
             ctx.beginPath();
@@ -7687,28 +8077,50 @@ export default function Battle({
             ctx.fill();
           }
         } else if (p.kind === "shard") {
-          ctx.globalAlpha = al;
+          // faceted debris with a light trail behind it
+          ctx.globalAlpha = al * 0.9;
           ctx.save();
           ctx.translate(p.x, p.y);
           ctx.rotate(rot);
-          ctx.fillStyle = p.color;
+          const trailLen = Math.min(20, Math.hypot(p.vx, p.vy) * 0.08);
+          const tr = ctx.createLinearGradient(-trailLen, 0, 0, 0);
+          tr.addColorStop(0, "transparent");
+          tr.addColorStop(1, p.color);
+          ctx.strokeStyle = tr;
+          ctx.lineWidth = p.size * 0.7;
+          ctx.beginPath();
+          ctx.moveTo(-trailLen, 0);
+          ctx.lineTo(0, 0);
+          ctx.stroke();
+          const sh = ctx.createLinearGradient(-p.size, -p.size, p.size, p.size);
+          sh.addColorStop(0, "#ffffff");
+          sh.addColorStop(0.45, p.color);
+          sh.addColorStop(1, p.color + "88");
+          ctx.fillStyle = sh;
           ctx.beginPath();
           ctx.moveTo(0, -p.size);
           ctx.lineTo(p.size * 0.72, p.size * 0.7);
+          ctx.lineTo(0, p.size * 0.34);
           ctx.lineTo(-p.size * 0.72, p.size * 0.7);
           ctx.closePath();
           ctx.fill();
           ctx.restore();
         } else if (p.kind === "star") {
-          // four-point sparkle: two crossed spikes plus a hot core
-          const sc = al * (0.6 + Math.sin(t * Math.PI) * 0.8);
+          // four-point sparkle with a soft halo and a white hot core
+          const sc = al * (0.55 + Math.sin(t * Math.PI) * 0.85);
           ctx.globalAlpha = al;
+          if (sprite) {
+            const gr = p.size * 3 * sc;
+            ctx.globalAlpha = al * 0.3;
+            ctx.drawImage(sprite, p.x - gr, p.y - gr, gr * 2, gr * 2);
+            ctx.globalAlpha = al;
+          }
           ctx.save();
           ctx.translate(p.x, p.y);
           ctx.rotate(rot);
           ctx.fillStyle = p.color;
           const L = p.size * 2.1 * sc;
-          const Wd = p.size * 0.28 * sc;
+          const Wd = p.size * 0.26 * sc;
           ctx.beginPath();
           ctx.moveTo(0, -L);
           ctx.quadraticCurveTo(Wd, -Wd, L, 0);
@@ -7717,23 +8129,112 @@ export default function Battle({
           ctx.quadraticCurveTo(-Wd, -Wd, 0, -L);
           ctx.fill();
           ctx.fillStyle = "#ffffff";
-          ctx.globalAlpha = al * 0.9;
           ctx.beginPath();
-          ctx.arc(0, 0, p.size * 0.26 * sc, 0, Math.PI * 2);
+          ctx.arc(0, 0, p.size * 0.3 * sc, 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
         } else if (p.kind === "ember") {
-          ctx.globalAlpha = al * (0.6 + 0.4 * Math.sin(p.life * 22));
-          ctx.fillStyle = p.color;
+          // glowing ember with a short upward tail
+          const r = p.size * (0.7 + al * 0.5);
+          ctx.globalAlpha = al * (0.55 + 0.45 * Math.sin(p.life * 24));
+          if (sprite) {
+            ctx.drawImage(sprite, p.x - r * 2.4, p.y - r * 2.4, r * 4.8, r * 4.8);
+          } else {
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.strokeStyle = p.color;
+          ctx.globalAlpha *= 0.5;
+          ctx.lineWidth = r * 0.7;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * al, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x - p.vx * 0.035, p.y - p.vy * 0.035);
+          ctx.stroke();
         } else if (p.kind === "smoke") {
-          ctx.globalAlpha = al * 0.4;
-          ctx.fillStyle = p.color;
+          const r = p.size * (0.8 + t * 1.9);
+          ctx.globalAlpha = al * 0.3;
+          if (sprite) {
+            ctx.drawImage(sprite, p.x - r, p.y - r, r * 2, r * 2);
+          } else {
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        } else if (p.kind === "rune") {
+          // a rotating glyph ring: hexagon + cardinal ticks + inner sigil
+          const r = p.size * (0.55 + Math.min(1, t * 1.8) * 0.6);
+          ctx.globalAlpha = al * 0.85;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(rot);
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(p.x, p.y, p.size * (2 - al), 0, Math.PI * 2);
+          for (let i = 0; i <= 6; i++) {
+            const a = (i / 6) * Math.PI * 2;
+            const qx = Math.cos(a) * r;
+            const qy = Math.sin(a) * r;
+            i === 0 ? ctx.moveTo(qx, qy) : ctx.lineTo(qx, qy);
+          }
+          ctx.stroke();
+          ctx.globalAlpha = al * 0.7;
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 1;
+          for (let i = 0; i < 4; i++) {
+            const a = (i / 4) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.moveTo(Math.cos(a) * r * 0.82, Math.sin(a) * r * 0.82);
+            ctx.lineTo(Math.cos(a) * r * 1.12, Math.sin(a) * r * 1.12);
+            ctx.stroke();
+          }
+          ctx.rotate(-rot * 2.4);
+          ctx.globalAlpha = al * 0.55;
+          ctx.strokeStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.42, 0, Math.PI * 1.4);
+          ctx.stroke();
+          ctx.restore();
+        } else if (p.kind === "wave") {
+          // ground-plane shockwave: a flattened annulus that races outward
+          const ease = 1 - Math.pow(1 - t, 4);
+          const r = p.size * (0.2 + ease * 2.4);
+          const grad = ctx.createRadialGradient(p.x, p.y, r * 0.42, p.x, p.y, r);
+          grad.addColorStop(0, "transparent");
+          grad.addColorStop(0.7, p.color + "aa");
+          grad.addColorStop(1, "transparent");
+          ctx.globalAlpha = al * 0.7;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.scale(1, 0.48);
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
           ctx.fill();
+          ctx.strokeStyle = "#ffffff";
+          ctx.globalAlpha = al * 0.4;
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.arc(0, 0, r * 0.92, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        } else if (p.kind === "sparkle") {
+          // fine drifting glint: a tiny cross with a soft halo
+          const r = p.size * (0.5 + al * 0.8);
+          ctx.globalAlpha = al * 0.9;
+          if (sprite) {
+            ctx.drawImage(sprite, p.x - r * 2.6, p.y - r * 2.6, r * 5.2, r * 5.2);
+          }
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(p.x - r * 1.6, p.y);
+          ctx.lineTo(p.x + r * 1.6, p.y);
+          ctx.moveTo(p.x, p.y - r * 1.6);
+          ctx.lineTo(p.x, p.y + r * 1.6);
+          ctx.stroke();
         } else {
           // sparks stretch along their velocity so fast debris reads as streaks
           const sp = Math.hypot(p.vx, p.vy);
@@ -7743,11 +8244,20 @@ export default function Battle({
             ctx.save();
             ctx.translate(p.x, p.y);
             ctx.rotate(Math.atan2(p.vy, p.vx));
-            const len = Math.min(16, p.size + sp * 0.03);
+            const len = Math.min(18, p.size + sp * 0.035);
             ctx.fillRect(-len, -p.size / 2, len + p.size, p.size);
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(-p.size * 0.5, -p.size * 0.22, p.size * 2.2, p.size * 0.44);
             ctx.restore();
           } else {
-            ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * 0.62, 0, Math.PI * 2);
+            ctx.fill();
+            if (sprite && p.size > 3) {
+              ctx.globalAlpha = al * 0.45;
+              const r = p.size * 3;
+              ctx.drawImage(sprite, p.x - r, p.y - r, r * 2, r * 2);
+            }
           }
         }
         ctx.restore();
@@ -9098,7 +9608,7 @@ export default function Battle({
                 <span className="text-[11px] font-bold tracking-[0.25em] text-[var(--dim)]">
                   {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "CUTSCENE"}
                 </span>
-                <button type="button" className="btn btn-cyan px-3 py-1.5 text-xs" aria-label="Skip boss cutscene" onClick={() => { sfx.bossSkip(); if (g) g.cut = null; }}>SKIP INTRO</button>
+                <button type="button" className="btn btn-cyan px-3 py-1.5 text-xs" aria-label="Skip boss cutscene" onClick={() => { sfx.bossSkip(); if (g) g.cut = null; }}>SKIP BOSS INTRO</button>
               </div>
             </div>
           </div>

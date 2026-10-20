@@ -217,6 +217,8 @@ export interface SaveData {
   fxq: number;
   /** camera shake on explosions */
   shakeFx: boolean;
+  /** camera shake strength multiplier, 0 = off, 1 = 100%, 2 = 200% */
+  shakeIntensity: number;
   /** internal canvas resolution multiplier (0.75..2) */
   pixelRatio: number;
   bloomFx: boolean;
@@ -327,6 +329,7 @@ export function defaultSave(): SaveData {
     interpolationMethod: "smoothstep",
     fxq: 0,
     shakeFx: true,
+    shakeIntensity: 1,
     pixelRatio: 1,
     bloomFx: true,
     shadowFx: true,
@@ -383,6 +386,7 @@ function normalise(s: SaveData): SaveData {
   s.eventStreak = Math.max(0, Math.min(7, Number.isFinite(s.eventStreak) ? Math.round(s.eventStreak) : 0));
   s.zoom = clampZoom(s.zoom);
   s.pixelRatio = Math.round(Math.max(0.75, Math.min(2, Number.isFinite(s.pixelRatio) ? s.pixelRatio : 1)) * 4) / 4;
+  s.shakeIntensity = Math.round(Math.max(0, Math.min(2, Number.isFinite(s.shakeIntensity) ? s.shakeIntensity : 1)) * 20) / 20;
   s.bloomFx = s.bloomFx !== false;
   s.shadowFx = s.shadowFx !== false;
   s.antiAlias = s.antiAlias !== false;

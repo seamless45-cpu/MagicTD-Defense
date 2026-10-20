@@ -813,10 +813,10 @@ describe("Towers", () => {
     );
     expect(nested, "nested scroll boxes inside the tab").toHaveLength(0);
 
-    // every tower is in that one grid: 62 cells + 5 rarity headers
-    expect(grid.children.length).toBe(67);
+    // every tower is in that one grid: 64 cells + 5 rarity headers
+    expect(grid.children.length).toBe(69);
     const towerCells = page.querySelectorAll(".tw-cell[data-tower]").length;
-    expect(towerCells).toBe(62);
+    expect(towerCells).toBe(64);
 
     // the rotation strip and the filters ride along on top of the scroll, so the
     // drag-to-rotation drop target never scrolls out of reach

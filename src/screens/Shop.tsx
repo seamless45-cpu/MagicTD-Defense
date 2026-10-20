@@ -81,7 +81,7 @@ export default function Shop({
     push(`+${fragQty} ${picked.name} fragments`, RARITY[picked.rarity].color);
   };
 
-  const GOLD_GEM_BATCH = 2000;
+  const GOLD_GEM_BATCH = 1000;
   const GOLD_PER_GEM = 5;
   const exchangeGoldForGems = () => {
     const cost = GOLD_GEM_BATCH * GOLD_PER_GEM;

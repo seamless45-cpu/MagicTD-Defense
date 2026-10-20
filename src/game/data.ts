@@ -72,7 +72,9 @@ export type TowerKind =
   | "scythe"
   | "sandstorm"
   | "bloodstone"
-  | "venom";
+  | "venom"
+  | "eclipse"
+  | "seraph";
 
 export type GameMode = "battle" | "endless" | "gauntlet" | "gemrush";
 
@@ -1007,6 +1009,35 @@ export const TOWERS: TowerDef[] = [
       fmt: (m) => `19% merge chance · instant kill within ${m}m`,
     },
   },
+  // ---------- the mystical court: two new endgame summons ----------
+  {
+    id: "eclipse", name: "Eclipse Oracle", rarity: "mystical", kind: "eclipse", art: "eclipse", accent: "#b06bff",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Hurls a collapsing dark moon. On impact it implodes: a violet singularity tears nearby enemies backward along the lane, slows them and burns a share of their maximum health.",
+    dmg: 780, upDmg: 22, ascDmg: 30, rate: 1.5, upRate: 0.025, ascRate: 0.03,
+    aspd: 0.04, upAspd: 0.008, ascAspd: 0.012,
+    splash: 120, upSplash: 6, ascSplash: 8,
+    pctHp: 0.06, upPctHp: 0.006, ascPctHp: 0.008,
+    slow: 0.5, upSlow: 0.012, ascSlow: 0.016, slowDur: 2.6,
+    awk1: awking("Total Eclipse", "splash",
+      "Chance the dark moon swallows a far wider patch of lane", [0.35, 1], [0.4, 1.5]),
+    awk2: awking("Event Horizon", "execute",
+      "Chance the implosion drags anything beneath a health threshold across the event horizon", [0.12, 0.42], [0.18, 0.36]),
+  },
+  {
+    id: "seraph", name: "Astral Seraph", rarity: "mystical", kind: "seraph", art: "seraph", accent: "#8ff0ff",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Spears the lane with a lance of starlight: it pierces four enemies, arcs a choir of holy bolts through the pack, and every kill it lands restores grid SP.",
+    dmg: 520, upDmg: 18, ascDmg: 26, rate: 0.95, upRate: 0.02, ascRate: 0.025,
+    aspd: 0.06, upAspd: 0.01, ascAspd: 0.015,
+    pierce: 4, upPierce: 1, ascPierce: 1,
+    chain: 3, upChain: 1, ascChain: 1,
+    spGain: 6,
+    awk1: awking("Ascension", "critup",
+      "Chance the lance descends as a guaranteed critical starfall", [0.12, 0.45], [1, 1]),
+    awk2: awking("Choir of Stars", "chain",
+      "Chance the holy arc forks into extra enemies", [0.2, 0.7], [1, 4]),
+  },
 ];
 
 /** Tier VI extends every tower's two awakening paths beyond the original five tiers.
@@ -1261,6 +1292,14 @@ export function towerStatRows(def: TowerDef, menuLv: number, battleLv = 1): Stat
     rows.push({ label: "Kill Buff", value: "+1% ATK speed per kill · +2,000% cap", better: "up" });
     rows.push({ label: "Superbuff", value: "20% chance · +6,000% amplified", better: "up" });
     rows.push({ label: "Merge Strike", value: "Executes up to 10 path enemies", better: "up" });
+  }
+  if (def.id === "eclipse") {
+    rows.push({ label: "Implosion", value: "Dragged back up the lane · slowed", better: "up" });
+    rows.push({ label: "Dark Moon", value: "Burns a share of maximum health on every hit", better: "up" });
+  }
+  if (def.id === "seraph") {
+    rows.push({ label: "Holy Choir", value: "Every hit arcs to nearby enemies", better: "up" });
+    rows.push({ label: "Soul Tithe", value: `+${def.spGain || 0} SP per kill`, better: "up" });
   }
 
   const special: [string, number, number, (v: number) => string][] = [];
@@ -2761,7 +2800,7 @@ export const CHESTS: ChestDef[] = [
   },
   { id: "epic", name: "Epic Chest", cost: 800, gem: 1, color: "#c44dff", gold: [60, 140], frags: [5, 8], bias: 0.45, blurb: "Epic-leaning fragments." },
   { id: "legendary", name: "Legendary Chest", cost: 2000, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12], bias: 1, blurb: "Best odds at a legendary." },
-  { id: "mystical", name: "Mystical Chest", cost: 5000, gem: 1, color: "#ff315c", gold: [0, 0], frags: [0, 0], bias: 1, special: "mystical", blurb: "71%: five legendary fragments · 29%: one Supervisor fragment." },
+  { id: "mystical", name: "Mystical Chest", cost: 5000, gem: 1, color: "#ff315c", gold: [0, 0], frags: [0, 0], bias: 1, special: "mystical", blurb: "71%: five legendary fragments · 29%: one mystical fragment — Supervisor, Eclipse Oracle or Astral Seraph." },
 ];
 
 export const CHEST_BY_ID: Record<string, ChestDef> = Object.fromEntries(CHESTS.map((c) => [c.id, c]));

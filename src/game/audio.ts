@@ -230,16 +230,20 @@ function tone(
     filt.frequency.exponentialRampToValueAtTime(Math.max(300, cutoff * 0.45), t0 + dur);
 
     const g = new Tone.Gain(vol);
+    // REWORKED: every synth voice gets a small random stereo seat, so stacked
+    // shots spread across the field instead of piling into a mono point.
+    const pan = new Tone.Panner((opts.sub ? 0 : 1) * (Math.random() * 2 - 1) * 0.26);
     osc.connect(env);
     env.connect(filt);
     filt.connect(g);
-    g.connect(opts.sub ? rack.bass : rack.bus);
-    if (opts.verb) g.connect(rack.send);
+    g.connect(pan);
+    pan.connect(opts.sub ? rack.bass : rack.bus);
+    if (opts.verb) pan.connect(rack.send);
 
     osc.start(t0);
     osc.stop(t0 + dur + 0.12);
     env.triggerAttackRelease(Math.max(0.02, dur * 0.92), t0);
-    disposeLater([osc, env, filt, g], delay + dur + 0.4);
+    disposeLater([osc, env, filt, g, pan], delay + dur + 0.4);
   } catch {
     /* ignore */
   }
@@ -267,16 +271,20 @@ function noise(
       filt.frequency.exponentialRampToValueAtTime(Math.max(80, freq * opts.sweep), t0 + dur);
     }
     const g = new Tone.Gain(vol);
+    const hp = new Tone.Filter({ frequency: 55, type: "highpass", Q: 0.6 });
+    const pan = new Tone.Panner((Math.random() * 2 - 1) * 0.3);
     src.connect(env);
     env.connect(filt);
-    filt.connect(g);
-    g.connect(opts.sub ? rack.bass : rack.bus);
-    if (opts.verb) g.connect(rack.send);
+    filt.connect(hp);
+    hp.connect(g);
+    g.connect(pan);
+    pan.connect(opts.sub ? rack.bass : rack.bus);
+    if (opts.verb) pan.connect(rack.send);
 
     src.start(t0);
     src.stop(t0 + dur + 0.15);
     env.triggerAttackRelease(Math.max(0.02, dur * 0.9), t0);
-    disposeLater([src, env, filt, g], (opts.delay ?? 0) + dur + 0.4);
+    disposeLater([src, env, filt, hp, g, pan], (opts.delay ?? 0) + dur + 0.4);
   } catch {
     /* ignore */
   }
@@ -295,12 +303,14 @@ function fm(carrier: number, ratio: number, index: number, dur: number, vol: num
       envelope: { attack: 0.001, decay: dur * 0.7, sustain: 0, release: Math.max(0.05, dur * 0.3) },
     });
     const g = new Tone.Gain(vol);
+    const pan = new Tone.Panner((Math.random() * 2 - 1) * 0.22);
     synth.connect(g);
-    g.connect(rack.bus);
-    if (verb) g.connect(rack.send);
+    g.connect(pan);
+    pan.connect(rack.bus);
+    if (verb) pan.connect(rack.send);
     synth.modulationIndex.rampTo(1, dur);
     synth.triggerAttackRelease(carrier, dur, t0);
-    disposeLater([synth, g], delay + dur + 0.5);
+    disposeLater([synth, g, pan], delay + dur + 0.5);
   } catch {
     /* ignore */
   }
@@ -319,11 +329,13 @@ function clang(freq: number, dur: number, vol: number, delay = 0, verb = 0.5) {
       envelope: { attack: 0.001, decay: dur * 0.8, sustain: 0, release: Math.max(0.04, dur * 0.2) },
     });
     const g = new Tone.Gain(vol);
+    const pan = new Tone.Panner((Math.random() * 2 - 1) * 0.34);
     m.connect(g);
-    g.connect(rack.bus);
-    if (verb) g.connect(rack.send);
+    g.connect(pan);
+    pan.connect(rack.bus);
+    if (verb) pan.connect(rack.send);
     m.triggerAttackRelease(freq, dur, t0);
-    disposeLater([m, g], delay + dur + 0.5);
+    disposeLater([m, g, pan], delay + dur + 0.5);
   } catch {
     /* ignore */
   }
@@ -341,11 +353,13 @@ function boom(freq: number, dur: number, vol: number, delay = 0, drop = 2.2) {
       envelope: { attack: 0.001, decay: dur * 0.75, sustain: 0, release: Math.max(0.06, dur * 0.25) },
     });
     const g = new Tone.Gain(vol);
+    const pan = new Tone.Panner((Math.random() * 2 - 1) * 0.12);
     mem.connect(g);
-    g.connect(rack.bass);
-    g.connect(rack.bus);
+    g.connect(pan);
+    pan.connect(rack.bass);
+    pan.connect(rack.bus);
     mem.triggerAttackRelease(freq, dur, t0, 1);
-    disposeLater([mem, g], delay + dur + 0.5);
+    disposeLater([mem, g, pan], delay + dur + 0.5);
   } catch {
     /* ignore */
   }
@@ -364,8 +378,11 @@ function riser(dur: number, vol: number, from = 180, to = 1400, delay = 0) {
 
 /** big impact: noise transient + pitch-dropping body + sub thump */
 function impact(vol = 0.3, size = 1) {
-  noise(0.22 * size, vol, 1800, { sweep: 0.12, q: 0.8, verb: 0.6, noiseType: "pink" });
+  // transient -> body -> sub -> debris: four layers, each with its own seat
+  noise(0.16 * size, vol * 0.9, 3200, { sweep: 0.1, q: 1.1, verb: 0.55, noiseType: "pink" });
+  noise(0.26 * size, vol * 0.7, 900, { sweep: 0.16, q: 0.8, verb: 0.7, noiseType: "brown" });
   tone(160 * size, 0.34 * size, "sine", vol * 0.9, -110 * size, 0, { sub: true, cutoff: 900 });
+  clang(1800 / Math.max(0.5, size), 0.12, vol * 0.16, 0.01, 0.7);
   boom(90 * size, 0.42 * size, vol * 0.85);
 }
 
@@ -678,6 +695,18 @@ const synthSfx = {
         noise(0.24, 0.2, 4000, { type: "highpass", q: 1.5, verb: 0.7 });
         tone(180, 0.3, "sine", 0.18, -60, 0.02, { sub: true, verb: 0.5 });
         break;
+      case "eclipse":
+        // a collapsing note: a sine falling into a filtered void
+        tone(620, 0.34, "sine", 0.16, -480, 0, { sub: true, verb: 0.7, cutoff: 1800 });
+        noise(0.3, 0.1, 700, { type: "bandpass", q: 2.4, sweep: 0.3, noiseType: "brown", verb: 0.6 });
+        clang(340, 0.3, 0.05, 0.02, 0.8);
+        break;
+      case "seraph":
+        // a choral ping: two glassy sines a fifth apart, very wet
+        tone(1568, 0.2, "sine", 0.12, 240, 0, { verb: 0.9, cutoff: 12000 });
+        tone(2093, 0.26, "sine", 0.08, 160, 0.03, { verb: 0.9 });
+        noise(0.16, 0.05, 7200, { type: "highpass", verb: 0.7 });
+        break;
       default:
         tone(1100, 0.05, "square", 0.07, -400, 0, { cutoff: 4000 });
     }
@@ -828,6 +857,22 @@ const synthSfx = {
     riser(0.5, 0.2, 200, 1800);
     impact(0.34, 1.3);
     stab([523, 784, 1046], 0.4, 0.16, 0.12, "triangle");
+  },
+  // ---------- the two new mystical towers ----------
+  /** Eclipse Oracle: a collapsing void — a reverse riser into a sub-bass snap */
+  eclipseBurst: () => {
+    tone(420, 0.5, "sawtooth", 0.22, -380, 0, { q: 7, sub: true, verb: 0.7, cutoff: 2200 });
+    noise(0.42, 0.24, 900, { sweep: 0.18, q: 1.4, noiseType: "brown", verb: 0.75 });
+    fm(120, 1.9, 2.6, 0.26, 0.28);
+    clang(620, 0.4, 0.06, 0.05, 0.9);
+    boom(64, 0.55, 0.26, 0.02, 4);
+  },
+  /** Astral Seraph: a bright choral ping with a starry tail */
+  seraphHymn: () => {
+    stab([1046, 1318, 1568], 0.28, 0.1, 0, "sine");
+    tone(2093, 0.34, "sine", 0.1, 420, 0.02, { verb: 0.95, cutoff: 12000 });
+    clang(2637, 0.3, 0.05, 0.05, 0.9);
+    noise(0.24, 0.07, 7200, { type: "highpass", sweep: 0.4, verb: 0.8 });
   },
 } as const;
 

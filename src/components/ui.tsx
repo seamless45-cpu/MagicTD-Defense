@@ -619,11 +619,31 @@ export function TowerIcon({
             <path d="M18 32h12" stroke={a} strokeWidth="3" strokeLinecap="round" />
           </g>
         );
+      case "eclipse":
+        return (
+          <g>
+            <circle cx="24" cy="24" r="15" fill="#12032a" stroke={c} strokeWidth="2.4" />
+            <path d="M31 12a14 14 0 1 0 0 24 12 12 0 1 1 0-24z" fill={a} opacity="0.9" />
+            <circle cx="24" cy="24" r="6.5" fill="#0a0115" stroke="#e6d6ff" strokeWidth="1.6" />
+            <circle cx="37" cy="15" r="3" fill="#d8c2ff" />
+            <path d="M12 36h7M29 36h7" stroke={a} strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        );
+      case "seraph":
+        return (
+          <g>
+            <ellipse cx="24" cy="11" rx="10" ry="3.2" fill="none" stroke="#ffe9a8" strokeWidth="2" />
+            <path d="M14 27c-6-6-10-2-10 3 4-1 8 0 10 4zM34 27c6-6 10-2 10 3-4-1-8 0-10 4z" fill={a} opacity="0.8" />
+            <rect x="21" y="18" width="6" height="20" rx="3" fill="#123244" stroke={c} strokeWidth="2" />
+            <path d="M24 5l5 10-5 5-5-5z" fill="#ffffff" stroke={c} strokeWidth="1.4" />
+            <circle cx="24" cy="20" r="3" fill={a} />
+          </g>
+        );
       default:
         return (
           <g>
             <circle cx="24" cy="24" r="16" fill="#11102a" stroke={c} strokeWidth="2.5" />
-            <text x="24" y="31" textAnchor="middle" fontSize="20" fontWeight="900" fill={a}>{id.slice(0, 1).toUpperCase()}</text>
+            <text x="24" y="31" textAnchor="middle" fontSize="20" fontWeight="900" fill={a} fontFamily="var(--font-ui, inherit)">{id.slice(0, 1).toUpperCase()}</text>
           </g>
         );
     }

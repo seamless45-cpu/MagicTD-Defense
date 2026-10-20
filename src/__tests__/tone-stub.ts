@@ -44,6 +44,7 @@ export const Reverb = m;
 export const FeedbackDelay = m;
 export const Delay = m;
 export const Filter = m;
+export const Panner = m;
 export const EQ3 = m;
 export const Distortion = m;
 export const BitCrusher = m;

@@ -321,8 +321,9 @@ describe("tower data", () => {
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
-    // the roster includes the 61 established towers plus the new Mystical Supervisor
-    expect(TOWERS).toHaveLength(62);
+    // the roster includes the established towers, the Mystical Supervisor and
+    // the two new mystical summons (Eclipse Oracle / Astral Seraph)
+    expect(TOWERS).toHaveLength(64);
     expect(TOWER_BY_ID.supervisor.rarity).toBe("mystical");
     expect(TOWER_BY_ID.supervisor.unlockFrags).toBe(1);
     // mechanics actually differ between them
@@ -694,6 +695,7 @@ describe("save file", () => {
     expect(s.vol).toBeGreaterThan(0);
     expect(s.dmgNums).toBe(true);
     expect(s.shakeFx).toBe(true);
+    expect(s.shakeIntensity).toBe(1);
     expect(s.guides).toBe(true);
     expect(s.fastWaves).toBe(false);
     expect(s.reducedMotion).toBe(false);
@@ -703,6 +705,7 @@ describe("save file", () => {
     const back = loadSave();
     expect(back.gold).toBe(777);
     expect(back.vol).toBe(defaultSave().vol);
+    expect(back.shakeIntensity).toBe(1);
     expect(back.guides).toBe(true);
   });
 
@@ -1494,7 +1497,8 @@ describe("chest economy", () => {
       random.mockReturnValueOnce(0.71);
       random.mockReturnValueOnce(0.99);
       const mystical = rollChest("mystical");
-      expect(mystical.frags).toEqual([{ id: "supervisor", n: 1 }]);
+      expect(mystical.frags).toHaveLength(1);
+      expect(mystical.frags[0].n).toBe(1);
       expect(TOWER_BY_ID[mystical.frags[0].id].rarity).toBe("mystical");
       expect(mystical.gold).toBe(0);
     } finally {
@@ -1624,6 +1628,28 @@ describe("new towers", () => {
 
   it("registers each new tower in the id index", () => {
     for (const id of NEW) expect(TOWER_BY_ID[id].id).toBe(id);
+  });
+
+  it("ships the two new mystical towers with unique kits", () => {
+    const eclipse = TOWER_BY_ID.eclipse;
+    const seraph = TOWER_BY_ID.seraph;
+    expect(eclipse.rarity).toBe("mystical");
+    expect(seraph.rarity).toBe("mystical");
+    expect(eclipse.unlockFrags).toBe(1);
+    expect(seraph.unlockFrags).toBe(1);
+    expect(eclipse.kind).toBe("eclipse");
+    expect(seraph.kind).toBe("seraph");
+    expect(eclipse.pctHp).toBeGreaterThan(0);
+    expect(eclipse.splash).toBeGreaterThan(0);
+    expect(seraph.pierce).toBeGreaterThan(0);
+    expect(seraph.chain).toBeGreaterThan(0);
+    expect(seraph.spGain).toBeGreaterThan(0);
+    expect(eclipse.awk1 && eclipse.awk2).toBeTruthy();
+    expect(seraph.awk1 && seraph.awk2).toBeTruthy();
+    // every mystical tower is reachable from the mystical chest pool
+    const mysticalIds = TOWERS.filter((t) => t.rarity === "mystical").map((t) => t.id);
+    expect(mysticalIds).toContain("eclipse");
+    expect(mysticalIds).toContain("seraph");
   });
 });
 

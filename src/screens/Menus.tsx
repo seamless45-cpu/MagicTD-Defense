@@ -2468,8 +2468,6 @@ export function SettingsModal({
     ["Dynamic Shadows", "shadowFx", "Canvas glow and shadow rendering", "fx", "#b98bff"],
     ["Anti-aliasing", "antiAlias", "Smooth edges and scaled canvas output", "fx", "#8effc4"],
     ["Damage Numbers", "dmgNums", "Floating damage values over every hit", "dmg", "#ffcf4d"],
-    ["Screen Shake", "shakeFx", "Impact shake on explosions and hero skills", "shake", "#ff8a3d"],
-    ["Camera Motion Blur", "motionBlur", "Directional trail smear only while camera shake is active", "shake", "#ff315c"],
     ["Battlefield Guides", "guides", "Grid, buildable-cell and range circles", "guides", "#8effc4"],
     ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves", "fast", "#b98bff"],
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
@@ -2586,6 +2584,80 @@ export function SettingsModal({
               }} />
             </label>
           ))}
+        </div>
+      </div>
+
+      {/* CAMERA SHAKE — its own section: the on/off switch, the high-frequency
+          intensity slider, and the trail smear that only runs while shaking. */}
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]" data-testid="camera-shake-section">CAMERA SHAKE</div>
+      <div className="mt-1.5 space-y-2 rounded-xl border border-[var(--line)] bg-black/25 p-3">
+        <div className="flex items-center gap-3">
+          <SetIcon name="shake" color="#ff8a3d" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Screen Shake</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">High-frequency random jitter on both camera axes for impacts and hero skills</div>
+          </div>
+          <KnobToggle
+            on={save.shakeFx}
+            label="Screen Shake"
+            testId="toggle-shakeFx"
+            onToggle={() => {
+              const next = !save.shakeFx;
+              mutate((s) => { s.shakeFx = next; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="shake-intensity-row">
+          <SetIcon name="shake" color="#ffcf4d" />
+          <div className="min-w-[150px] flex-1">
+            <div className="font-bold">Shake Intensity</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">How hard the arena kicks · {Math.round((save.shakeIntensity ?? 1) * 100)}%</div>
+          </div>
+          <input
+            className="w-40 accent-[#ff8a3d]"
+            type="range"
+            min="0"
+            max="200"
+            step="5"
+            value={Math.round((save.shakeIntensity ?? 1) * 100)}
+            aria-label="Shake intensity"
+            data-testid="shake-intensity"
+            disabled={!save.shakeFx}
+            onChange={(e) => {
+              const value = Number(e.target.value) / 100;
+              mutate((s) => { s.shakeIntensity = value; });
+            }}
+          />
+          <button
+            className="btn shrink-0 px-2.5 py-1 text-[11px]"
+            disabled={!save.shakeFx || Math.abs((save.shakeIntensity ?? 1) - 1) < 0.01}
+            onClick={() => { sfx.uiTab(); mutate((s) => { s.shakeIntensity = 1; }); }}
+          >
+            RESET
+          </button>
+        </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3">
+          <SetIcon name="shake" color="#ff315c" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Camera Motion Blur</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Directional trail smear only while camera shake is active</div>
+          </div>
+          <KnobToggle
+            on={save.motionBlur}
+            label="Camera Motion Blur"
+            testId="toggle-motionBlur"
+            onToggle={() => {
+              const next = !save.motionBlur;
+              mutate((s) => { s.motionBlur = next; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+        <div className="text-[10px] font-semibold text-[var(--dim)]">
+          Shake is pure random offset per axis at 120 Hz — no sway, rotation or zoom. Intensity 0% keeps the FX but holds the camera still.
         </div>
       </div>
 
