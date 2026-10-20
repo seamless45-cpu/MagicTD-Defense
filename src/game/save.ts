@@ -21,6 +21,9 @@ import {
   MAIL,
   MAIL_BY_ID,
   RARITY,
+  REWARD_MUL,
+  reward,
+  runGold,
   SEASON_TIERS,
   seasonNumber,
   seasonPoints,
@@ -31,6 +34,11 @@ import {
   type CrystalId,
   TROPHY_WIN,
   eventForDate,
+  eventBonus,
+  waveComp,
+  ENEMY_TYPES,
+  isBossType,
+  monthlyEventBonus,
   critBonusFrom,
   critMultiplierFrom,
   heroUpgradeCost,
@@ -58,6 +66,13 @@ export interface TaskState {
 }
 
 export interface MailState {
+  /** dynamically generated messages such as auto-battle reports */
+  custom: MailItem[];
+  /** unix timestamp when the next automatic expedition may be started */
+  autoReadyAt: number;
+  /** weekly Auto Battle usage stamp and count */
+  autoWeek: string;
+  autoUses: number;
   /** message ids already opened */
   read: string[];
   /** message ids whose attachment has been taken */
@@ -94,6 +109,18 @@ export interface GuildState {
   questsDone: string[];
 }
 
+export const UI_THEMES = [
+  { id: "rift", name: "Rift", accent: "#b06bff", swatches: ["#0c0824", "#251454", "#b06bff"] },
+  { id: "ocean", name: "Ocean", accent: "#35e0ff", swatches: ["#061827", "#123b58", "#35e0ff"] },
+  { id: "ember", name: "Ember", accent: "#ff8a3d", swatches: ["#210b12", "#4a1722", "#ff8a3d"] },
+  { id: "forest", name: "Forest", accent: "#3dff8e", swatches: ["#071a18", "#123c2d", "#3dff8e"] },
+  { id: "royal", name: "Royal", accent: "#ff4fd8", swatches: ["#130a2b", "#30205c", "#ff4fd8"] },
+  { id: "aurora", name: "Aurora", accent: "#63ffe1", swatches: ["#04191d", "#0d3941", "#63ffe1"] },
+  { id: "solar", name: "Solar Flare", accent: "#ff9f43", swatches: ["#241006", "#52210c", "#ff9f43"] },
+  { id: "obsidian", name: "Obsidian", accent: "#a8b5d8", swatches: ["#080b14", "#171d2d", "#a8b5d8"] },
+] as const;
+export type UiTheme = (typeof UI_THEMES)[number]["id"];
+
 export interface SaveData {
   gold: number;
   gems: number;
@@ -101,6 +128,8 @@ export interface SaveData {
   levels: Record<string, number>; // tower id -> menu level (1..15); absent = locked
   frags: Record<string, number>;
   lineup: string[]; // max 6 tower ids
+  /** owned visual scenes; ownership grants the scene crit-damage bonus */
+  scenes: string[];
   awn: Record<string, [number, number]>; // tower id -> [awk1Tier, awk2Tier] 0..5
   hero: string; // selected hero id
   heroLv: Record<string, number>; // hero id -> level (1..HERO_MAX_LEVEL)
@@ -140,7 +169,27 @@ export interface SaveData {
   volBoost: boolean;
   /** power saving: 30fps cap, minimal effects, no interpolation */
   powerSaver: boolean;
-  /** selected UI font id from the 50-font catalog in game/fonts.ts */
+  /** directional temporal smear during camera shake */
+  motionBlur: boolean;
+  /** boost low frequencies on the sound-effects mix */
+  bassBoost: boolean;
+  /** boost high frequencies on the sound-effects mix */
+  trebleBoost: boolean;
+  /** three-band SFX EQ in decibels (-12..12) */
+  eqBass: number;
+  eqMid: number;
+  eqTreble: number;
+  /** independent music player settings; the track itself is stored in IndexedDB */
+  musicVol: number;
+  musicStart: number;
+  musicEnd: number;
+  musicRate: number;
+  musicName: string;
+  /** enable optional translucent liquid-glass UI styling */
+  liquidGlass: boolean;
+  /** color palette selected in the theme picker */
+  uiTheme: UiTheme;
+  /** selected UI font id from the 80-font catalog in game/fonts.ts */
   font: string;
   /** crystal potions, spent on the crystal vault in the Towers tab */
   potions: number;
@@ -160,6 +209,8 @@ export interface SaveData {
   maxFps: number;
   /** draw between sim steps for smoother motion */
   frameInterp: boolean;
+  /** interpolation curve used between fixed-step updates */
+  interpolationMethod: "linear" | "smoothstep" | "hermite";
   /** effects budget: 0 = everything, 1 = reduced, 2 = minimal */
   fxq: number;
   /** camera shake on explosions */
@@ -196,7 +247,7 @@ export function emptyTasks(day = ""): TaskState {
 }
 
 export function emptyMail(): MailState {
-  return { read: [], claimed: [], deleted: [] };
+  return { custom: [], autoReadyAt: 0, autoWeek: "", autoUses: 0, read: [], claimed: [], deleted: [] };
 }
 
 export function emptySeason(number = seasonNumber()): SeasonState {
@@ -217,6 +268,7 @@ export function defaultSave(): SaveData {
     levels: { arrow: 1, cannon: 1, ice: 1 },
     frags: { arrow: 2, cannon: 1, ice: 0 },
     lineup: ["arrow", "cannon", "ice"],
+    scenes: [],
     awn: {},
     hero: "nova",
     heroLv: {},
@@ -241,6 +293,19 @@ export function defaultSave(): SaveData {
     vol: 0.7,
     volBoost: false,
     powerSaver: false,
+    motionBlur: false,
+    bassBoost: false,
+    trebleBoost: false,
+    eqBass: 0,
+    eqMid: 0,
+    eqTreble: 0,
+    musicVol: 0.5,
+    musicStart: 0,
+    musicEnd: 0,
+    musicRate: 1,
+    musicName: "",
+    liquidGlass: false,
+    uiTheme: "rift",
     font: "rajdhani",
     // a new account can immediately ignite one crystal
     potions: 6,
@@ -252,6 +317,7 @@ export function defaultSave(): SaveData {
     dmgNums: true,
     maxFps: 0,
     frameInterp: true,
+    interpolationMethod: "smoothstep",
     fxq: 0,
     shakeFx: true,
     guides: true,
@@ -270,11 +336,25 @@ function normalise(s: SaveData): SaveData {
   if (!s.levels || Object.keys(s.levels).length === 0) s.levels = { arrow: 1 };
   if (!Array.isArray(s.lineup)) s.lineup = [];
   s.lineup = s.lineup.filter((id) => s.levels[id]);
+  s.scenes = Array.isArray(s.scenes) ? [...new Set(s.scenes.filter((id) => typeof id === "string"))] : [];
   if (!HERO_BY_ID[s.hero]) s.hero = "nova";
   s.vol = Math.min(1, Math.max(0, Number.isFinite(s.vol) ? s.vol : 0.7));
   s.volBoost = !!s.volBoost;
   s.powerSaver = !!s.powerSaver;
+  s.motionBlur = !!s.motionBlur;
+  s.bassBoost = !!s.bassBoost;
+  s.trebleBoost = !!s.trebleBoost;
+  const eq = (n: number) => Math.max(-12, Math.min(12, Number.isFinite(n) ? n : 0));
+  s.eqBass = eq(s.eqBass);
+  s.eqMid = eq(s.eqMid);
+  s.eqTreble = eq(s.eqTreble);
+  s.musicVol = Math.max(0, Math.min(1, Number.isFinite(s.musicVol) ? s.musicVol : 0.5));
+  s.musicStart = Math.max(0, Number.isFinite(s.musicStart) ? s.musicStart : 0);
+  s.musicEnd = Math.max(0, Number.isFinite(s.musicEnd) ? s.musicEnd : 0);
+  s.musicRate = Math.round(Math.max(0.5, Math.min(2, Number.isFinite(s.musicRate) ? s.musicRate : 1)) * 100) / 100;
+  s.musicName = typeof s.musicName === "string" ? s.musicName.slice(0, 160) : "";
   s.font = typeof s.font === "string" && s.font ? s.font : "rajdhani";
+  s.interpolationMethod = s.interpolationMethod === "linear" || s.interpolationMethod === "hermite" ? s.interpolationMethod : "smoothstep";
   s.potions = Math.max(0, Number.isFinite(s.potions) ? Math.round(s.potions) : 0);
   s.crystals = s.crystals && typeof s.crystals === "object" ? s.crystals : {};
   for (const def of CRYSTALS) {
@@ -291,6 +371,7 @@ function normalise(s: SaveData): SaveData {
   }
   s.eventStreak = Math.max(0, Math.min(7, Number.isFinite(s.eventStreak) ? Math.round(s.eventStreak) : 0));
   s.zoom = clampZoom(s.zoom);
+  if (!UI_THEMES.some((theme) => theme.id === s.uiTheme)) s.uiTheme = "rift";
   s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
   s.heroShards = s.heroShards && typeof s.heroShards === "object" ? s.heroShards : {};
   s.chips = { ...emptyChips(), ...(s.chips && typeof s.chips === "object" ? s.chips : {}) };
@@ -309,6 +390,10 @@ function normalise(s: SaveData): SaveData {
   s.tasks.claimed = Array.isArray(s.tasks.claimed) ? (s.tasks.claimed as TaskId[]) : [];
   s.tasks.milestones = Array.isArray(s.tasks.milestones) ? s.tasks.milestones.map(Number) : [];
   s.mail = { ...emptyMail(), ...(s.mail && typeof s.mail === "object" ? s.mail : {}) };
+  s.mail.custom = Array.isArray(s.mail.custom) ? s.mail.custom : [];
+  s.mail.autoReadyAt = Math.max(0, Number(s.mail.autoReadyAt) || 0);
+  s.mail.autoWeek = typeof s.mail.autoWeek === "string" ? s.mail.autoWeek : "";
+  s.mail.autoUses = Math.max(0, Math.min(3, Math.floor(Number(s.mail.autoUses) || 0)));
   s.mail.read = Array.isArray(s.mail.read) ? s.mail.read.map(String) : [];
   s.mail.claimed = Array.isArray(s.mail.claimed) ? s.mail.claimed.map(String) : [];
   s.mail.deleted = Array.isArray(s.mail.deleted) ? s.mail.deleted.map(String) : [];
@@ -363,25 +448,29 @@ export function clearSave() {
 // ---------- mail ----------
 /** every message still sitting in the inbox, newest last */
 export function inbox(s: SaveData): MailItem[] {
-  return MAIL.filter((m) => !s.mail.deleted.includes(m.id));
+  return [...MAIL, ...s.mail.custom].filter((m) => !s.mail.deleted.includes(m.id));
+}
+
+export function mailItem(s: SaveData, id: string): MailItem | undefined {
+  return MAIL_BY_ID[id] || s.mail.custom.find((m) => m.id === id);
 }
 
 /** ids whose attachment is still waiting to be collected */
 export function unclaimedMail(s: SaveData): string[] {
-  return MAIL.filter(
+  return [...MAIL, ...s.mail.custom].filter(
     (m) => m.reward && !s.mail.claimed.includes(m.id) && !s.mail.deleted.includes(m.id)
   ).map((m) => m.id);
 }
 
 /** how many messages are unopened or unclaimed — drives the badge */
 export function mailReady(s: SaveData): number {
-  return MAIL.filter(
+  return [...MAIL, ...s.mail.custom].filter(
     (m) => !s.mail.deleted.includes(m.id) && (!s.mail.read.includes(m.id) || (m.reward && !s.mail.claimed.includes(m.id)))
   ).length;
 }
 
 export function openMail(s: SaveData, id: string) {
-  if (!MAIL_BY_ID[id]) return;
+  if (!mailItem(s, id)) return;
   if (!s.mail.read.includes(id)) s.mail.read = [...s.mail.read, id];
 }
 
@@ -390,10 +479,90 @@ export function deleteMail(s: SaveData, id: string) {
 }
 
 /** take a message's attachment. Returns the loot lines for the claim UI. */
+export function deliverAutoBattleReport(
+  s: SaveData,
+  mode: "endless" | "gauntlet",
+  waves: number,
+  minutes: number,
+  walletGold = 0,
+  startingWave = 1,
+  breakAtWave = startingWave + waves,
+  runGoldMul = 1,
+  boons = 0,
+): string {
+  const week = weekStr();
+  if (s.mail.autoWeek !== week) { s.mail.autoWeek = week; s.mail.autoUses = 0; }
+  if (s.mail.autoUses >= 3) return "";
+  const count = Math.max(0, Math.floor(waves));
+  const start = Math.max(1, Math.floor(startingWave));
+  const brokenAt = Math.max(start, Math.floor(breakAtWave));
+  const rounds = Math.max(0, brokenAt - 1);
+  const event = eventBonus(eventForDate().id);
+  const month = monthlyEventBonus(monthlyEventForDate().id);
+  let accruedWallet = Math.max(0, Math.floor(walletGold));
+  let tokens = 0;
+
+  // Reproduce the run wallet over the simulated waves: wave-clear gold plus
+  // expected enemy kill-gold from the exact ten-slot wave composition. Stratified
+  // rolls keep the estimate deterministic while matching the wave's rarity bands.
+  for (let wave = start; wave < brokenAt; wave++) {
+    const waveTypes = waveComp(wave, (() => { let i = 0; return () => { const value = (i + 0.5) / 10; i++; return value; }; })());
+    let killGold = 0;
+    for (const type of waveTypes) {
+      const enemy = ENEMY_TYPES[type];
+      if (!enemy) continue;
+      const boss = isBossType(type);
+      const eliteChance = boss ? 0 : Math.min(0.35, 0.06 + wave * 0.015);
+      const base = enemy.gold + Math.floor(wave / 2);
+      const expected = base * (boss ? 1 : 1 + eliteChance);
+      killGold += runGold(Math.round(expected * month.goldMul * runGoldMul));
+    }
+    const clearGold = runGold(reward((40 + 10 * wave) / 2) * runGoldMul);
+    accruedWallet += killGold + clearGold;
+    if (wave % 5 === 0) tokens++;
+  }
+
+  let gold = 0;
+  let gems = 0;
+  let frags = 0;
+  let potions = 0;
+  if (mode === "endless") {
+    const clearReward = reward(60 + 45 * rounds + 12 * rounds * rounds);
+    gold = Math.round((runGold(clearReward) + accruedWallet) * event.goldMul * month.goldMul);
+    gems = Math.round(Math.floor((rounds / 3) * REWARD_MUL) * event.gemMul * month.gemMul);
+    // Endless grants tokens on each fifth wave plus its end-of-run sixth-wave bonus.
+    tokens += Math.floor(rounds / 6);
+    frags = Math.min(12, 1 + Math.floor(rounds / 3));
+    potions = 1 + Math.floor(rounds / 3);
+  } else {
+    const payout = collectGauntlet({ ...s }, rounds, boons + count, s.gauntletBest);
+    // Expected gold from the random boon pool: Bounty contributes +500 per pick
+    // at a 1-in-9 rate. Greed's multiplier is left inside the payout estimate's
+    // conservative margin rather than assumed to be selected every time.
+    accruedWallet += Math.round(count * 500 / 9);
+    gold = Math.round((runGold(payout.gold) + accruedWallet) * event.goldMul * month.goldMul);
+    gems = Math.round(payout.gems * event.gemMul * month.gemMul);
+    potions = payout.potions;
+    tokens += 0;
+    frags = Math.min(12, 1 + Math.floor(rounds / 3));
+  }
+  // Legacy field retained for old save compatibility; Auto-Resolve has no cooldown.
+  s.mail.autoReadyAt = 0;
+  s.mail.autoUses += 1;
+  const id = `auto-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  s.mail.custom.push({
+    id, kind: "reward", from: "Auto-Defense Command", subject: `${mode === "gauntlet" ? "Gauntlet" : "Endless"} expedition report`,
+    body: `Your active run was ended. Your squad cleared ${count} simulated waves and was overwhelmed at wave ${brokenAt} (${minutes} minutes estimated). Rewards mirror the run's completed-wave wallet and end-of-run payout; enemy kill gold uses a deterministic expected composition. No cooldown applies. Weekly uses: ${s.mail.autoUses}/3.`,
+    color: mode === "gauntlet" ? "#3dff8e" : "#ff4fd8",
+    reward: { gold, gems, tokens, frags, potions }, age: "just now",
+  });
+  return id;
+}
+
 export function claimMail(s: SaveData, id: string): ChestLoot | null {
-  const m = MAIL_BY_ID[id];
+  const m = mailItem(s, id);
   if (!m || !m.reward || s.mail.claimed.includes(id) || s.mail.deleted.includes(id)) return null;
-  const loot: ChestLoot = { ...emptyLoot(), gold: m.reward.gold || 0, gems: m.reward.gems || 0, tokens: m.reward.tokens || 0 };
+  const loot: ChestLoot = { ...emptyLoot(), gold: m.reward.gold || 0, gems: m.reward.gems || 0, tokens: m.reward.tokens || 0, potions: m.reward.potions || 0 };
   if (m.reward.chips) loot.chips = { basic: m.reward.chips, advanced: 0, elite: 0 };
   if (m.reward.frags) {
     // fragments are rolled off the rarity table, so a mail drop is never a dud
@@ -507,8 +676,8 @@ export function weekStr(d = new Date()) {
   return `${shifted.getFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
-export const ZOOM_MIN = 1;
-export const ZOOM_MAX = 2;
+export const ZOOM_MIN = 0.75;
+export const ZOOM_MAX = 2.5;
 export function clampZoom(z: number) {
   if (!Number.isFinite(z)) return 1.1;
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 20) / 20));
@@ -599,6 +768,20 @@ export function rollChest(chestId: string, fragBonus = 0, biasBonus = 0): ChestL
   const c = CHEST_BY_ID[chestId];
   const loot = emptyLoot();
   if (!c) return loot;
+  if (c.special === "mystical") {
+    if (Math.random() < 0.71) {
+      const legendaryIds = Object.keys(TOWER_BY_ID).filter((id) => TOWER_BY_ID[id].rarity === "legendary");
+      for (let i = 0; i < 5; i++) {
+        const id = legendaryIds[Math.floor(Math.random() * legendaryIds.length)];
+        if (id) pushFrag(loot.frags, id);
+      }
+    } else {
+      const mysticalIds = Object.keys(TOWER_BY_ID).filter((id) => TOWER_BY_ID[id].rarity === "mystical");
+      const id = mysticalIds[Math.floor(Math.random() * mysticalIds.length)];
+      if (id) pushFrag(loot.frags, id);
+    }
+    return loot;
+  }
   loot.gold = rint(c.gold[0], c.gold[1]);
   const nFrags = Math.max(0, rint(c.frags[0], c.frags[1]) + fragBonus);
   for (let i = 0; i < nFrags; i++) pushFrag(loot.frags, randFrag(Math.min(1, c.bias + biasBonus)));
@@ -899,9 +1082,8 @@ export function claimEventBonus(s: SaveData): ChestLoot | null {
     case "mineshaft":
       loot.gold = 12000;
       break;
-    case "lightning":
-      loot.gems = 400;
-      loot.tokens = 2;
+    case "gemrush":
+      // Sunday is an active survival mode, not a passive claim bonus.
       break;
   }
   // the streak scales the currency side of the claim and hands out crystal
@@ -1133,9 +1315,12 @@ export function randFrag(bias: number): string {
     (rar) =>
       weights
         .filter((w) => w === rar)
-        .map(() =>
-          Object.keys(TOWER_BY_ID).filter((id) => TOWER_BY_ID[id].rarity === rar)
-        ).flat()
+        .map(() => Object.keys(TOWER_BY_ID).filter((id) => TOWER_BY_ID[id].rarity === rar))
+        .flat()
   );
-  return pool[Math.floor(Math.random() * pool.length)];
+  const chosen = pool[Math.floor(Math.random() * pool.length)];
+  // A mystical Supervisor fragment is a 1% bonus drop only on a random
+  // legendary-fragment roll; the fragment shop never rolls or sells it.
+  if (chosen && TOWER_BY_ID[chosen].rarity === "legendary" && TOWER_BY_ID.supervisor && Math.random() < 0.01) return "supervisor";
+  return chosen;
 }

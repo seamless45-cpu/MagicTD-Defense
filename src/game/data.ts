@@ -1,13 +1,14 @@
-export type Rarity = "normal" | "decent" | "epic" | "legendary";
+export type Rarity = "normal" | "decent" | "epic" | "legendary" | "mystical";
 
 export const RARITY: Record<Rarity, { name: string; color: string; glow: string }> = {
   normal: { name: "Normal", color: "#9fb4c7", glow: "rgba(159,180,199,0.4)" },
   decent: { name: "Decent", color: "#3fb6ff", glow: "rgba(63,182,255,0.5)" },
   epic: { name: "Epic", color: "#c44dff", glow: "rgba(196,77,255,0.55)" },
   legendary: { name: "Legendary", color: "#ffb324", glow: "rgba(255,179,36,0.6)" },
+  mystical: { name: "Mystical", color: "#ff315c", glow: "rgba(255,49,92,0.72)" },
 };
 
-export const RARITY_ORDER: Rarity[] = ["normal", "decent", "epic", "legendary"];
+export const RARITY_ORDER: Rarity[] = ["normal", "decent", "epic", "legendary", "mystical"];
 
 export type TowerKind =
   | "arrow"
@@ -61,6 +62,7 @@ export type TowerKind =
   | "demon"
   | "heavenly"
   | "honor"
+  | "supervisor"
   | "gale"
   | "bombardment"
   | "wildfire"
@@ -72,7 +74,7 @@ export type TowerKind =
   | "bloodstone"
   | "venom";
 
-export type GameMode = "battle" | "endless" | "gauntlet";
+export type GameMode = "battle" | "endless" | "gauntlet" | "gemrush";
 
 /**
  * How an awakening behaves, so one implementation in the battle engine can
@@ -101,7 +103,7 @@ export type AwkFx =
 export interface AwkSpec {
   name: string;
   desc: string;
-  chance: number[]; // per tier I..V
+  chance: number[]; // per tier I..VI
   mult: number[]; // effect magnitude per tier
   mult2?: number[]; // secondary magnitude per tier
   /** engine hook — absent means the tower has bespoke handling in Battle.tsx */
@@ -112,7 +114,7 @@ export interface AwkSpec {
 
 /**
  * Awakening factory. `chance` and `mult` are given as [tier I, tier V] pairs and
- * interpolated across the five tiers, so the data stays readable.
+ * interpolated across the original five tiers, then extended to Tier VI for every tower.
  */
 export function awking(
   name: string,
@@ -216,8 +218,6 @@ export interface TowerDef {
   skill?: string;
   /** Demon Execution: seconds between executioner strikes (base, un-awakened) */
   execCd?: number;
-  /** Demon Execution: share of a boss's maximum health the strike tears off */
-  execBossHp?: number;
   /** Heavenly God: how many enemies behind the target the laser also burns */
   laserBehind?: number;
   /** Heavenly God: damage share the enemies behind the target take */
@@ -377,7 +377,7 @@ export const TOWERS: TowerDef[] = [
       "Icicles splinter into the enemies packed around the target", [0.25, 0.8], [2, 5]),  },
   {
     id: "plant", name: "Power Plant", rarity: "legendary", kind: "plant", target: "none",
-    desc: "Buffs surrounding towers' attack speed by tower points. 4 / 6 / 8 / 12 placed = High Performance (+50% bonus).",
+    desc: "A living reactor aura boosts adjacent towers' attack speed and damage; 4 / 6 / 8 / 12 Power Plants in the network amplify both buffs by +25 / +50 / +75 / +100%.",
     dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
     aura: true, aspd: 0.03, upAspd: 0.01, ascAspd: 0.02,
     atkAura: 0.03, upAtkAura: 0.01, ascAtkAura: 0.02,
@@ -923,27 +923,25 @@ export const TOWERS: TowerDef[] = [
   },
   // ---------- mythic arsenal IV: the demon court, the heavens and the throne ----------
   {
-    id: "demon", name: "Demon Execution", rarity: "legendary", kind: "demon", art: "demon", accent: "#ff2b3d",
+    id: "demon", name: "Demon Execution", rarity: "mystical", kind: "demon", art: "demon", accent: "#9b001b",
     target: "all", exotic: true, unlockFrags: 1,
-    desc: "Every 5 seconds it calls a red executioner's bolt down on the lane: normal enemies die where they stand, and a boss loses half of its maximum health.",
+    desc: "Every 5 seconds, deep-red execution lightning detonates across the battlefield and executes every enemy—including bosses—through immunity. This strike ignores attack, attack speed and all buffs.",
     dmg: 0, upDmg: 0, ascDmg: 0, rate: 5, upRate: 0, ascRate: 0,
-    aspd: 0.02, upAspd: 0.005, ascAspd: 0.008,
-    execCd: 5, execBossHp: 0.5,
+    execCd: 5,
     awk1: {
-      name: "Rapid Strike",
-      desc: "The execution falls every 2.5 seconds and bites deeper — up to 75% of a boss's maximum health. Every merge whips the altar into a frenzy: 35% off the timer for 5 seconds.",
-      chance: [1, 1, 1, 1, 1],
-      mult: [0.55, 0.6, 0.65, 0.7, 0.75],
-      mult2: [2.5, 2.4, 2.3, 2.2, 2.1],
-      fmt: (m, m2) => `${Math.round(m * 100)}% of boss max HP · every ${m2}s`,
+      name: "Soul Wipeout",
+      desc: "When merging, fires a beam of deep-red powerful lasers at enemies, with base beam count equal to the Demon Execution tower's points.",
+      chance: [1, 1, 1, 1, 1, 1],
+      mult: [2, 4, 6, 8, 10, 12],
+      fmt: (m) => `+${m} merge beams`,
     },
     awk2: {
-      name: "Demon Ritual",
-      desc: "A bolt that lands on a boss imprisons it for 8 seconds — its skills are sealed — and leaves it bleeding for 4% of its maximum health every half second, for 4.5 seconds.",
-      chance: [1, 1, 1, 1, 1],
-      mult: [8, 9, 10, 11, 12],
-      mult2: [0.04, 0.04, 0.04, 0.04, 0.04],
-      fmt: (m, m2) => `imprisoned ${m}s · bleed ${Math.round((m2 || 0) * 1000) / 10}% a tick`,
+      name: "Hell Dimensions",
+      desc: "When execution lightning strikes an elite or boss, a portal drops at tremendous speed, opens blazing ground cracks, sends its target back to spawn and blasts nearby enemies backward.",
+      chance: [1, 1, 1, 1, 1, 1],
+      mult: [0.25, 0.5, 0.75, 1, 1.25, 1.5],
+      mult2: [1, 2, 3, 4, 5, 6],
+      fmt: (m, m2) => `portal +${Math.round(m * 100)}% · knockback +${m2}m`,
     },
   },
   {
@@ -991,7 +989,52 @@ export const TOWERS: TowerDef[] = [
       fmt: (m) => `+${Math.round(m * 100)}% attack & attack speed, permanent`,
     },
   },
+  {
+    id: "supervisor", name: "Supervisor", rarity: "mystical", kind: "supervisor", art: "supervisor", accent: "#ff315c",
+    target: "none", exotic: true, unlockFrags: 1,
+    desc: "A deep-red sovereign that permanently speeds every tower by 1% per kill, up to +2,000%. Each kill has a 20% chance to amplify that buff tick tenfold. Merging unleashes ten red lightning executions along the path.",
+    dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
+    awk1: {
+      name: "Hypervisor",
+      desc: "The Superbuff amplification rises by 100% each wave, up to 12,000%.",
+      chance: [1, 1, 1, 1, 1], mult: [1, 1, 1, 1, 1],
+      fmt: () => "+100% amplification per wave · capped at +12,000%",
+    },
+    awk2: {
+      name: "Doomsday",
+      desc: "Every merge has a 19% chance to drop a nuclear bomb, instantly destroying enemies within 900m and violently shaking the arena.",
+      chance: [0.19, 0.19, 0.19, 0.19, 0.19, 0.19], mult: [900, 900, 900, 900, 900, 900],
+      fmt: (m) => `19% merge chance · instant kill within ${m}m`,
+    },
+  },
 ];
+
+/** Tier VI extends every tower's two awakening paths beyond the original five tiers.
+ * It adds half of the Tier IV→V increase (or +25% when the old tiers were flat),
+ * while probability values remain capped at 100%. */
+export const AWAKENING_MAX_TIER = 6;
+function extendAwakeningToTierSix(spec: AwkSpec | undefined) {
+  if (!spec) return;
+  const extend = (values: number[], cap = Number.POSITIVE_INFINITY) => {
+    if (values.length >= AWAKENING_MAX_TIER) return;
+    while (values.length < AWAKENING_MAX_TIER) {
+      const prev = values[values.length - 2] ?? 0;
+      const last = values[values.length - 1] ?? 0;
+      const delta = last - prev;
+      // Preserve direction for descending stats such as cooldowns; flat stats
+      // continue gaining a small 25% step at Tier VI.
+      const bump = delta > 0 ? delta * 0.5 : delta < 0 ? delta * 0.5 : last > 0 ? last * 0.25 : 0;
+      values.push(Math.round(Math.min(cap, last + bump) * 1000) / 1000);
+    }
+  };
+  extend(spec.chance, 1);
+  extend(spec.mult);
+  if (spec.mult2) extend(spec.mult2);
+}
+for (const tower of TOWERS) {
+  extendAwakeningToTierSix(tower.awk1);
+  extendAwakeningToTierSix(tower.awk2);
+}
 
 /** tower id -> art family used by the canvas + the menu icon */
 export function towerArt(def: TowerDef): string {
@@ -1002,7 +1045,7 @@ export const TOWER_BY_ID: Record<string, TowerDef> = Object.fromEntries(
   TOWERS.map((t) => [t.id, t])
 );
 
-export const ROMAN = ["", "I", "II", "III", "IV", "V"];
+export const ROMAN = ["", "I", "II", "III", "IV", "V", "VI"];
 
 export const MAX_MENU_LEVEL = 15;
 export const MAX_BATTLE_LEVEL = 6;
@@ -1054,14 +1097,23 @@ export function spawnBudget(n = SPAWN_BUDGET_TOWERS) {
 export const REWARD_MUL = 1.4;
 export const reward = (v: number) => Math.round(v * REWARD_MUL);
 
-/** Enemies get 80% stronger every wave - the game's difficulty curve. */
-export const HP_GROWTH = 1.8;
+/** Enemy durability grows by 72% each wave, compounding with the run length. */
+export const HP_GROWTH = 1.72;
+
+/** Network bonus applied to both Power Plant damage and attack-speed auras. */
+export function powerPlantNetworkScale(plantCount: number): number {
+  if (plantCount >= 12) return 2;
+  if (plantCount >= 8) return 1.75;
+  if (plantCount >= 6) return 1.5;
+  if (plantCount >= 4) return 1.25;
+  return 1;
+}
 
 /**
  * Damage a tower deals per shot.
  * Menu levels add flat damage, battle levels multiply it, points multiply it again,
  * and aura buffs come in as `atkMul`. Growth is multiplicative so it can keep up
- * with the 1.8x enemy curve.
+ * with the 1.72x enemy curve.
  */
 // ---------- crit damage ----------------
 /**
@@ -1121,6 +1173,10 @@ export function upgradeGoldCost(level: number) {
 }
 export function upgradeFragCost(level: number) {
   return 1 + Math.floor(level / 3);
+}
+/** Mystical tower levels use gems only; the next level costs 500, then +75% each time. */
+export function mysticalUpgradeCost(level: number) {
+  return Math.round(500 * Math.pow(1.75, Math.max(0, level - 1)));
 }
 export function ascentAllCost(avgLevel: number) {
   return Math.round(300 + 120 * avgLevel);
@@ -1195,7 +1251,16 @@ export function towerStatRows(def: TowerDef, menuLv: number, battleLv = 1): Stat
       better: "up",
     });
   } else {
-    rows.push({ label: "Attacks", value: "Support tower", better: "up" });
+    rows.push({ label: "Attacks", value: def.id === "demon" ? "Unbuffable execution" : "Support tower", better: "up" });
+  }
+  if (def.id === "demon") {
+    rows.push({ label: "Execution", value: "All enemies and bosses · ignores immunity", better: "up" });
+    rows.push({ label: "Strike Interval", value: `${def.execCd || 5}s · unaffected by attack speed or buffs`, better: "down", maxed: true });
+  }
+  if (def.id === "supervisor") {
+    rows.push({ label: "Kill Buff", value: "+1% ATK speed per kill · +2,000% cap", better: "up" });
+    rows.push({ label: "Superbuff", value: "20% chance · +6,000% amplified", better: "up" });
+    rows.push({ label: "Merge Strike", value: "Executes up to 10 path enemies", better: "up" });
   }
 
   const special: [string, number, number, (v: number) => string][] = [];
@@ -1309,11 +1374,10 @@ export function runShopCost(item: RunShopItem, bought: number) {
 /**
  * The crystal vault lives inside the Towers tab. Every crystal is a permanent,
  * account-wide buff paid for with **crystal potions** — a currency that only
- * drops from runs, events and monthly crates. Levels are deliberately small
- * (a few percent a level) so six crystals together feel like a slow burn
- * rather than a second tower ladder.
+ * drops from runs, events and monthly crates. The three Super Crystals have
+ * stronger but explicitly capped account-wide effects.
  */
-export type CrystalId = "ruby" | "sapphire" | "emerald" | "topaz" | "amethyst" | "diamond";
+export type CrystalId = "ruby" | "sapphire" | "emerald" | "topaz" | "amethyst" | "diamond" | "magicianKing" | "superbolt" | "superCrit";
 
 export interface CrystalDef {
   id: CrystalId;
@@ -1326,6 +1390,14 @@ export interface CrystalDef {
   perLevel: number;
   max: number;
   color: string;
+  /** starting amount at level one; later levels add `perLevel` */
+  base?: number;
+  /** optional second stat bundled into a crystal */
+  secondaryBase?: number;
+  secondaryPerLevel?: number;
+  secondaryMax?: number;
+  /** cap the primary amount when the curve reaches its ceiling */
+  maxValue?: number;
   /** true when the buff is flat lives rather than a percentage */
   flat?: boolean;
 }
@@ -1341,6 +1413,9 @@ export const CRYSTALS: CrystalDef[] = [
   { id: "topaz", name: "Topaz", desc: "Sun-baked amber that draws extra gold out of the wreck.", stat: "Run Gold", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#ffcf4d" },
   { id: "amethyst", name: "Amethyst", desc: "A humming shard that speeds up every firing mechanism.", stat: "ATK Speed", perLevel: 0.02, max: CRYSTAL_MAX_LEVEL, color: "#c44dff" },
   { id: "diamond", name: "Diamond", desc: "A flawless ward crystal. Each level adds a starting life.", stat: "Start Lives", perLevel: 1, max: 10, color: "#9fe8ff", flat: true },
+  { id: "magicianKing", name: "Magician King", desc: "A royal super crystal: +25% tower ATK and ATK speed at level 1, then +5% each level, capped at +75%.", stat: "ATK + Speed", base: 0.25, perLevel: 0.05, max: 11, maxValue: 0.75, color: "#ffd76a" },
+  { id: "superbolt", name: "Superbolt", desc: "Raises the damage of lightning-type towers by +10% per level, up to +100%; lightning strikes chain behind their targets.", stat: "Lightning ATK", base: 0.1, perLevel: 0.1, max: 10, maxValue: 1, color: "#ffef77" },
+  { id: "superCrit", name: "Super Crit", desc: "At level 1: +150% crit damage and +7.5% crit chance. Each later level adds +50% damage and +0.5% chance, capped at +850% and +22.5%.", stat: "Crit DMG + Chance", base: 1.5, perLevel: 0.5, max: 31, maxValue: 8.5, secondaryBase: 0.075, secondaryPerLevel: 0.005, secondaryMax: 0.225, color: "#ff4fd8" },
 ];
 
 export const CRYSTAL_BY_ID: Record<CrystalId, CrystalDef> = Object.fromEntries(
@@ -1365,9 +1440,16 @@ export interface CrystalBonus {
   aspd: number;
   /** extra starting lives */
   lives: number;
+  /** Magician King: matching global damage and attack-speed buff */
+  magicianKing: number;
+  /** Superbolt: damage bonus for lightning-family towers */
+  lightning: number;
+  /** Super Crit: bonus crit damage and chance */
+  critDamage: number;
+  superCritChance: number;
 }
 
-export const NO_CRYSTAL_BONUS: CrystalBonus = { atk: 0, crit: 0, sp: 0, gold: 0, aspd: 0, lives: 0 };
+export const NO_CRYSTAL_BONUS: CrystalBonus = { atk: 0, crit: 0, sp: 0, gold: 0, aspd: 0, lives: 0, magicianKing: 0, lightning: 0, critDamage: 0, superCritChance: 0 };
 
 /** fold every crystal level into one set of run modifiers */
 export function crystalBonus(levels: Partial<Record<CrystalId, number>>): CrystalBonus {
@@ -1375,13 +1457,19 @@ export function crystalBonus(levels: Partial<Record<CrystalId, number>>): Crysta
   for (const def of CRYSTALS) {
     const lv = Math.max(0, Math.min(def.max, Math.floor(levels[def.id] || 0)));
     if (lv <= 0) continue;
-    const v = def.perLevel * lv;
+    const v = Math.min(def.maxValue ?? Number.POSITIVE_INFINITY, def.base !== undefined ? def.base + def.perLevel * (lv - 1) : def.perLevel * lv);
     if (def.id === "ruby") out.atk += v;
     else if (def.id === "sapphire") out.crit += v;
     else if (def.id === "emerald") out.sp += v;
     else if (def.id === "topaz") out.gold += v;
     else if (def.id === "amethyst") out.aspd += v;
     else if (def.id === "diamond") out.lives += v;
+    else if (def.id === "magicianKing") out.magicianKing += v;
+    else if (def.id === "superbolt") out.lightning += v;
+    else if (def.id === "superCrit") {
+      out.critDamage += v;
+      out.superCritChance += Math.min(def.secondaryMax ?? Number.POSITIVE_INFINITY, (def.secondaryBase ?? 0) + (def.secondaryPerLevel ?? 0) * (lv - 1));
+    }
   }
   return out;
 }
@@ -1389,7 +1477,11 @@ export function crystalBonus(levels: Partial<Record<CrystalId, number>>): Crysta
 /** "Ruby Lv 4 · +8% Tower ATK" — the line under a crystal card */
 export function crystalBuffText(def: CrystalDef, level: number): string {
   if (level <= 0) return "Not awakened — spend crystal potions to ignite it";
-  const v = def.perLevel * level;
+  const v = Math.min(def.maxValue ?? Number.POSITIVE_INFINITY, def.base !== undefined ? def.base + def.perLevel * (level - 1) : def.perLevel * level);
+  if (def.id === "superCrit") {
+    const chance = Math.min(def.secondaryMax ?? Number.POSITIVE_INFINITY, (def.secondaryBase ?? 0) + (def.secondaryPerLevel ?? 0) * (level - 1));
+    return `+${Math.round(v * 100)}% crit damage · +${(chance * 100).toFixed(1)}% crit chance`;
+  }
   if (def.flat) return `+${Math.round(v)} starting ${v === 1 ? "life" : "lives"}`;
   return `+${(Math.round(v * 1000) / 10).toFixed(1).replace(/\.0$/, "")}% ${def.stat}`;
 }
@@ -1725,30 +1817,78 @@ export function roundHp(round: number) {
 }
 
 /**
- * Bosses carry 10% less maximum health than their type's raw multiplier.
- * The wave curve got steeper (57% -> 80% a wave), and a boss is worth 15-34x a
- * normal enemy on top of it: without this trim the Warlord, Overlord and Titan
- * spike far harder than the ramp around them. Only maximum health moves — boss
- * speed, armour, lives and gold are untouched.
+ * Bosses receive a dedicated +78% health scale; normal enemies and elites use
+ * the regular-enemy scale, with elites also carrying their 2.8x elite modifier.
+ * Type-specific multipliers remain on top. Speed, armour, lives and gold are untouched.
  */
-export const BOSS_HP_MUL = 0.9;
+export const BOSS_HP_MUL = 1.78;
 
 /**
- * Run gold is paid out 25% richer: every kill, every bounty awakening and the
+ * Non-boss enemies receive +90% maximum health at spawn time, including
+ * elites, normal waves and Rift Call summons. Bosses use BOSS_HP_MUL instead; elites
+ * additionally have 2.8x their type-scaled health.
+ */
+export const ENEMY_HP_SCALE = 1.9;
+/** Elites are markedly tougher than their base enemy type. */
+export const ELITE_HP_MUL = 2.8;
+
+/**
+ * Compact number for the in-battle health readout: 987, 12.3k, 4.56M, 7.9B.
+ * Enemies scale exponentially with the wave, so a raw 47-digit number would
+ * never fit over a slime's head.
+ */
+export function shortHp(v: number): string {
+  const n = Math.max(0, v);
+  if (n < 1000) return String(Math.ceil(n - 1e-9));
+  const units = ["k", "M", "B", "T", "Qa"];
+  let x = n;
+  let u = -1;
+  while (x >= 1000 && u < units.length - 1) {
+    x /= 1000;
+    u++;
+  }
+  const pick = () => (x >= 100 ? 0 : x >= 10 ? 1 : 2);
+  let digits = pick();
+  let t = x.toFixed(digits);
+  // rounding can push 999.6k to "1000k" - step up a unit instead
+  if (Number(t) >= 1000 && u < units.length - 1) {
+    x /= 1000;
+    u++;
+    digits = pick();
+    t = x.toFixed(digits);
+  }
+  return `${t.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "")}${units[u]}`;
+}
+
+/**
+ * Run gold is paid out 50% richer: every kill, every bounty awakening and the
  * wave-clear purse. Account gold from chests and tasks is a different economy
  * and is not touched by this. Whatever is left in the wallet is settled when the
  * run ends, so the bonus carries into the results screen too.
  */
-export const GOLD_GAIN_MUL = 1.25;
+export const GOLD_GAIN_MUL = 1.5;
 export const runGold = (v: number) => Math.round(v * GOLD_GAIN_MUL);
 
-export function waveComp(round: number): number[] {
+export const WAVE_ENEMY_COUNT = 10;
+export const SPAWN_INTERVAL_SECONDS = 0.72;
+export const SPAWN_INTERVAL_STEP = 0.00002;
+export function enemySpawnInterval(wave: number): number {
+  return Math.max(0.08, SPAWN_INTERVAL_SECONDS - Math.max(0, wave - 1) * SPAWN_INTERVAL_STEP);
+}
+
+export function waveComp(round: number, randomRoll: () => number = Math.random): number[] {
+  const bosses: number[] = [];
+  // Bosses take slots in the fixed ten-enemy wave rather than adding extra kills.
+  if (round % 4 === 0) bosses.push(round >= 32 ? 6 : round >= 16 ? 5 : 4);
+  if (round >= 16 && round % 4 === 0) bosses.push(round >= 32 ? 5 : 4);
+  if (round >= 32 && round % 8 === 0) bosses.push(6);
+  if (round >= 20 && round % 8 === 0) bosses.push(LEVIATHAN_TYPE);
+
+  const regularCount = Math.max(0, WAVE_ENEMY_COUNT - bosses.length);
   const out: number[] = [];
-  // balance patch: two more enemies every wave, capped at 46
-  const n = Math.min(46, 8 + round * 2);
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < regularCount; i++) {
     let t = 0;
-    const roll = Math.random();
+    const roll = randomRoll();
     if (round >= 7 && roll < 0.16) t = 3;
     else if (round >= 5 && roll < 0.3) t = 2;
     else if (round >= 3 && roll < 0.54) t = 1;
@@ -1757,13 +1897,7 @@ export function waveComp(round: number): number[] {
     else if (round >= 9 && roll < 0.9) t = HOUND_TYPE;
     out.push(t);
   }
-  // boss every 4th wave; the roster escalates with the round count
-  if (round % 4 === 0) out.push(round >= 32 ? 6 : round >= 16 ? 5 : 4);
-  if (round >= 16 && round % 4 === 0) out.push(round >= 32 ? 5 : 4);
-  if (round >= 32 && round % 8 === 0) out.push(6);
-  // the Leviathan only surfaces in the deep waves
-  if (round >= 20 && round % 8 === 0) out.push(LEVIATHAN_TYPE);
-  return out;
+  return [...out, ...bosses];
 }
 
 export const BATTLE_ROUNDS = 12;
@@ -1929,7 +2063,7 @@ export const HERO_BY_ID: Record<string, HeroDef> = Object.fromEntries(
 );
 
 // ---------- hero levelling ----------
-export const HERO_MAX_LEVEL = 10;
+export const HERO_MAX_LEVEL = 15;
 /** gold needed to take a hero from `lv` to `lv + 1` */
 export const heroUpgradeCost = (lv: number) => Math.round(120 * Math.pow(1.45, Math.max(0, lv - 1)));
 /** every level adds 30% ability power (damage, burn, freeze/overdrive duration) */
@@ -2063,7 +2197,7 @@ export const TASK_MILESTONES: TaskMilestone[] = [
 ];
 
 // ---------- weekly event rotation ----------
-export type EventId = "luck" | "chestbox" | "trophy" | "items" | "mineshaft" | "lightning";
+export type EventId = "luck" | "chestbox" | "trophy" | "items" | "mineshaft" | "gemrush";
 
 export interface GameEvent {
   id: EventId;
@@ -2134,14 +2268,14 @@ export const EVENTS: GameEvent[] = [
     icon: "mineshaft",
   },
   {
-    id: "lightning",
-    name: "Survive Lightning",
+    id: "gemrush",
+    name: "Gem Rush",
     days: [0],
     tagline: "Sunday",
-    desc: "Storm clouds sit over the arena. Enemies hit harder, but gems rain down on anyone who holds.",
-    perk: "×2 gems from runs · +15% enemy health",
-    color: "#c44dff",
-    icon: "lightning",
+    desc: "Hold the arena for five minutes. Each ordinary kill earns 50 gems; elites pay 5× and bosses 10×. Monsters have 12× health and move 50% faster.",
+    perk: "5-minute survival · 50 gems per kill · elites ×5 · bosses ×10",
+    color: "#35e0ff",
+    icon: "gemrush",
   },
 ];
 
@@ -2166,6 +2300,16 @@ export interface EventBonus {
   trophyLoss: number;
   hpMul: number;
   chipDrop: ChipBag | null;
+}
+
+export const GEM_RUSH_SECONDS = 5 * 60;
+export const GEM_RUSH_NORMAL_GEMS = 50;
+export const GEM_RUSH_ELITE_GEMS = 5;
+export const GEM_RUSH_BOSS_GEMS = 10;
+export const GEM_RUSH_HP_MUL = 12;
+export const GEM_RUSH_SPEED_MUL = 1.5;
+export function gemRushKillGems(elite: boolean, boss: boolean): number {
+  return GEM_RUSH_NORMAL_GEMS * (boss ? GEM_RUSH_BOSS_GEMS : elite ? GEM_RUSH_ELITE_GEMS : 1);
 }
 
 export const BASE_EVENT_BONUS: EventBonus = {
@@ -2193,8 +2337,8 @@ export function eventBonus(id: EventId): EventBonus {
       return { ...BASE_EVENT_BONUS, chipDrop: { basic: 2 } };
     case "mineshaft":
       return { ...BASE_EVENT_BONUS, goldMul: 1.6 };
-    case "lightning":
-      return { ...BASE_EVENT_BONUS, gemMul: 2, hpMul: 1.15 };
+    case "gemrush":
+      return BASE_EVENT_BONUS;
   }
 }
 
@@ -2578,6 +2722,8 @@ export interface ChestDef {
   heroShards?: [number, number];
   /** fragment rarity bias 0..1 */
   bias: number;
+  /** special fixed-outcome reward table for the Mystical Chest */
+  special?: "mystical";
   blurb: string;
 }
 
@@ -2613,6 +2759,7 @@ export const CHESTS: ChestDef[] = [
   },
   { id: "epic", name: "Epic Chest", cost: 800, gem: 1, color: "#c44dff", gold: [60, 140], frags: [5, 8], bias: 0.45, blurb: "Epic-leaning fragments." },
   { id: "legendary", name: "Legendary Chest", cost: 2000, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12], bias: 1, blurb: "Best odds at a legendary." },
+  { id: "mystical", name: "Mystical Chest", cost: 5000, gem: 1, color: "#ff315c", gold: [0, 0], frags: [0, 0], bias: 1, special: "mystical", blurb: "71%: five legendary fragments · 29%: one Supervisor fragment." },
 ];
 
 export const CHEST_BY_ID: Record<string, ChestDef> = Object.fromEntries(CHESTS.map((c) => [c.id, c]));
@@ -2763,7 +2910,7 @@ export interface MailItem {
   /** shown when the mail is not claimable (a plain announcement) */
   color: string;
   /** optional reward, claimed with the CLAIM button */
-  reward?: { gold?: number; gems?: number; tokens?: number; frags?: number; chips?: number };
+  reward?: { gold?: number; gems?: number; tokens?: number; potions?: number; frags?: number; chips?: number };
   /** game-day stamp the message pretends to have been sent on */
   age: string;
 }
@@ -2812,7 +2959,7 @@ export const MAIL: MailItem[] = [
     kind: "system",
     from: "Awakened Council",
     subject: "Every tower can awaken",
-    body: "Two awakenings per tower, five tiers each. Spend Magic Tokens at the Towers screen and watch your damage ceiling move.",
+    body: "Two awakenings per tower, six tiers each. Tier VI pushes each effect beyond its former limit. Spend Magic Tokens at the Towers screen to grow stronger.",
     color: "#ffcf4d",
     reward: { tokens: 8 },
     age: "day 3",

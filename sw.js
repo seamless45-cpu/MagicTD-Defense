@@ -4,8 +4,14 @@
  * The whole game is one self-contained HTML file, so the install just needs the
  * shell plus the icons. Navigations go network-first (so a new deploy is picked
  * up immediately) and fall back to the cached shell when offline.
+ *
+ * The external sound bank (`sfx/**`, ~1.3 MB of CC0 samples) is cached on first
+ * play by the normal fetch branch below; the sample engine preloads the bank as
+ * soon as audio unlocks, so a player who has heard the game once has it offline.
+ * Bump CACHE when the sample files change, otherwise installed PWAs keep the
+ * old clips (the filenames are stable).
  */
-const CACHE = "magictd-v1";
+const CACHE = "magictd-v8";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

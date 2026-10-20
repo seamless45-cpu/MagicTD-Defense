@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { MAIL_KIND, MAIL_BY_ID } from "../game/data";
+import { MAIL_KIND } from "../game/data";
 import {
   claimAllMail,
   claimMail,
@@ -7,12 +7,13 @@ import {
   deleteMail,
   inbox,
   lootLines,
+  mailItem,
   openMail,
   unclaimedMail,
   type SaveData,
 } from "../game/save";
 import { sfx } from "../game/audio";
-import { RewardClaim, CoinIcon, GemIcon, TokenIcon, ChipIcon, type ClaimData } from "../components/ui";
+import { RewardClaim, CoinIcon, GemIcon, TokenIcon, ChipIcon, PotionIcon, type ClaimData } from "../components/ui";
 
 /**
  * The mailbox.
@@ -44,7 +45,7 @@ export default function Mail({
   };
 
   const doClaim = (id: string) => {
-    const m = MAIL_BY_ID[id];
+    const m = mailItem(save, id);
     if (!m || !ready.includes(id)) return;
     // roll on a draft so the loot is ready synchronously for the reward card,
     // then commit through mutate — the claimed-guard does the real work
@@ -99,7 +100,7 @@ export default function Mail({
     push("Message deleted", "#8fb0ff");
   };
 
-  const cur = open ? MAIL_BY_ID[open] : null;
+  const cur = open ? mailItem(save, open) : null;
   const curReady = cur ? ready.includes(cur.id) : false;
 
   return (
@@ -215,6 +216,11 @@ export default function Mail({
                     {!!cur.reward.tokens && (
                       <span className="inline-flex items-center gap-1 text-[#ff4fd8]">
                         <TokenIcon size={15} /> <span className="num">{cur.reward.tokens}</span>
+                      </span>
+                    )}
+                    {!!cur.reward.potions && (
+                      <span className="inline-flex items-center gap-1 text-[#b98bff]">
+                        <PotionIcon size={15} /> <span className="num">{cur.reward.potions}</span>
                       </span>
                     )}
                     {!!cur.reward.chips && (
