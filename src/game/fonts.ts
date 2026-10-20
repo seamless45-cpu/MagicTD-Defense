@@ -1,14 +1,14 @@
 /**
  * FONT CATALOG
  *
- * MagicTD ships fifty UI fonts. Half of them are display faces (Permanent
+ * MagicTD ships eighty UI fonts. Half of them are display faces (Permanent
  * Marker, EDO, Bungee, Press Start 2P …), the rest are clean readable text
  * faces for players who want the menus calmer. Every entry carries its own
  * fallback stack, so the game still renders correctly with no network at all.
  *
  * Google-hosted families are loaded lazily: only the font the player actually
- * picks is fetched (one stylesheet, once), instead of all fifty up front.
- * Local-only faces (EDO, system stacks) never touch the network.
+ * picks is fetched (one stylesheet, once), instead of all eighty up front.
+ * EDO is bundled locally; system stacks never touch the network.
  */
 export interface FontDef {
   id: string;
@@ -35,7 +35,7 @@ export const FONTS: FontDef[] = [
 
   // ---------- display / poster faces ----------
   { id: "marker", name: "Permanent Marker", stack: '"Permanent Marker", "Comic Sans MS", cursive', google: "Permanent+Marker", group: "display" },
-  { id: "edo", name: "EDO", stack: '"EDO", "Edo SZ", "Bebas Neue", Impact, sans-serif', local: true, group: "display" },
+  { id: "edo", name: "EDO", stack: '"EDO", sans-serif', local: true, group: "display" },
   { id: "bebas", name: "Bebas Neue", stack: '"Bebas Neue", Impact, "Arial Narrow", sans-serif', google: "Bebas+Neue", group: "display" },
   { id: "anton", name: "Anton", stack: '"Anton", Impact, sans-serif', google: "Anton", group: "display" },
   { id: "oswald", name: "Oswald", stack: '"Oswald", "Arial Narrow", sans-serif', google: "Oswald:wght@400;700", group: "display" },
@@ -88,6 +88,40 @@ export const FONTS: FontDef[] = [
   { id: "firacode", name: "Fira Code", stack: '"Fira Code", "Courier New", monospace', google: "Fira+Code:wght@400;700", group: "mono" },
   { id: "courier", name: "Courier Prime", stack: '"Courier Prime", "Courier New", monospace', google: "Courier+Prime:wght@400;700", group: "mono" },
   { id: "ibmplex", name: "IBM Plex Mono", stack: '"IBM Plex Mono", "Courier New", monospace', google: "IBM+Plex+Mono:wght@400;700", group: "mono" },
+
+  // ---------- new display + reading faces ----------
+  { id: "oxanium", name: "Oxanium", stack: '"Oxanium", system-ui, sans-serif', google: "Oxanium:wght@400;600;700", group: "display" },
+  { id: "exo2", name: "Exo 2", stack: '"Exo 2", system-ui, sans-serif', google: "Exo+2:wght@400;600;700", group: "display" },
+  { id: "righteous", name: "Righteous", stack: '"Righteous", Impact, sans-serif', google: "Righteous", group: "display" },
+  { id: "archivo-black", name: "Archivo Black", stack: '"Archivo Black", Impact, sans-serif', google: "Archivo+Black", group: "display" },
+  { id: "unbounded", name: "Unbounded", stack: '"Unbounded", system-ui, sans-serif', google: "Unbounded:wght@400;600;700", group: "display" },
+  { id: "barlow", name: "Barlow Condensed", stack: '"Barlow Condensed", "Arial Narrow", sans-serif', google: "Barlow+Condensed:wght@400;600;700", group: "text" },
+  { id: "outfit", name: "Outfit", stack: '"Outfit", system-ui, sans-serif', google: "Outfit:wght@400;600;700", group: "text" },
+  { id: "manrope", name: "Manrope", stack: '"Manrope", system-ui, sans-serif', google: "Manrope:wght@400;600;700", group: "text" },
+  { id: "lora", name: "Lora", stack: '"Lora", Georgia, serif', google: "Lora:wght@400;600;700", group: "text" },
+  { id: "sora", name: "Sora", stack: '"Sora", system-ui, sans-serif', google: "Sora:wght@400;600;700", group: "text" },
+
+  // ---------- new additions: twenty more arena-ready typefaces ----------
+  { id: "aldrich", name: "Aldrich", stack: '"Aldrich", system-ui, sans-serif', google: "Aldrich", group: "display" },
+  { id: "blackops", name: "Black Ops One", stack: '"Black Ops One", Impact, sans-serif', google: "Black+Ops+One", group: "display" },
+  { id: "changa", name: "Changa", stack: '"Changa", system-ui, sans-serif', google: "Changa:wght@400;600;700", group: "display" },
+  { id: "electrolize", name: "Electrolize", stack: '"Electrolize", system-ui, sans-serif', google: "Electrolize", group: "display" },
+  { id: "kronaone", name: "Krona One", stack: '"Krona One", system-ui, sans-serif', google: "Krona+One", group: "display" },
+  { id: "michroma", name: "Michroma", stack: '"Michroma", system-ui, sans-serif', google: "Michroma", group: "display" },
+  { id: "quantico", name: "Quantico", stack: '"Quantico", system-ui, sans-serif', google: "Quantico:wght@400;700", group: "display" },
+  { id: "racing", name: "Racing Sans One", stack: '"Racing Sans One", system-ui, sans-serif', google: "Racing+Sans+One", group: "display" },
+  { id: "tomorrow", name: "Tomorrow", stack: '"Tomorrow", system-ui, sans-serif', google: "Tomorrow:wght@400;600;700", group: "display" },
+  { id: "zendots", name: "Zen Dots", stack: '"Zen Dots", system-ui, sans-serif', google: "Zen+Dots", group: "display" },
+  { id: "alegreya", name: "Alegreya Sans", stack: '"Alegreya Sans", system-ui, sans-serif', google: "Alegreya+Sans:wght@400;700", group: "text" },
+  { id: "cabin", name: "Cabin", stack: '"Cabin", system-ui, sans-serif', google: "Cabin:wght@400;700", group: "text" },
+  { id: "dmsans", name: "DM Sans", stack: '"DM Sans", system-ui, sans-serif', google: "DM+Sans:wght@400;700", group: "text" },
+  { id: "figtree", name: "Figtree", stack: '"Figtree", system-ui, sans-serif', google: "Figtree:wght@400;700", group: "text" },
+  { id: "ibmplexsans", name: "IBM Plex Sans", stack: '"IBM Plex Sans", system-ui, sans-serif', google: "IBM+Plex+Sans:wght@400;700", group: "text" },
+  { id: "kanit", name: "Kanit", stack: '"Kanit", system-ui, sans-serif', google: "Kanit:wght@400;700", group: "text" },
+  { id: "lato", name: "Lato", stack: '"Lato", system-ui, sans-serif', google: "Lato:wght@400;700", group: "text" },
+  { id: "lexend", name: "Lexend", stack: '"Lexend", system-ui, sans-serif', google: "Lexend:wght@400;700", group: "text" },
+  { id: "roboto-condensed", name: "Roboto Condensed", stack: '"Roboto Condensed", "Arial Narrow", sans-serif', google: "Roboto+Condensed:wght@400;700", group: "text" },
+  { id: "work-sans", name: "Work Sans", stack: '"Work Sans", system-ui, sans-serif', google: "Work+Sans:wght@400;700", group: "text" },
 ];
 
 export const DEFAULT_FONT = "rajdhani";
@@ -104,7 +138,9 @@ export function fontStack(id: string | undefined): string {
 /** the heading stack for a font id */
 export function fontDisplayStack(id: string | undefined): string {
   const f = FONT_BY_ID[id || ""] || FONT_BY_ID[DEFAULT_FONT];
-  return f.display || f.stack;
+  // The selected face is used for every text role; no silent Bungee/header
+  // substitution when the player explicitly picked another font.
+  return f.stack;
 }
 
 /** ids of fonts that have already had their stylesheet injected */

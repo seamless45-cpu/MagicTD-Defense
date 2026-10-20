@@ -17,8 +17,10 @@ import {
   ROMAN,
   MAX_MENU_LEVEL,
   MAX_BATTLE_LEVEL,
+  AWAKENING_MAX_TIER,
   upgradeGoldCost,
   upgradeFragCost,
+  mysticalUpgradeCost,
   ascentAllCost,
   awakenCost,
   critBonusFrom,
@@ -42,6 +44,7 @@ import {
   TokenIcon,
   TowerIcon,
   UpgradeCeremony,
+  ViewportPortal,
   type CeremonyData,
   type UpgradeData,
 } from "../components/ui";
@@ -208,14 +211,17 @@ export default function Towers({
   const doUpgrade = (def: TowerDef) => {
     const lv = save.levels[def.id] || 0;
     if (lv >= MAX_MENU_LEVEL) return deny("Max level reached");
-    const gold = Math.round(upgradeGoldCost(lv) * monthUpgMul);
-    const fr = upgradeFragCost(lv);
+    const mystical = def.rarity === "mystical";
+    const gold = mystical ? 0 : Math.round(upgradeGoldCost(lv) * monthUpgMul);
+    const gems = mystical ? mysticalUpgradeCost(lv) : 0;
+    const fr = mystical ? 0 : upgradeFragCost(lv);
     const have = save.frags[def.id] || 0;
-    if (save.gold < gold || have < fr) {
+    if (mystical ? save.gems < gems : save.gold < gold || have < fr) {
       canShake(def.id);
-      return deny(`Need ${gold} gold + ${fr} ${def.name} fragments`);
+      return deny(mystical ? `Need ${gems} gems to upgrade ${def.name}` : `Need ${gold} gold + ${fr} ${def.name} fragments`);
     }
-    sfx.coin();
+    if (mystical) sfx.gem();
+    else sfx.coin();
     // capture the before/after stats so the flourish can show the real deltas
     const before = towerStatRows(def, Math.max(1, lv));
     const after = towerStatRows(def, lv + 1);
@@ -223,11 +229,14 @@ export default function Towers({
     const critFrom = fmtCritPct(critBonusFrom(save.levels));
     const critTo = fmtCritPct(critBonusFrom({ ...save.levels, [def.id]: lv + 1 }));
     mutate((s) => {
-      s.gold -= gold;
-      s.frags[def.id] -= fr;
+      if (mystical) s.gems -= gems;
+      else {
+        s.gold -= gold;
+        s.frags[def.id] -= fr;
+        bumpTask(s, "spend", gold);
+      }
       s.levels[def.id] += 1;
       bumpTask(s, "upgrade", 1);
-      bumpTask(s, "spend", gold);
     });
     sfx.awaken();
     setUpg({
@@ -307,7 +316,7 @@ export default function Towers({
     const spec = slot === 0 ? def.awk1! : def.awk2!;
     if (lv < needLv) return deny(`Awakening ${slot === 0 ? "1" : "2"} unlocks at Lv ${needLv}`);
     const cur = save.awn[def.id]?.[slot] || 0;
-    if (cur >= 5) return deny("Awakening maxed (V)");
+    if (cur >= AWAKENING_MAX_TIER) return deny(`Awakening maxed (${ROMAN[AWAKENING_MAX_TIER]})`);
     const cost = awakenCost(cur + 1);
     if (save.tokens < cost) return deny(`Need ${cost} Magic Tokens`);
     mutate((s) => {
@@ -359,8 +368,10 @@ export default function Towers({
     if (twFilter === "line") return save.lineup.includes(def.id);
     if (twFilter === "locked") return lv === 0;
     if (twFilter === "ready") {
-      const fr = lv > 0 ? upgradeFragCost(lv) : def.unlockFrags;
-      return lv > 0 && lv < MAX_MENU_LEVEL && (save.frags[def.id] || 0) >= fr;
+      const ready = def.rarity === "mystical"
+        ? save.gems >= mysticalUpgradeCost(lv)
+        : (save.frags[def.id] || 0) >= (lv > 0 ? upgradeFragCost(lv) : def.unlockFrags);
+      return lv > 0 && lv < MAX_MENU_LEVEL && ready;
     }
     return true;
   });
@@ -368,7 +379,7 @@ export default function Towers({
   const pv = preview ? TOWER_BY_ID[preview] : null;
 
   return (
-    /* ONE scroll surface for the whole tab. The grid is 61 cells tall and used to
+    /* ONE scroll surface for the whole tab. The grid is 62 cells tall and used to
        live in its own nested scroll box (grid inside a fixed-height flex column
        with a pinned footer), which meant the box was never tall enough to reach
        the last rows on a phone. Now the page itself scrolls, the grid is free to
@@ -412,7 +423,7 @@ export default function Towers({
         <>
       {/* The rotation strip and the filter row ride along on top of the scroll:
           the strip is the drop target for drag-to-rotation, so it has to stay
-          reachable while the grid (61 cells) scrolls underneath it. */}
+          reachable while the grid (62 cells) scrolls underneath it. */}
       <div className="towers-sticky sticky top-0 z-30 flex flex-col gap-2">
         {/* SUMMON ROTATION — one horizontal strip that never wraps, so the grid
             below keeps its height no matter how many towers are queued. Order
@@ -511,9 +522,9 @@ export default function Towers({
           level underneath and an outline in the tower's rarity colour. No
           buttons, no descriptions: tap a cell for the full sheet, drag it onto
           the rotation bar to reorder. The grid is a direct child of the scroll
-          surface, so it is allowed to be all 61 cells tall. */}
+          surface, so it is allowed to be all 62 cells tall. */}
       <div className="tower-scroll stagger grid content-start gap-1 pr-1" data-testid="tower-grid">
-        {(["legendary", "epic", "decent", "normal"] as const).map((rarity) => {
+        {(["mystical", "legendary", "epic", "decent", "normal"] as const).map((rarity) => {
           const group = twVisible.filter((def) => def.rarity === rarity);
           if (!group.length) return null;
           const rc = RARITY[rarity];
@@ -527,8 +538,8 @@ export default function Towers({
               {group.map((def, i) => {
                 const lv = save.levels[def.id] || 0;
                 const locked = lv === 0;
-                const fr = lv > 0 ? upgradeFragCost(lv) : def.unlockFrags;
-                const have = save.frags[def.id] || 0;
+                const fr = locked ? def.unlockFrags : def.rarity === "mystical" ? mysticalUpgradeCost(lv) : upgradeFragCost(lv);
+                const have = def.rarity === "mystical" && !locked ? save.gems : save.frags[def.id] || 0;
                 const inLine = save.lineup.includes(def.id);
                 const awoken = (save.awn[def.id]?.[0] || 0) + (save.awn[def.id]?.[1] || 0);
                 const maxed = lv >= MAX_MENU_LEVEL;
@@ -572,6 +583,13 @@ export default function Towers({
         </div>
       )}
       </div>
+
+      <section className="tile p-3" data-testid="tower-scenes">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><div className="font-disp text-lg text-[#ff9be9]">SCENES</div><div className="text-xs font-semibold text-[var(--dim)]">Starfall Sanctum · cosmetic battlefield backdrop</div></div>
+          {save.scenes.includes("starfall") ? <span className="chip text-[#8effc4]">OWNED · COSMETIC</span> : <button className="btn btn-cyan flex items-center gap-1.5 px-3 py-2 text-xs" disabled={save.gems < 1500} onClick={() => { mutate((s) => { if (!s.scenes.includes("starfall") && s.gems >= 1500) { s.gems -= 1500; s.scenes.push("starfall"); } }); push("STARFALL SANCTUM UNLOCKED · COSMETIC SCENE", "#ff9be9"); }}><GemIcon size={14}/> 1,500</button>}
+        </div>
+      </section>
 
       {/* ASCENT ALL — a compact one-line bar rather than a second panel */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#35e0ff66] bg-[#0d1330]/70 px-2.5 py-1.5" data-testid="ascent-all">
@@ -649,6 +667,10 @@ function CrystalVault({
   if (summary.sp > 0) active.push({ label: "SP Gain", value: `+${(summary.sp * 100).toFixed(1)}%`, color: "#3dff8e" });
   if (summary.gold > 0) active.push({ label: "Run Gold", value: `+${(summary.gold * 100).toFixed(1)}%`, color: "#ffcf4d" });
   if (summary.lives > 0) active.push({ label: "Start Lives", value: `+${summary.lives}`, color: "#9fe8ff" });
+  if (summary.magicianKing > 0) active.push({ label: "Magician King · ATK & Speed", value: `+${(summary.magicianKing * 100).toFixed(0)}%`, color: "#ffd76a" });
+  if (summary.lightning > 0) active.push({ label: "Lightning ATK", value: `+${(summary.lightning * 100).toFixed(0)}%`, color: "#ffef77" });
+  if (summary.critDamage > 0) active.push({ label: "Super Crit · Crit DMG", value: `+${(summary.critDamage * 100).toFixed(0)}%`, color: "#ff4fd8" });
+  if (summary.superCritChance > 0) active.push({ label: "Super Crit · Crit Chance", value: `+${(summary.superCritChance * 100).toFixed(1)}%`, color: "#ff4fd8" });
 
   return (
     <div className="flex flex-col gap-2.5" data-testid="crystal-vault">
@@ -661,8 +683,7 @@ function CrystalVault({
               <span className="text-[var(--dim)]"> / {CRYSTALS.reduce((a, c) => a + c.max, 0)} LEVELS</span>
             </div>
             <p className="mt-1 max-w-xl text-[12px] font-semibold text-[var(--dim)]">
-              Every crystal is a small permanent buff for the whole account. Each upgrade costs crystal
-              potions — never gold, never fragments. Potions drop from runs, daily events and monthly crates.
+              Crystals grant permanent account buffs. Super Crystals unlock Magician King, Superbolt and Super Crit effects; levels use crystal potions, while Mystical tower upgrades use gems only.
             </p>
           </div>
           <div className="flex items-center gap-1.5 rounded-xl border-2 border-[#5b3b8c] bg-black/45 px-3 py-2 text-[15px] font-bold text-[#b98bff]" data-testid="potion-balance">
@@ -739,7 +760,7 @@ function CrystalVault({
       </div>
 
       <div className="rounded-lg border border-[var(--line)] bg-black/30 px-3 py-2 text-[11px] font-semibold leading-snug text-[var(--dim)]">
-        Max level per crystal is {CRYSTAL_MAX_LEVEL} (Diamond stops at 10). Costs climb 22% a level.
+        Base crystals cap at {CRYSTAL_MAX_LEVEL} (Diamond at 10); Super Crystals have their own stated caps. Potion costs rise 22% per level.
         Potions come from run payouts, the daily event streak, daily tasks, and the monthly track.
       </div>
     </div>
@@ -772,14 +793,17 @@ function TowerPreview({
   const lv = save.levels[def.id] || 0;
   const locked = lv === 0;
   const rc = RARITY[def.rarity];
-  const gold = Math.round(upgradeGoldCost(Math.max(1, lv)) * monthlyEventBonus(monthlyEventForDate().id).upgradeCostMul);
-  const fr = upgradeFragCost(Math.max(1, lv));
+  const mystical = def.rarity === "mystical";
+  const gold = mystical ? 0 : Math.round(upgradeGoldCost(Math.max(1, lv)) * monthlyEventBonus(monthlyEventForDate().id).upgradeCostMul);
+  const gems = mystical ? mysticalUpgradeCost(Math.max(1, lv)) : 0;
+  const fr = locked ? def.unlockFrags : mystical ? 0 : upgradeFragCost(Math.max(1, lv));
   const have = save.frags[def.id] || 0;
   const inLine = save.lineup.includes(def.id);
   const maxed = lv >= MAX_MENU_LEVEL;
   const rows = stats;
 
   return (
+    <ViewportPortal>
     <div
       className="fixed inset-0 z-[90] flex items-center justify-center bg-black/75 p-4"
       onPointerDown={(e) => {
@@ -787,7 +811,7 @@ function TowerPreview({
       }}
     >
       <div
-        className="panel anim-pop max-h-[90vh] w-[620px] overflow-y-auto scroll-thin p-5"
+        className="panel anim-pop max-h-[90dvh] w-[min(620px,94vw)] overflow-y-auto scroll-thin p-3 sm:p-5"
         style={{ borderColor: rc.color + "aa" }}
         data-testid="tower-preview"
       >
@@ -862,7 +886,9 @@ function TowerPreview({
                 ? `Unlock with ${def.unlockFrags} fragments (you have ${have})`
                 : maxed
                   ? "Menu level maxed — ascend it in battle"
-                  : `${gold} gold + ${fr} fragments (you have ${have})`}
+                  : mystical
+                    ? `${gems} gems · next level (you have ${save.gems})`
+                    : `${gold} gold + ${fr} fragments (you have ${have})`}
             </div>
           </div>
           {locked ? (
@@ -875,11 +901,11 @@ function TowerPreview({
             </button>
           ) : (
             <button
-              className={`btn px-5 py-2 text-[13px] ${!maxed && save.gold >= gold && have >= fr ? "btn-gold" : ""}`}
-              disabled={maxed}
+              className={`btn px-5 py-2 text-[13px] ${!maxed && (mystical ? save.gems >= gems : save.gold >= gold && have >= fr) ? "btn-gold" : ""}`}
+              disabled={maxed || (mystical ? save.gems < gems : save.gold < gold || have < fr)}
               onClick={onUpgrade}
             >
-              {maxed ? "MAX LEVEL" : (<span className="inline-flex items-center gap-1.5"><CoinIcon size={14} /> Upgrade</span>)}
+              {maxed ? "MAX LEVEL" : (<span className="inline-flex items-center gap-1.5">{mystical ? <GemIcon size={14} /> : <CoinIcon size={14} />} Upgrade</span>)}
             </button>
           )}
         </div>
@@ -913,19 +939,20 @@ function TowerPreview({
                     </div>
                     <p className="mt-0.5 text-[11px] font-semibold leading-snug text-[var(--dim)]">{spec.desc}</p>
                     <div className="mt-1.5 flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold text-[var(--dim)]">{awkText(def, slot, tier)}</span>
+                      <span className="text-[11px] font-bold text-[var(--dim)]">{tier > 0 ? awkText(def, slot, tier) : "Not awakened yet"}</span>
                       {avail ? (
-                        tier < 5 ? (
+                        tier < AWAKENING_MAX_TIER ? (
                           <button className="btn flex shrink-0 items-center gap-1 px-2.5 py-1 text-[11px]" onClick={() => onAwaken(slot)}>
                             <TokenIcon size={12} /> {cost} · Tier {ROMAN[tier + 1]}
                           </button>
                         ) : (
-                          <span className="text-[11px] font-bold text-[#ff4fd8]">MAX TIER</span>
+                          <span className="text-[11px] font-bold text-[#ff4fd8]">MAX TIER {ROMAN[AWAKENING_MAX_TIER]}</span>
                         )
                       ) : (
                         <span className="shrink-0 text-[11px] font-bold text-[var(--line2)]">Lv {needLv} needed</span>
                       )}
                     </div>
+                    {tier < AWAKENING_MAX_TIER && avail && <div className="mt-1 text-[10px] font-semibold text-[#ffd5f5]">Next · Tier {ROMAN[tier + 1]}: {awkText(def, slot, tier + 1)}</div>}
                   </div>
                 );
             })}
@@ -947,6 +974,7 @@ function TowerPreview({
         </div>
       </div>
     </div>
+    </ViewportPortal>
   );
 }
 
