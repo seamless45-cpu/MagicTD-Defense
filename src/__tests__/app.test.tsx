@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import App from "../App";
 import Battle from "../screens/Battle";
 import { canvasStats, consoleErrors } from "./setup";
-import { defaultSave, persistSave, type SaveData } from "../game/save";
+import { defaultSave, persistSave, todayStr, type SaveData } from "../game/save";
 import { upgradeGoldCost, monthlyEventBonus, monthlyEventForDate, TOWERS } from "../game/data";
 
 // ---------- tiny helpers (no testing-library dependency) ----------
@@ -1511,6 +1511,8 @@ describe("Battle", () => {
       Number((document.querySelector('[data-testid="towers-on-board"]')!.textContent || "0").replace(/[^\d]/g, ""));
 
     for (let i = 0; i < 3; i++) {
+      // the button stays disabled until the engine binds its summon handle
+      await waitFor(() => !summon.disabled, "summon enabled");
       click(summon);
       await sleep(150);
     }
@@ -1951,5 +1953,91 @@ describe("Battle controls", () => {
     expect(document.querySelector('[data-testid="call-wave"]')).toBeTruthy();
     noErrors();
     unmountApp();
+  }, 30000);
+});
+
+
+describe("Hardcore", () => {
+  it("spends a daily attempt to enter and shows the mode rules", async () => {
+    await mountApp();
+    const card = document.querySelector('[data-mode="Hardcore"]') as HTMLElement;
+    expect(card, "hardcore mode card").toBeTruthy();
+    expect(card.textContent).toContain("3/3 LEFT");
+
+    click(card.querySelector("button") as HTMLElement);
+    await waitFor(() => saved().hardcoreUses === 1, "attempt banked");
+    // the HUD advertises the remaining daily attempts and the rule set
+    const plays = await waitFor(
+      () => document.querySelector('[data-testid="hardcore-plays"]') as HTMLElement,
+      "hardcore HUD pill"
+    );
+    expect(plays.textContent || "").toContain("2");
+    expect(plays.textContent || "").toContain("/ 3 left");
+    expect((document.querySelector('[data-testid="hardcore-rules"]') as HTMLElement).textContent).toContain("100× REWARDS");
+
+    // the first wave fields two bodies per slot: twenty enemies, not ten
+    const fielded = await waitFor(() => {
+      const n = Number((document.querySelector('[data-testid="enemies-left"]')?.textContent || "").replace(/[^\d]/g, ""));
+      return n >= 20 ? n : 0;
+    }, "double-spawn wave", 20000);
+    expect(fielded).toBe(20);
+
+    // abandoning does not refund the attempt
+    click(byText("button", "Abandon") as HTMLElement);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    expect(saved().hardcoreUses).toBe(1);
+    expect((document.querySelector('[data-mode="Hardcore"]') as HTMLElement).textContent).toContain("2/3 LEFT");
+    noErrors();
+  }, 40000);
+
+  it("locks the mode out after three runs in one day", async () => {
+    persistSave({ ...defaultSave(), hardcoreUses: 3, hardcoreDay: todayStr() });
+    await mountApp();
+    const card = document.querySelector('[data-mode="Hardcore"]') as HTMLElement;
+    expect(card.textContent).toContain("NO RUNS LEFT");
+    click(card.querySelector("button") as HTMLElement);
+    await sleep(250);
+    // still on the home screen, and the budget was not overspent
+    expect(document.querySelector('[data-testid="hud"]')).toBeNull();
+    expect(saved().hardcoreUses).toBe(3);
+    noErrors();
+  }, 20000);
+});
+
+describe("Notifications", () => {
+  it("suppresses every toast when notifications are hidden", async () => {
+    persistSave({ ...defaultSave(), hideNotifs: true });
+    await mountApp();
+    // equipping a hero normally raises an "equipped" toast
+    const glacier = all("button").find((b) => (b.textContent || "").includes("Glacier")) as HTMLElement;
+    click(glacier);
+    await waitFor(() => saved().hero === "glacier", "hero saved");
+    await sleep(200);
+    expect(document.querySelectorAll(".toast")).toHaveLength(0);
+    // the setting round-trips through the Settings toggle
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => byText("div", "Settings"), "settings modal");
+    expect(document.body.textContent).toContain("Hide Notifications");
+    noErrors();
+  }, 30000);
+});
+
+describe("Boss roulette strip", () => {
+  it("draws a compact single-row reel above the arena", async () => {
+    await mountApp();
+    startMode("Battle");
+    const reel = await waitFor(
+      () => document.querySelector('[data-testid="boss-roulette"]') as HTMLElement,
+      "boss roulette"
+    );
+    // one row: copy block, small portrait, hairline progress track
+    expect(reel.querySelector(".boss-roulette-copy")).toBeTruthy();
+    expect(reel.textContent || "").toContain("NEXT BOSS");
+    expect(reel.querySelectorAll(".boss-roulette-kicker")).toHaveLength(1);
+    expect(reel.querySelector(".boss-roulette-track")).toBeTruthy();
+    expect(reel.querySelector(".boss-roulette-result")).toBeTruthy();
+    click(byText("button", "Abandon") as HTMLElement);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
   }, 30000);
 });

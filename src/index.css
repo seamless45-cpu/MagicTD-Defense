@@ -4941,23 +4941,28 @@ html[data-ui-glass="on"] .power-saver * { backdrop-filter: none !important; -web
 @keyframes interfaceReflow { from { opacity: 0; transform: translateY(12px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .modal-slide-in { animation-duration: .38s; animation-timing-function: var(--motion-spring); }
 
+/* COMPACT ROULETTE — a single slim strip: reel, portrait, name, progress. */
 .boss-roulette-overlay {
-  position: absolute; inset: 58px 0 auto; z-index: 42; display: flex; justify-content: center;
-  pointer-events: none; padding: 12px; animation: rouletteOverlayIn .3s var(--motion-snap) both;
+  position: absolute; inset: 52px 0 auto; z-index: 42; display: flex; justify-content: center;
+  pointer-events: none; padding: 0 8px; animation: rouletteOverlayIn .28s var(--motion-snap) both;
 }
 .boss-roulette-card {
-  position: relative; display: grid; grid-template-columns: 66px minmax(160px, 1fr); align-items: center; gap: 3px 12px;
-  width: min(340px, 88vw); padding: 11px 15px; border: 1px solid color-mix(in srgb, var(--magenta) 62%, white);
-  border-radius: 16px; background: linear-gradient(140deg, color-mix(in srgb, var(--panel2) 96%, #06030f), rgba(6,4,15,.92));
-  box-shadow: 0 12px 36px #0009, 0 0 28px color-mix(in srgb, var(--magenta) 22%, transparent); backdrop-filter: blur(10px);
+  position: relative; display: grid; grid-template-columns: 30px 26px minmax(0, 1fr) auto;
+  align-items: center; gap: 8px; width: min(300px, 86vw); padding: 5px 10px 7px;
+  border: 1px solid color-mix(in srgb, var(--magenta) 62%, white); border-radius: 11px;
+  background: linear-gradient(140deg, color-mix(in srgb, var(--panel2) 96%, #06030f), rgba(6,4,15,.92));
+  box-shadow: 0 8px 22px #0009, 0 0 20px color-mix(in srgb, var(--magenta) 20%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
 }
-.boss-roulette-kicker { grid-column: 1 / -1; color: var(--dim); font-size: 9px; font-weight: 900; letter-spacing: .24em; text-align: center; }
-.boss-roulette-spinner { position: relative; display: grid; width: 58px; height: 58px; place-items: center; }
-.boss-roulette-wheel { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(#ff315c 0 20%, #ffcf4d 20% 40%, #8c50ff 40% 60%, #35e0ff 60% 80%, #3dff8e 80% 100%); box-shadow: 0 0 0 3px #12081c, 0 0 18px color-mix(in srgb, var(--magenta) 35%, transparent); animation: bossRouletteSpin 1s cubic-bezier(.12,.68,.16,1) infinite; }
-.boss-roulette-spinner > span { position: relative; display: grid; width: 24px; height: 24px; place-items: center; border-radius: 50%; background: #100a20; color: #fff; font-size: 13px; }
-.boss-roulette-focus { width: 40px; height: 40px; grid-column: 1; grid-row: 3 / span 2; margin: 0 auto; filter: drop-shadow(0 0 10px currentColor); }
-.boss-roulette-result { grid-column: 2; font-family: var(--font-disp); font-size: clamp(13px, 3.4vw, 17px); line-height: 1.15; text-shadow: 0 0 14px currentColor; }
-.boss-roulette-caption { grid-column: 2; color: var(--dim); font-size: 9px; font-weight: 900; letter-spacing: .22em; }
+.boss-roulette-spinner { position: relative; display: grid; width: 30px; height: 30px; place-items: center; }
+.boss-roulette-wheel { position: absolute; inset: 0; border-radius: 50%; background: conic-gradient(#ff315c 0 20%, #ffcf4d 20% 40%, #8c50ff 40% 60%, #35e0ff 60% 80%, #3dff8e 80% 100%); box-shadow: 0 0 0 2px #12081c, 0 0 10px color-mix(in srgb, var(--magenta) 32%, transparent); animation: bossRouletteSpin 1s cubic-bezier(.12,.68,.16,1) infinite; }
+.boss-roulette-spinner > span { position: relative; display: grid; width: 13px; height: 13px; place-items: center; border-radius: 50%; background: #100a20; color: #fff; font-size: 7px; }
+.boss-roulette-focus { width: 26px; height: 26px; filter: drop-shadow(0 0 7px currentColor); }
+.boss-roulette-focus svg { width: 100%; height: 100%; }
+.boss-roulette-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.boss-roulette-kicker { color: var(--dim); font-size: 7.5px; font-weight: 900; letter-spacing: .22em; line-height: 1; white-space: nowrap; }
+.boss-roulette-result { font-family: var(--font-disp); font-size: clamp(11px, 2.8vw, 13.5px); line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 0 10px currentColor; }
+.boss-roulette-caption { color: var(--dim); font-size: 8px; font-weight: 900; letter-spacing: .14em; font-variant-numeric: tabular-nums; }
 @keyframes bossRouletteSpin { to { transform: rotate(1080deg); } }
 @keyframes rouletteOverlayIn { from { opacity: 0; transform: translateY(-12px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .calm .boss-roulette-wheel, .calm .boss-roulette-overlay { animation: none !important; }
@@ -4985,7 +4990,7 @@ input[type="range"]:disabled { opacity:.35; cursor:not-allowed; }
 .boss-cut-portrait svg { width: min(42vw, 190px); height: auto; }
 .boss-cut-scan { pointer-events: none; }
 .boss-roulette-card.is-locked { border-color: color-mix(in srgb, var(--green) 65%, white); }
-.boss-roulette-track { grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: 9px; background: #ffffff20; }
+.boss-roulette-track { position: absolute; left: 8px; right: 8px; bottom: 2px; height: 2px; overflow: hidden; border-radius: 9px; background: #ffffff1f; }
 .boss-roulette-track > span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--cyan), var(--magenta), var(--gold)); box-shadow: 0 0 9px var(--cyan); transition: width .12s linear; }
 @media (max-height: 680px) {
   .boss-cut-stage { justify-content: flex-start; }
@@ -5392,4 +5397,20 @@ html[data-ui-glass="on"] .screen-enter { filter: none; }
   background: linear-gradient(180deg, rgba(255, 79, 216, .32), rgba(124, 231, 255, .18));
   color: #fff;
   box-shadow: 0 0 10px rgba(255, 79, 216, .45);
+}
+
+/* ---------- HARDCORE ---------- */
+.hud-hardcore {
+  border-color: rgba(255, 49, 92, .55) !important;
+  background-image: linear-gradient(180deg, rgba(255, 49, 92, .22), rgba(60, 0, 18, .32)) !important;
+  color: #ff8fa6 !important;
+  text-shadow: 0 0 8px rgba(255, 49, 92, .55);
+}
+.hud-hardcore b { color: #ff5d7e; }
+.tile[data-mode="Hardcore"] {
+  background: radial-gradient(120% 90% at 90% 0%, rgba(255, 49, 92, .16), transparent 60%);
+}
+.tile[data-mode="Hardcore"] .cta-banner {
+  background: linear-gradient(180deg, #ff315c, #a30026);
+  box-shadow: 0 5px 0 #580014, 0 0 22px rgba(255, 49, 92, .35);
 }

@@ -20,6 +20,8 @@ import {
   HERO_SHARD_COST,
   HERO_AWAKENING_MAX_TIER,
   heroAwakenCost,
+  BATTLE_ROUNDS,
+  HARDCORE_DAILY_PLAYS,
   heroAwkSpec,
   MAIL,
   MAIL_BY_ID,
@@ -164,6 +166,12 @@ export interface SaveData {
   bestEndless: number;
   /** deepest wave ever reached in the Gauntlet roguelite mode */
   gauntletBest: number;
+  /** deepest round ever cleared in Hardcore */
+  hardcoreBest: number;
+  /** game-day stamp the Hardcore daily attempts belong to */
+  hardcoreDay: string;
+  /** Hardcore runs started today (max HARDCORE_DAILY_PLAYS) */
+  hardcoreUses: number;
   wins: number;
   runs: number;
   /** consecutive Battle victories */
@@ -239,6 +247,8 @@ export interface SaveData {
   reducedMotion: boolean;
   /** fps + entity counter overlay */
   perf: boolean;
+  /** suppress every toast popup, including battle callouts */
+  hideNotifs: boolean;
   /** how many days in a row the daily reward has been claimed (1..7) */
   dailyStreak: number;
   lastDaily: string;
@@ -302,6 +312,9 @@ export function defaultSave(): SaveData {
     best: 0,
     bestEndless: 0,
     gauntletBest: 0,
+    hardcoreBest: 0,
+    hardcoreDay: "",
+    hardcoreUses: 0,
     wins: 0,
     runs: 0,
     streak: 0,
@@ -347,6 +360,7 @@ export function defaultSave(): SaveData {
     fastWaves: false,
     reducedMotion: false,
     perf: false,
+    hideNotifs: false,
     dailyStreak: 0,
     lastDaily: "",
     lastSeen: 0,
@@ -394,7 +408,8 @@ function normalise(s: SaveData): SaveData {
   }
   s.eventStreak = Math.max(0, Math.min(7, Number.isFinite(s.eventStreak) ? Math.round(s.eventStreak) : 0));
   s.zoom = clampZoom(s.zoom);
-  s.pixelRatio = Math.round(Math.max(0.75, Math.min(2, Number.isFinite(s.pixelRatio) ? s.pixelRatio : 1)) * 4) / 4;
+  // the floor is a quarter-resolution render (0.25) for low-end phones
+  s.pixelRatio = Math.round(Math.max(0.25, Math.min(2, Number.isFinite(s.pixelRatio) ? s.pixelRatio : 1)) * 4) / 4;
   s.shakeIntensity = Math.round(Math.max(0, Math.min(2, Number.isFinite(s.shakeIntensity) ? s.shakeIntensity : 1)) * 20) / 20;
   s.bloomFx = s.bloomFx !== false;
   s.shadowFx = s.shadowFx !== false;
@@ -419,6 +434,15 @@ function normalise(s: SaveData): SaveData {
   s.best = Math.max(0, Math.floor(Number(s.best) || 0));
   s.bestEndless = Math.max(0, Math.floor(Number(s.bestEndless) || 0));
   s.gauntletBest = Math.max(0, Math.floor(Number(s.gauntletBest) || 0));
+  s.hardcoreBest = Math.max(0, Math.min(BATTLE_ROUNDS, Math.floor(Number(s.hardcoreBest) || 0)));
+  s.hardcoreDay = typeof s.hardcoreDay === "string" ? s.hardcoreDay : "";
+  s.hardcoreUses = Math.max(0, Math.min(HARDCORE_DAILY_PLAYS, Math.floor(Number(s.hardcoreUses) || 0)));
+  // a stale day stamp retires yesterday's attempts
+  if (s.hardcoreDay !== todayStr()) {
+    s.hardcoreDay = todayStr();
+    s.hardcoreUses = 0;
+  }
+  s.hideNotifs = s.hideNotifs === true;
   s.compClaimed = Array.isArray(s.compClaimed) ? s.compClaimed.map(String) : [];
   s.guild = { ...emptyGuild(), ...(s.guild && typeof s.guild === "object" ? s.guild : {}) };
   s.guild.quests = s.guild.quests && typeof s.guild.quests === "object" ? s.guild.quests : {};
@@ -676,6 +700,23 @@ export function rollSeason(s: SaveData): boolean {
  * 06:59 and again at 07:01 counts as two different days — which is the whole
  * point of a 7 A.M. reset.
  */
+/** Hardcore attempts left today (0..3), reset with the 07:00 game-day */
+export function hardcorePlaysLeft(s: SaveData, day = todayStr()): number {
+  const used = s.hardcoreDay === day ? Math.max(0, Math.min(HARDCORE_DAILY_PLAYS, s.hardcoreUses || 0)) : 0;
+  return Math.max(0, HARDCORE_DAILY_PLAYS - used);
+}
+
+/** Spend one Hardcore attempt. Returns false when the daily budget is gone. */
+export function spendHardcorePlay(s: SaveData, day = todayStr()): boolean {
+  if (s.hardcoreDay !== day) {
+    s.hardcoreDay = day;
+    s.hardcoreUses = 0;
+  }
+  if ((s.hardcoreUses || 0) >= HARDCORE_DAILY_PLAYS) return false;
+  s.hardcoreUses = (s.hardcoreUses || 0) + 1;
+  return true;
+}
+
 export function todayStr(d = new Date()) {
   const shifted = new Date(d.getTime() - DAILY_RESET_HOUR * 3600000);
   // local calendar date of the shifted instant

@@ -733,20 +733,36 @@ export function Emblem({ size = 120 }: { size?: number }) {
   );
 }
 
-export function useToasts() {
+export function useToasts(enabled = true) {
   const [toasts, setToasts] = useState<{ id: number; msg: string; color?: string }[]>([]);
   const idRef = useRef(0);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
-  const push = useCallback((msg: string, color?: string) => {
-    const id = ++idRef.current;
-    setToasts((t) => [...t.slice(-4), { id, msg, color }]);
-    const timer = setTimeout(() => {
-      setToasts((t) => t.filter((x) => x.id !== id));
-      timersRef.current = timersRef.current.filter((x) => x !== timer);
-    }, 2400);
-    timersRef.current.push(timer);
-  }, []);
+  // flipping the setting on clears anything already on screen
+  useEffect(() => {
+    if (enabled) return;
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    setToasts((t) => (t.length ? [] : t));
+  }, [enabled]);
+
+  const push = useCallback(
+    (msg: string, color?: string) => {
+      // the Hide Notifications setting turns every toast into a no-op, without
+      // touching the call sites (rewards, saves and sounds still happen)
+      if (!enabledRef.current) return;
+      const id = ++idRef.current;
+      setToasts((t) => [...t.slice(-4), { id, msg, color }]);
+      const timer = setTimeout(() => {
+        setToasts((t) => t.filter((x) => x.id !== id));
+        timersRef.current = timersRef.current.filter((x) => x !== timer);
+      }, 2400);
+      timersRef.current.push(timer);
+    },
+    []
+  );
 
   useEffect(
     () => () => {
@@ -940,6 +956,7 @@ export type SetIconName =
   | "fps"
   | "bolt"
   | "boss"
+  | "bell"
   | "download"
   | "expand"
   | "backup"
@@ -993,6 +1010,13 @@ const SET_PATHS: Record<SetIconName, ReactNode> = {
       <path d="M16 4l-1.5 16" />
       <path d="M4.6 9h15" />
       <path d="M3.9 15h15" />
+    </>
+  ),
+  bell: (
+    <>
+      <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l2 2.5H4z" />
+      <path d="M10 21h4" />
+      <path d="M3 3l18 18" />
     </>
   ),
   boss: (

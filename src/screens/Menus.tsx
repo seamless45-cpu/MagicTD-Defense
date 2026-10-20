@@ -17,6 +17,7 @@ import {
 } from "../game/save";
 import {
   todayStr,
+  hardcorePlaysLeft,
   defaultSave,
   importSave,
   persistSave,
@@ -79,6 +80,7 @@ import {
 import {
   TOWERS,
   BATTLE_ROUNDS,
+  HARDCORE_DAILY_PLAYS,
   CHIPS,
   COMPETITION_TIERS,
   DAILY_REWARDS,
@@ -453,6 +455,7 @@ export function Home({
   onEndless,
   onGauntlet,
   onGemRush,
+  onHardcore,
   push,
 }: {
   save: SaveData;
@@ -461,6 +464,7 @@ export function Home({
   onEndless: () => void;
   onGauntlet: () => void;
   onGemRush: () => void;
+  onHardcore: () => void;
   push: (m: string, c?: string) => void;
 }) {
   const hero = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
@@ -766,7 +770,7 @@ export function Home({
       </div>
 
       {/* MODES */}
-      <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <ModeCard
           accent="#ffcf4d"
           title="Battle"
@@ -792,6 +796,15 @@ export function Home({
           onClick={onGauntlet}
           delay="120ms"
           badge={`BEST ${save.gauntletBest}`}
+        />
+        <ModeCard
+          accent="#ff315c"
+          title="Hardcore"
+          sub={`${BATTLE_ROUNDS} rounds · 3 runs a day${save.hardcoreBest ? ` · best R${save.hardcoreBest}` : ""}`}
+          body="Double spawns, 5× enemy HP, enemies immune to crits — and 100× the rewards."
+          onClick={onHardcore}
+          delay="180ms"
+          badge={hardcorePlaysLeft(save) > 0 ? `${hardcorePlaysLeft(save)}/${HARDCORE_DAILY_PLAYS} LEFT` : "NO RUNS LEFT"}
         />
       </div>
 
@@ -2567,6 +2580,7 @@ export function SettingsModal({
     ["Auto-Skip Boss Cutscene", "autoSkipBossCut", "Bosses engage immediately — a one-line callout replaces the cutscene card", "boss", "#ff8a3d"],
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
     ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
+    ["Hide Notifications", "hideNotifs", "Mutes toast popups and battle callouts — rewards still land", "bell", "#ff9be9"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
     ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffcf4d"],
     ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
@@ -2759,8 +2773,8 @@ export function SettingsModal({
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
       <div className="row-card mt-1.5" data-testid="pixel-ratio-row">
         <SetIcon name="perf" color="#54f4ff" />
-        <div className="min-w-0 flex-1"><div className="font-bold">Pixel Ratio</div><div className="text-[11px] font-semibold text-[var(--dim)]">Canvas render resolution · {save.pixelRatio.toFixed(2)}×</div></div>
-        <input className="w-36" type="range" min="0.75" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
+        <div className="min-w-0 flex-1"><div className="font-bold">Pixel Ratio</div><div className="text-[11px] font-semibold text-[var(--dim)]">Canvas render resolution · {save.pixelRatio.toFixed(2)}× · 0.25 = fastest, 2.00 = sharpest</div></div>
+        <input className="w-36" type="range" min="0.25" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
       </div>
       <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
         <div className="mb-2 flex items-center justify-between gap-2">

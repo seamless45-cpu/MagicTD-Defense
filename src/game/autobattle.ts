@@ -24,6 +24,7 @@
 import {
   BOSS_HP_MUL,
   ELITE_HP_MUL,
+  ENEMY_SPEED_MUL,
   ENEMY_HP_SCALE,
   ENEMY_TYPES,
   HERO_BY_ID,
@@ -113,7 +114,8 @@ function effectiveHp(type: number, wave: number): EnemyBudget {
   return {
     hp: hp / throughArmor,
     lives: et.lives,
-    speed: et.speed * (1 + wave * 0.012) * (elite ? 1.08 : 1),
+    // the shipped walk speed is 20% above the data sheet (ENEMY_SPEED_MUL)
+    speed: et.speed * ENEMY_SPEED_MUL * (1 + wave * 0.012) * (elite ? 1.08 : 1),
   };
 }
 

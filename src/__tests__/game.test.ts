@@ -87,6 +87,17 @@ import {
   towerUpgradeCount,
   critAfterUpgrade,
   HERO_AWAKENING_MAX_TIER,
+  ENEMY_SPEED_MUL,
+  HARDCORE_CRIT_IMMUNE,
+  HARDCORE_DAILY_PLAYS,
+  HARDCORE_HP_MUL,
+  HARDCORE_REWARD_MUL,
+  HARDCORE_SPAWN_MUL,
+  hardcoreEnemyHp,
+  hardcoreSpawnPlan,
+  critAllowed,
+  payoutMul,
+  isRunMode,
   HERO_AWAKENINGS,
   heroAwakenCost,
   heroAwkSpec,
@@ -137,6 +148,8 @@ import {
   UI_THEMES,
   awakenHero,
   heroAwkTier,
+  hardcorePlaysLeft,
+  spendHardcorePlay,
 } from "../game/save";
 import { FONTS, FONT_BY_ID, DEFAULT_FONT, fontStack, fontDisplayStack, applyFont } from "../game/fonts";
 import { estimateAutoBattle } from "../game/autobattle";
@@ -1991,5 +2004,95 @@ describe("auto-resolve simulation", () => {
     const noBoons = estimateAutoBattle(defaultSave(), "gauntlet", 4000, 6, 5, 0);
     const manyBoons = estimateAutoBattle(defaultSave(), "gauntlet", 4000, 6, 5, 20);
     expect(manyBoons.waves).toBeGreaterThanOrEqual(noBoons.waves);
+  });
+});
+
+
+// ---------- hardcore + global tuning ----------
+describe("hardcore mode", () => {
+  it("ships the exact modifier set the mode card advertises", () => {
+    expect(HARDCORE_SPAWN_MUL).toBe(2);
+    expect(HARDCORE_HP_MUL).toBe(5);
+    expect(HARDCORE_REWARD_MUL).toBe(100);
+    expect(HARDCORE_DAILY_PLAYS).toBe(3);
+    expect(HARDCORE_CRIT_IMMUNE).toBe(true);
+    // it is a campaign-shaped run, like Battle
+    expect(isRunMode("hardcore")).toBe(true);
+    expect(isRunMode("battle")).toBe(true);
+    expect(isRunMode("endless")).toBe(false);
+    expect(isRunMode("gemrush")).toBe(false);
+  });
+
+  it("walks every enemy 20% faster than its data sheet", () => {
+    expect(ENEMY_SPEED_MUL).toBeCloseTo(1.2);
+  });
+
+  it("applies the modifiers through the shared helpers", () => {
+    // 5x health only in hardcore
+    expect(hardcoreEnemyHp(1000, "hardcore")).toBe(5000);
+    expect(hardcoreEnemyHp(1000, "battle")).toBe(1000);
+    // every slot spawns twice
+    expect(hardcoreSpawnPlan([0, 1, 4], "hardcore")).toEqual([0, 0, 1, 1, 4, 4]);
+    expect(hardcoreSpawnPlan([0, 1], "battle")).toEqual([0, 1]);
+    // 100x payouts, crits refused
+    expect(payoutMul("hardcore")).toBe(100);
+    expect(payoutMul("battle")).toBe(1);
+    expect(critAllowed("hardcore")).toBe(false);
+    expect(critAllowed("battle")).toBe(true);
+    expect(critAllowed("endless")).toBe(true);
+  });
+
+  it("gives three attempts per game-day and refuses the fourth", () => {
+    const s = defaultSave();
+    expect(hardcorePlaysLeft(s)).toBe(3);
+    expect(spendHardcorePlay(s)).toBe(true);
+    expect(hardcorePlaysLeft(s)).toBe(2);
+    expect(spendHardcorePlay(s)).toBe(true);
+    expect(spendHardcorePlay(s)).toBe(true);
+    expect(hardcorePlaysLeft(s)).toBe(0);
+    expect(spendHardcorePlay(s)).toBe(false);
+    expect(s.hardcoreUses).toBe(3);
+  });
+
+  it("resets the daily budget on the next game-day and persists the record", () => {
+    const s = defaultSave();
+    s.hardcoreDay = "2020-01-01";
+    s.hardcoreUses = 3;
+    // a stale stamp means a fresh budget
+    expect(hardcorePlaysLeft(s, "2026-10-20")).toBe(3);
+    s.hardcoreBest = 9;
+    persistSave(s);
+    const back = loadSave();
+    expect(back.hardcoreBest).toBe(9);
+    expect(back.hardcoreUses).toBe(0);
+    expect(back.hardcoreDay).toBe(todayStr());
+  });
+
+  it("clamps a hand-edited record and attempt count", () => {
+    const junk = importSave(JSON.stringify({ hardcoreBest: 9999, hardcoreUses: 99, hardcoreDay: todayStr() }));
+    expect(junk.hardcoreBest).toBe(BATTLE_ROUNDS);
+    expect(junk.hardcoreUses).toBe(HARDCORE_DAILY_PLAYS);
+  });
+});
+
+describe("performance + notification settings", () => {
+  it("allows a quarter-resolution canvas and clamps below it", () => {
+    const s = defaultSave();
+    s.pixelRatio = 0.25;
+    persistSave(s);
+    expect(loadSave().pixelRatio).toBe(0.25);
+    expect(importSave(JSON.stringify({ pixelRatio: 0.1 })).pixelRatio).toBe(0.25);
+    expect(importSave(JSON.stringify({ pixelRatio: 0.6 })).pixelRatio).toBe(0.5);
+    expect(importSave(JSON.stringify({ pixelRatio: 9 })).pixelRatio).toBe(2);
+  });
+
+  it("defaults notifications on and persists the mute", () => {
+    const s = defaultSave();
+    expect(s.hideNotifs).toBe(false);
+    s.hideNotifs = true;
+    persistSave(s);
+    expect(loadSave().hideNotifs).toBe(true);
+    // junk values fall back to "notifications on"
+    expect(importSave(JSON.stringify({ hideNotifs: "yes" })).hideNotifs).toBe(false);
   });
 });

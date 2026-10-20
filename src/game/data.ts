@@ -76,7 +76,37 @@ export type TowerKind =
   | "eclipse"
   | "seraph";
 
-export type GameMode = "battle" | "endless" | "gauntlet" | "gemrush";
+export type GameMode = "battle" | "endless" | "gauntlet" | "gemrush" | "hardcore";
+
+/** HARDCORE is a campaign-shaped run (12 rounds) with brutal modifiers. */
+export const isRunMode = (mode: GameMode) => mode === "battle" || mode === "hardcore";
+
+/** every enemy walks 20% faster than its data sheet, in every mode */
+export const ENEMY_SPEED_MUL = 1.2;
+
+// ---------- hardcore rules ----------
+/** enemies spawn in pairs: two bodies per spawn slot */
+export const HARDCORE_SPAWN_MUL = 2;
+/** five times the health of the same enemy in Battle */
+export const HARDCORE_HP_MUL = 5;
+/** every payout — gold, gems, potions, fragments — is multiplied by this */
+export const HARDCORE_REWARD_MUL = 100;
+/** the mode is a daily ladder: three attempts per calendar day */
+export const HARDCORE_DAILY_PLAYS = 3;
+export const HARDCORE_LIVES = 12;
+/** enemies are immune to crits: crit chance and crit damage never apply */
+export const HARDCORE_CRIT_IMMUNE = true;
+
+/** the single source of truth for every hardcore modifier, used by Battle */
+export const hardcoreEnemyHp = (base: number, mode: GameMode) =>
+  base * (mode === "hardcore" ? HARDCORE_HP_MUL : 1);
+/** hardcore fields two bodies per slot, so the wave is doubled in place */
+export const hardcoreSpawnPlan = (comp: number[], mode: GameMode) =>
+  mode === "hardcore" ? comp.flatMap((type) => [type, type]) : comp;
+/** every payout — gold, gems, potions, fragments, tokens — scales with this */
+export const payoutMul = (mode: GameMode) => (mode === "hardcore" ? HARDCORE_REWARD_MUL : 1);
+/** crits are rolled and applied only when the mode allows them */
+export const critAllowed = (mode: GameMode) => !(mode === "hardcore" && HARDCORE_CRIT_IMMUNE);
 
 /**
  * How an awakening behaves, so one implementation in the battle engine can

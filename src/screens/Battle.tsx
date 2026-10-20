@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveData } from "../game/save";
-import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, heroLevel, weekStr } from "../game/save";
+import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, hardcorePlaysLeft, heroLevel, weekStr } from "../game/save";
 import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import {
@@ -85,6 +85,16 @@ import {
   BOSS_OVERCHARGE_DOWN,
   BOSS_MAELSTROM_CD,
   BOSS_MAELSTROM_DIST,
+  ENEMY_SPEED_MUL,
+  HARDCORE_DAILY_PLAYS,
+  HARDCORE_HP_MUL,
+  HARDCORE_LIVES,
+  HARDCORE_SPAWN_MUL,
+  critAllowed,
+  hardcoreEnemyHp,
+  hardcoreSpawnPlan,
+  isRunMode,
+  payoutMul,
   inductionBonus,
   heroAwkSpec,
   boltThreshold,
@@ -281,6 +291,8 @@ interface Enemy {
   boltHit?: boolean;
   /** the killing blow came from lightning (pays induction bonuses) */
   lightKill?: boolean;
+  /** white hit-flash timer, driven by dealDamage */
+  flash?: number;
   /** War Cry / Maelstrom: seconds left sprinting */
   rage?: number;
   /** Iron Banner: seconds left with the armour plate */
@@ -685,8 +697,15 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     phaseT: mode === "endless" || mode === "gemrush" ? 6 : 7,
     round: Math.max(1, startRound),
     // endless and gauntlet have no final wave; maxRounds is display only
-    maxRounds: mode === "battle" ? BATTLE_ROUNDS : 0,
-    lives: (mode === "endless" || mode === "gemrush" ? 15 : mode === "gauntlet" ? 12 : 20) + Math.round(crystal.lives),
+    maxRounds: isRunMode(mode) ? BATTLE_ROUNDS : 0,
+    lives:
+      (mode === "endless" || mode === "gemrush"
+        ? 15
+        : mode === "gauntlet"
+          ? 12
+          : mode === "hardcore"
+            ? HARDCORE_LIVES
+            : 20) + Math.round(crystal.lives),
     // small field-kit budget so the run shop is useful from wave 1
     gold: 120,
     bonusAspd: crystal.aspd + crystal.magicianKing,
@@ -884,7 +903,8 @@ export default function Battle({
   mutateRef.current = mutate;
 
   const [, setTick] = useState(0);
-  const { toasts, push } = useToasts();
+  // battle callouts honour the same Hide Notifications switch as the shell
+  const { toasts, push } = useToasts(!save.hideNotifs);
   const [shopOpen, setShopOpen] = useState(false);
   /** arena zoom: 1 = fitted to the panel, up to 2 = twice as big (scroll to pan) */
   const [zoom, setZoom] = useState(() => clampZoom(save.zoom));
@@ -958,7 +978,10 @@ export default function Battle({
     canvas.width = Math.round(W * pixelRatio);
     canvas.height = Math.round(H * pixelRatio);
     canvas.style.imageRendering = saveRef.current.antiAlias ? "auto" : "pixelated";
-    const ctx = canvas.getContext("2d", { alpha: false })!;
+    // `desynchronized` lets the browser skip a compositor hop on supported
+    // hardware — the arena is repainted every frame anyway, so tearing risk is
+    // nil and input latency drops.
+    const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true })!;
     // Half-resolution history buffers keep shake blur inexpensive on phones.
     const bloomCanvas = document.createElement("canvas");
     bloomCanvas.width = Math.max(1, Math.round(W * 0.25));
@@ -1004,6 +1027,135 @@ export default function Battle({
      * Static arena backdrop, pre-rendered once. Nothing in here animates, so
      * the cache stays valid for the whole run and costs one drawImage a frame.
      */
+    // Build pads change only when a tower moves or a drag hovers a new cell, so
+    // they are rendered into their own layer and blitted when that state moves.
+    // That removes ~24 notched octagons (three paths + two strokes each) from
+    // every frame while the wave is running.
+    let padCache: HTMLCanvasElement | null = null;
+    let padCtx: CanvasRenderingContext2D | null = null;
+    let padSig = "";
+    const renderPads = (occupied: Set<string>, hover: { x: number; y: number } | null, showGuides: boolean) => {
+      // built on the first frame, not at mount: the engine must bind its
+      // imperative handles before the first paint costs anything
+      if (!padCache) {
+        padCache = document.createElement("canvas");
+        padCache.width = W;
+        padCache.height = H;
+        padCtx = padCache.getContext("2d")!;
+      }
+      const padCtx2 = padCtx!;
+      padCtx2.clearRect(0, 0, W, H);
+      if (!showGuides) return;
+      for (let c = 0; c < COLS; c++) {
+        for (let r = 0; r < ROWS; r++) {
+          if (isPathCell(c, r)) continue;
+          const x = OX + c * C;
+          const y = OY + r * C;
+          const isOccupied = occupied.has(c + "," + r);
+          let face = "rgba(31,22,74,0.72)";
+          let edge = "rgba(96,76,190,0.5)";
+          let inner = "rgba(53,224,255,0.07)";
+          if (hover) {
+            const over = hover.x >= x && hover.x < x + C && hover.y >= y && hover.y < y + C;
+            if (over) {
+              face = isOccupied ? "rgba(255,77,94,0.3)" : "rgba(61,255,142,0.28)";
+              edge = isOccupied ? "rgba(255,77,94,0.9)" : "rgba(61,255,142,0.95)";
+              inner = isOccupied ? "rgba(255,77,94,0.2)" : "rgba(61,255,142,0.22)";
+            } else {
+              face = "rgba(31,22,74,0.55)";
+              inner = "rgba(53,224,255,0.1)";
+            }
+          }
+          const pxs = x + 4;
+          const pys = y + 4;
+          const ps = C - 8;
+          const n = 7;
+          padCtx2.fillStyle = "rgba(0,0,0,0.5)";
+          padCtx2.beginPath();
+          padCtx2.roundRect(pxs, pys + 4, ps, ps, 8);
+          padCtx2.fill();
+          padCtx2.beginPath();
+          padCtx2.moveTo(pxs + n, pys);
+          padCtx2.lineTo(pxs + ps - n, pys);
+          padCtx2.lineTo(pxs + ps, pys + n);
+          padCtx2.lineTo(pxs + ps, pys + ps - n);
+          padCtx2.lineTo(pxs + ps - n, pys + ps);
+          padCtx2.lineTo(pxs + n, pys + ps);
+          padCtx2.lineTo(pxs, pys + ps - n);
+          padCtx2.lineTo(pxs, pys + n);
+          padCtx2.closePath();
+          padCtx2.fillStyle = face;
+          padCtx2.fill();
+          padCtx2.strokeStyle = edge;
+          padCtx2.lineWidth = 1.5;
+          padCtx2.stroke();
+          if (!isOccupied) {
+            padCtx2.strokeStyle = inner;
+            padCtx2.lineWidth = 1;
+            padCtx2.beginPath();
+            padCtx2.arc(x + C / 2, y + C / 2, ps * 0.26, 0, Math.PI * 2);
+            padCtx2.stroke();
+            const bl = ps * 0.1;
+            padCtx2.beginPath();
+            padCtx2.moveTo(x + C / 2 - bl, y + C / 2);
+            padCtx2.lineTo(x + C / 2 + bl, y + C / 2);
+            padCtx2.moveTo(x + C / 2, y + C / 2 - bl);
+            padCtx2.lineTo(x + C / 2, y + C / 2 + bl);
+            padCtx2.stroke();
+          }
+          padCtx2.strokeStyle = "rgba(255,255,255,0.07)";
+          padCtx2.lineWidth = 1;
+          padCtx2.beginPath();
+          padCtx2.moveTo(pxs + n, pys + 0.5);
+          padCtx2.lineTo(pxs + ps - n, pys + 0.5);
+          padCtx2.stroke();
+        }
+      }
+    };
+
+    // The road bed never changes: trench, asphalt, kerbs and paving ticks are
+    // painted once into a layer and blitted, leaving only the two moving
+    // conduit pulses as per-frame path strokes.
+    let laneCache: HTMLCanvasElement | null = null;
+    const laneCacheFor = () => {
+      if (laneCache) return laneCache;
+      laneCache = document.createElement("canvas");
+      laneCache.width = W;
+      laneCache.height = H;
+      const lc = laneCache.getContext("2d")!;
+      const strokePathOn = (c: CanvasRenderingContext2D) => {
+        c.beginPath();
+        c.moveTo(WPX[0].x, WPX[0].y);
+        for (let i = 1; i < WPX.length; i++) c.lineTo(WPX[i].x, WPX[i].y);
+        c.stroke();
+      };
+      lc.lineCap = "round";
+      lc.lineJoin = "round";
+      lc.strokeStyle = "rgba(0,0,0,0.6)";
+      lc.lineWidth = C * 0.92;
+      strokePathOn(lc);
+      lc.strokeStyle = "#1d1646";
+      lc.lineWidth = C * 0.82;
+      strokePathOn(lc);
+      lc.strokeStyle = "#2a2064";
+      lc.lineWidth = C * 0.68;
+      strokePathOn(lc);
+      lc.save();
+      lc.globalAlpha = 0.5;
+      lc.strokeStyle = "#4a3aa0";
+      lc.lineWidth = 2;
+      strokePathOn(lc);
+      lc.restore();
+      lc.save();
+      lc.globalAlpha = 0.22;
+      lc.strokeStyle = "#0a0722";
+      lc.lineWidth = C * 0.68;
+      lc.setLineDash([3, 30]);
+      strokePathOn(lc);
+      lc.restore();
+      return laneCache;
+    };
+
     const bgCache = document.createElement("canvas");
     bgCache.width = W;
     bgCache.height = H;
@@ -1141,7 +1293,10 @@ export default function Battle({
     // ---------- the upgraded FX kit ----------
     const PART_CAP = 620;
     /** power saving keeps the particle field small: the additive pass is heat */
-    const partCap = () => (saveRef.current.powerSaver ? 180 : PART_CAP);
+    // the particle budget follows the frame governor: if the draw cost climbs,
+    // the cap shrinks before the frame rate does
+    const partCap = () =>
+      saveRef.current.powerSaver ? 180 : Math.round(PART_CAP * (0.45 + 0.55 * fxQ()));
     const pushPart = (p: Part) => {
       if (g.parts.length > partCap()) {
         // skip rather than pile on: the additive pass is the expensive one,
@@ -1416,13 +1571,19 @@ export default function Battle({
       g.phase = "wave";
       g.phaseT = 999;
       const spawnInterval = mode === "gemrush" ? 0.22 : enemySpawnInterval(g.round);
-      const composition = mode === "gemrush"
+      let composition = mode === "gemrush"
         ? Array.from({ length: 18 + Math.min(10, Math.floor(g.round / 5)) }, () => {
             const mobTypes = ENEMY_TYPES.map((_, i) => i).filter((type) => !isBossType(type));
             return mobTypes[Math.floor(Math.random() * mobTypes.length)] ?? 0;
           }).concat(g.round % 4 === 0 ? [g.nextBossType ?? BOSS_TYPES[Math.floor(Math.random() * BOSS_TYPES.length)]] : [])
         : waveComp(g.round);
-      g.spawnQ = composition.map((type, i) => ({ type, at: g.t + (mode === "gemrush" ? 0.3 : 0.8) + i * spawnInterval }));
+      // HARDCORE: two bodies per spawn slot, arriving as a pair
+      const pairSpawn = mode === "hardcore";
+      composition = hardcoreSpawnPlan(composition, mode);
+      g.spawnQ = composition.map((type, i) => ({
+        type,
+        at: g.t + (mode === "gemrush" ? 0.3 : 0.8) + (pairSpawn ? Math.floor(i / HARDCORE_SPAWN_MUL) : i) * spawnInterval,
+      }));
       if (composition.some(isBossType) && g.nextBossType !== null) {
         let assigned = false;
         g.spawnQ = g.spawnQ.map((spawn) => {
@@ -1514,7 +1675,8 @@ export default function Battle({
       const rounds = won ? g.maxRounds : Math.max(0, g.round - 1);
       const frags: { id: string; n: number }[] = [];
       // Endless and Gauntlet pay depth fragments; Gem Rush pays only its kill bank.
-      const nf = mode === "gemrush" ? 0 : mode !== "battle" ? Math.min(12, 1 + Math.floor(rounds / 3)) : won ? 3 : 1;
+      const nfBase = mode === "gemrush" ? 0 : !isRunMode(mode) ? Math.min(12, 1 + Math.floor(rounds / 3)) : won ? 3 : 1;
+      const nf = nfBase * rewardMul;
       for (let i = 0; i < nf; i++) {
         const id = TOWERS[Math.floor(Math.random() * TOWERS.length)].id;
         const e2 = frags.find((f) => f.id === id);
@@ -1546,7 +1708,7 @@ export default function Battle({
       const baseGold = mode === "gemrush" ? 0 : runGold(clearRewardGold) + wallet;
       const baseGems = mode === "gemrush" ? g.gemRushGems : gauntletPay ? gauntletPay.gems : mode === "endless" ? endlessGems : won ? reward(2) : 0;
       // Crystal potions are normal run salvage; Gem Rush pays only its kill-based gems.
-      const potions = mode === "gemrush" ? 0 : gauntletPay ? gauntletPay.potions : (won ? 3 : 1) + Math.floor(rounds / 3);
+      const potions = mode === "gemrush" ? 0 : gauntletPay ? gauntletPay.potions : ((won ? 3 : 1) + Math.floor(rounds / 3)) * rewardMul;
       // Items Finding drops chip modules on a win (one extra advanced on boss waves)
       const chips: ChipBag | null =
         won && EV_BONUS.chipDrop
@@ -1557,9 +1719,9 @@ export default function Battle({
 
       g.final = {
         won,
-        gold: mode === "gemrush" ? 0 : Math.round(baseGold * EV_BONUS.goldMul * MONTH_BONUS.goldMul),
-        gems: mode === "gemrush" ? baseGems : Math.round(baseGems * EV_BONUS.gemMul * MONTH_BONUS.gemMul),
-        tokens: mode === "endless" ? endlessTokens : 0,
+        gold: mode === "gemrush" ? 0 : Math.round(baseGold * EV_BONUS.goldMul * MONTH_BONUS.goldMul * rewardMul),
+        gems: mode === "gemrush" ? baseGems : Math.round(baseGems * EV_BONUS.gemMul * MONTH_BONUS.gemMul * rewardMul),
+        tokens: mode === "endless" ? endlessTokens : mode === "hardcore" ? Math.max(1, endlessTokens) * rewardMul : 0,
         frags,
         rounds,
         trophies,
@@ -1575,7 +1737,7 @@ export default function Battle({
     const killReward = (e: Enemy) => {
       e.dead = true;
       g.kills++;
-      if (isBossType(e.type) && !(mode === "battle" && g.round >= g.maxRounds)) {
+      if (isBossType(e.type) && !(isRunMode(mode) && g.round >= g.maxRounds)) {
         // Deal from a shuffled deck rather than sampling with replacement:
         // no immediate repeat, and every boss is seen before the bag refills.
         if (!g.bossDeck.length || (g.bossDeck.length === 1 && g.bossDeck[0] === e.type)) {
@@ -1614,7 +1776,8 @@ export default function Battle({
       const inductionMul = induction > 0 && e.lightKill ? 1 + inductionBonus(induction) : 1;
       g.sp += spGain(Math.round(e.spv * inductionMul));
       // run gold is 50% richer across the board (kills, bounties, wave clears)
-      g.gold += runGold(Math.round(e.gold * MONTH_BONUS.goldMul * g.goldMul * inductionMul));
+      // and HARDCORE multiplies every payout by 100
+      g.gold += runGold(Math.round(e.gold * MONTH_BONUS.goldMul * g.goldMul * inductionMul * rewardMul));
       const p = enemyPos(e);
       const et = ENEMY_TYPES[e.type];
       if (e.elite) {
@@ -1649,6 +1812,9 @@ export default function Battle({
       }
     };
 
+    /** HARDCORE pays out 100×; every other mode pays 1× */
+    const rewardMul = payoutMul(mode);
+
     /** enemies armed by Bolt from the Blue, resolved once per frame */
     const boltQueue: Enemy[] = [];
 
@@ -1673,9 +1839,12 @@ export default function Battle({
 
     const dealDamage = (e: Enemy, raw: number, opt: { alwaysCrit?: boolean; tw?: BT; color?: string; noCrit?: boolean; lightning?: boolean }) => {
       if (e.dead) return;
-      let crit = opt.alwaysCrit ?? false;
+      // HARDCORE enemies are immune to crits: no roll, no forced crit, no crit
+      // multiplier on anything — the merged crit stat simply does not apply
+      const critImmune = !critAllowed(mode);
+      let crit = !critImmune && (opt.alwaysCrit ?? false);
       // executions and instant kills skip the crit roll: the number is the point
-      if (!crit && !opt.noCrit) crit = Math.random() < CRIT_CHANCE + g.critRate;
+      if (!crit && !opt.noCrit && !critImmune) crit = Math.random() < CRIT_CHANCE + g.critRate;
       // note: tower/aura multipliers are already folded into `raw` by the caller
       // Electrical Induction: a stripped shield turns armour into a liability.
       // A 120% cut on a 30%-armour boss leaves it at -6% armour (i.e. +6% damage).
@@ -1718,6 +1887,7 @@ export default function Battle({
               : 1
         : 0;
       e.hp -= dmg;
+      e.flash = Math.min(0.16, (e.flash || 0) + 0.1);
       if (opt.lightning) {
         if (e.hp <= 0) e.lightKill = true;
       }
@@ -3983,10 +4153,12 @@ export default function Battle({
           // elites: 2.8x-health variants with a golden sigil, 5x SP and double gold
           const elite = !boss && Math.random() < Math.min(0.35, 0.06 + g.round * 0.015);
           // Bosses use +78%; regulars use +90%, and elites gain the 2.8x variant multiplier.
-          const hp =
-            roundHp(g.round) * et.hpMul * (mode === "gemrush" ? GEM_RUSH_HP_MUL : EV_BONUS.hpMul * MONTH_BONUS.hpMul) * (elite ? ELITE_HP_MUL : 1) * (boss ? BOSS_HP_MUL : ENEMY_HP_SCALE);
+          const hp = hardcoreEnemyHp(
+            roundHp(g.round) * et.hpMul * (mode === "gemrush" ? GEM_RUSH_HP_MUL : EV_BONUS.hpMul * MONTH_BONUS.hpMul) * (elite ? ELITE_HP_MUL : 1) * (boss ? BOSS_HP_MUL : ENEMY_HP_SCALE),
+            mode
+          );
           g.enemies.push({
-            id: eidC++, d: 0, hp, max: hp, speed: et.speed * (1 + g.round * 0.012) * (elite ? 1.08 : 1) * (mode === "gemrush" ? GEM_RUSH_SPEED_MUL : 1), type: s.type,
+            id: eidC++, d: 0, hp, max: hp, speed: et.speed * ENEMY_SPEED_MUL * (1 + g.round * 0.012) * (elite ? 1.08 : 1) * (mode === "gemrush" ? GEM_RUSH_SPEED_MUL : 1), type: s.type,
             elite,
             frozen: 0, stun: 0, armor: et.armor, lives: et.lives, gold: (et.gold + Math.floor(g.round / 2)) * (elite ? 2 : 1),
             spv: Math.round(killSp(elite, boss) * MONTH_BONUS.spMul), dead: false, wob: Math.random() * 7,
@@ -3998,6 +4170,16 @@ export default function Battle({
             enraged: false, cast: 0,
             encased: 0, mark: 0, pulled: 0, ox: 0, oy: 0,
           });
+          // spawn-in: a rift opens at the gate and the body condenses out of it
+          // (elites and bosses get a bigger, brighter ring)
+          if (fxOn() && !saveRef.current.powerSaver) {
+            const sp0 = pathPos(0);
+            ring(sp0.x, sp0.y, et.color, boss ? 46 : elite ? 30 : 18);
+            if (boss) {
+              glow(sp0.x, sp0.y, et.accent, 140, 0.5);
+              shock(sp0.x, sp0.y, et.color, 90, 0.5);
+            }
+          }
           // a boss walks in with a cutscene — the sim holds until it finishes.
           // When a wave carries several bosses the card introduces the marquee
           // one (highest hpMul), so the Abyss Leviathan is never upstaged by a
@@ -4036,7 +4218,7 @@ export default function Battle({
           sfx.waveClear();
           // gold + gem payouts were buffed 40% (REWARD_MUL) in the balance patch
           g.gold += runGold(reward(bonus / 2) * g.goldMul);
-          if (g.mode === "battle" && g.round >= g.maxRounds) {
+          if (isRunMode(g.mode) && g.round >= g.maxRounds) {
             endGame(true);
           } else if (mode === "gauntlet") {
             // the run is never "won": it ends when the line breaks. Every clear
@@ -4179,7 +4361,7 @@ export default function Battle({
                 const hp = roundHp(g.round) * et0.hpMul * MONTH_BONUS.hpMul * 0.6 * ENEMY_HP_SCALE;
                 const back = Math.max(0, e.d - 30 - i * 26);
                 g.enemies.push({
-                  id: eidC++, d: back, hp, max: hp, speed: et0.speed * (1 + g.round * 0.012) * 1.25, type: 0,
+                  id: eidC++, d: back, hp, max: hp, speed: et0.speed * ENEMY_SPEED_MUL * (1 + g.round * 0.012) * 1.25, type: 0,
                   frozen: 0, stun: 0, armor: 0, lives: 1, gold: et0.gold + Math.floor(g.round / 4),
                   spv: killSp(false, false), dead: false, wob: Math.random() * 7,
                   slow: 0, slowT: 0, burnT: 0, burnDps: 0,
@@ -4387,6 +4569,7 @@ export default function Battle({
           }
         }
         if (e.slowT > 0) e.slowT -= dt;
+        if (e.flash) e.flash = Math.max(0, e.flash - dt);
         // ---------- skill status effects ----------
         if (e.link > 0) {
           e.link -= dt;
@@ -4945,12 +5128,6 @@ export default function Battle({
     };
 
     // ---------- draw ----------
-    const pathStroke = () => {
-      ctx.beginPath();
-      ctx.moveTo(WPX[0].x, WPX[0].y);
-      for (let i = 1; i < WPX.length; i++) ctx.lineTo(WPX[i].x, WPX[i].y);
-      ctx.stroke();
-    };
 
     /**
      * Spawn and exit gates. Each is a sunken well of light with a stone
@@ -6406,10 +6583,13 @@ export default function Battle({
         ctx.fillStyle = "#35e0ff";
         ctx.fillRect(x - 30 + i * 5, y - 40, 3, 3);
       }
-      ctx.font = `700 11px ${canvasUiFont}`;
-      ctx.textAlign = "center";
-      ctx.fillStyle = "rgba(234,230,255,0.85)";
-      ctx.fillText(`${t.def.name} · Lv${t.bLv}`, x, y - 46);
+      // tower name plates are dropped on big boards / low quality frames
+      if (fxQ() >= 0.7 || g.towers.length <= 18) {
+        ctx.font = `700 11px ${canvasUiFont}`;
+        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(234,230,255,0.85)";
+        ctx.fillText(`${t.def.name} · Lv${t.bLv}`, x, y - 46);
+      }
       ctx.globalAlpha = 1;
     };
 
@@ -6419,6 +6599,12 @@ export default function Battle({
      * facing along the path, shading, limbs and per-type details (armour
      * plates, robes and staff, warlord axe, overlord rift crown).
      */
+    /**
+     * One linear gradient per (enemy type, body height) is enough: gradient
+     * coordinates are resolved against the CTM when they are painted, so the
+     * cached object stays valid across the per-enemy translate.
+     */
+    const bodyGradCache = new Map<string, CanvasGradient>();
     const drawEnemy = (e: Enemy, now: number) => {
       // glide between sim steps when frame interpolation is on — path distance
       // and the lateral singularity offset are interpolated independently
@@ -6428,6 +6614,8 @@ export default function Battle({
       const oyDraw = e.poy === undefined ? e.oy : hermite ? hermiteLerp(e.ppoy, e.poy, e.oy, rawRenderAlpha) : e.poy + (e.oy - e.poy) * renderAlpha;
       const p = enemyPos({ d: dDraw, ox: oxDraw, oy: oyDraw });
       const et = ENEMY_TYPES[e.type];
+      // viewport cull: with the camera zoomed in, most of the path is offscreen
+      if (p.x < -90 || p.x > W + 90 || p.y < -150 || p.y > H + 110) return;
       // facing: sample a point slightly ahead on the path
       const ahead = pathPos(e.d + 6);
       const face = Math.atan2(ahead.y - p.y, ahead.x - p.x);
@@ -6461,6 +6649,139 @@ export default function Battle({
         ctx.restore();
       }
 
+      // ---------- PRESENCE FX ----------
+      // Bosses carry a signature aura keyed on their shape (embers for the
+      // Warlord, orbiting void shards for the Overlord, quake rings for the
+      // Titan, ripples for the Leviathan, static for the Herald) and every
+      // enemy gets a soft contact glow plus a white hit flash. It is all
+      // additive geometry with no shadowBlur, and it is skipped whenever the
+      // frame governor or the player's own FX budget dials quality down.
+      const auraOn = fxOn() && fxQ() >= 0.7 && !saveRef.current.powerSaver;
+      if (auraOn) {
+        const bossE = isBossType(e.type);
+        const pulse = 0.5 + 0.5 * Math.sin(cycle * 0.9 + e.wob);
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        if (bossE) {
+          // ground halo
+          const hy = p.y + R * 0.55;
+          const halo = ctx.createRadialGradient(p.x, hy, R * 0.2, p.x, hy, R * 2.2);
+          halo.addColorStop(0, `${et.color}66`);
+          halo.addColorStop(0.55, `${et.color}22`);
+          halo.addColorStop(1, "transparent");
+          ctx.globalAlpha = 0.3 + pulse * 0.22;
+          ctx.fillStyle = halo;
+          ctx.beginPath();
+          ctx.ellipse(p.x, hy, R * 2.1, R * 0.9, 0, 0, Math.PI * 2);
+          ctx.fill();
+          // slow rotating rune ring
+          ctx.globalAlpha = 0.34;
+          ctx.strokeStyle = et.accent;
+          ctx.lineWidth = 1.3;
+          ctx.setLineDash([7, 11]);
+          ctx.lineDashOffset = -now / 45;
+          ctx.beginPath();
+          ctx.ellipse(p.x, hy, R * 1.7, R * 0.66, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.lineDashOffset = 0;
+          // signature cue
+          switch (et.shape) {
+            case "warlord": {
+              // Warlord: embers rising off the standard
+              for (let i = 0; i < 4; i++) {
+                const t = (now / 700 + i / 4) % 1;
+                ctx.globalAlpha = (1 - t) * 0.75;
+                ctx.fillStyle = i % 2 ? "#ffd23f" : "#ff7a3d";
+                ctx.beginPath();
+                ctx.arc(p.x + Math.sin(now / 320 + i * 2.1) * R * 0.85, p.y - R - t * 40, 2.6 * (1 - t) + 0.6, 0, Math.PI * 2);
+                ctx.fill();
+              }
+              break;
+            }
+            case "overlord": {
+              // Rift Overlord: three void shards orbiting the crown
+              for (let i = 0; i < 3; i++) {
+                const a = now / 900 + (i / 3) * Math.PI * 2;
+                ctx.globalAlpha = 0.55 + 0.3 * Math.sin(a * 2);
+                ctx.fillStyle = i === 0 ? "#ffffff" : et.accent;
+                ctx.beginPath();
+                const sx = p.x + Math.cos(a) * R * 1.5;
+                const sy = p.y - R * 0.35 + Math.sin(a) * R * 0.55;
+                ctx.moveTo(sx, sy - 4.5);
+                ctx.lineTo(sx + 3, sy);
+                ctx.lineTo(sx, sy + 4.5);
+                ctx.lineTo(sx - 3, sy);
+                ctx.closePath();
+                ctx.fill();
+              }
+              break;
+            }
+            case "titan": {
+              // Void Titan: slow quake rings spreading from its feet
+              for (let i = 0; i < 2; i++) {
+                const t = (now / 1400 + i / 2) % 1;
+                ctx.globalAlpha = (1 - t) * 0.4;
+                ctx.strokeStyle = et.accent;
+                ctx.lineWidth = 2.2 * (1 - t) + 0.5;
+                ctx.beginPath();
+                ctx.ellipse(p.x, hy, R * (1 + t * 1.9), R * (0.4 + t * 0.75), 0, 0, Math.PI * 2);
+                ctx.stroke();
+              }
+              break;
+            }
+            case "leviathan": {
+              // Abyss Leviathan: water ripples lapping at the coils
+              for (let i = 0; i < 3; i++) {
+                const t = (now / 1100 + i / 3) % 1;
+                ctx.globalAlpha = (1 - t) * 0.35;
+                ctx.strokeStyle = i % 2 ? "#2ee6c8" : "#d6fff7";
+                ctx.lineWidth = 1.6;
+                ctx.beginPath();
+                ctx.ellipse(p.x, hy, R * (0.9 + t * 1.6), R * (0.32 + t * 0.6), 0, 0, Math.PI * 2);
+                ctx.stroke();
+              }
+              break;
+            }
+            case "herald": {
+              // Storm Herald: static crawling around the thunderhead
+              ctx.globalAlpha = 0.65;
+              ctx.strokeStyle = "#ffffff";
+              ctx.lineWidth = 1.4;
+              for (let i = 0; i < 2; i++) {
+                const a0 = now / 260 + i * Math.PI;
+                ctx.beginPath();
+                for (let k = 0; k <= 6; k++) {
+                  const a = a0 + (k / 6) * 1.5;
+                  const rr = R * 1.25 * (k % 2 ? 1.08 : 0.96);
+                  const px2 = p.x + Math.cos(a) * rr;
+                  const py2 = p.y - R * 0.3 + Math.sin(a) * rr * 0.7;
+                  k === 0 ? ctx.moveTo(px2, py2) : ctx.lineTo(px2, py2);
+                }
+                ctx.stroke();
+              }
+              break;
+            }
+          }
+        } else if (e.elite || e.flash) {
+          // regular mobs only pay for a glow when they are elite or just hit
+          ctx.globalAlpha = e.elite ? 0.2 + pulse * 0.12 : 0.26;
+          ctx.fillStyle = e.elite ? "#ffd23f" : "#ffffff";
+          ctx.beginPath();
+          ctx.ellipse(p.x, p.y + R * 0.6, R * 1.5, R * 0.62, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        if (e.flash) {
+          // hit flash: a white bloom that reads even through armour
+          ctx.globalAlpha = Math.min(0.5, e.flash * 4);
+          ctx.fillStyle = "#ffffff";
+          ctx.beginPath();
+          ctx.arc(p.x, p.y - R * 0.15, R * 1.05, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
       // ground shadow, squashed with the bob so the step reads as weight
       ctx.save();
       ctx.globalAlpha = 0.32;
@@ -6478,10 +6799,14 @@ export default function Battle({
 
       /** vertical body gradient: lit top, shaded belly */
       const bodyGrad = (h: number) => {
+        const key = e.type + ":" + Math.round(h);
+        const hit = bodyGradCache.get(key);
+        if (hit) return hit;
         const gr = ctx.createLinearGradient(0, -h, 0, h);
         gr.addColorStop(0, et.accent);
         gr.addColorStop(0.45, et.color);
         gr.addColorStop(1, et.shade);
+        bodyGradCache.set(key, gr);
         return gr;
       };
 
@@ -7381,29 +7706,41 @@ export default function Battle({
       const hpPct = Math.max(0, Math.min(1, e.hp / e.max));
       const by = p.y - et.r - (boss ? 22 : 15) + bob;
       const bh = boss ? 7 : 5;
-      // current/max readout: sits just above the bar, outlined for contrast
-      const hpLabel = `${shortHp(e.hp)}/${shortHp(e.max)}`;
-      ctx.save();
-      const fs = boss ? 12 : 10;
-      ctx.font = `800 ${fs}px ${canvasUiFont}`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "alphabetic";
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = "rgba(0,0,0,0.88)";
-      ctx.strokeText(hpLabel, p.x, by - 4);
-      ctx.fillStyle = hpPct > 0.25 ? "#eafff2" : "#ffd7db";
-      ctx.fillText(hpLabel, p.x, by - 4);
-      ctx.restore();
+      // current/max readout: sits just above the bar, outlined for contrast.
+      // Text is the most expensive per-enemy primitive, so on a packed board
+      // (or when the governor is throttling) only bosses and elites keep their
+      // numbers — the bars themselves still read perfectly.
+      const dense = g.enemies.length > 24 || fxQ() < 0.7;
+      if (boss || e.elite || !dense) {
+        const hpLabel = `${shortHp(e.hp)}/${shortHp(e.max)}`;
+        ctx.save();
+        const fs = boss ? 12 : 10;
+        ctx.font = `800 ${fs}px ${canvasUiFont}`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "alphabetic";
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "rgba(0,0,0,0.88)";
+        ctx.strokeText(hpLabel, p.x, by - 4);
+        ctx.fillStyle = hpPct > 0.25 ? "#eafff2" : "#ffd7db";
+        ctx.fillText(hpLabel, p.x, by - 4);
+        ctx.restore();
+      }
       ctx.fillStyle = "rgba(0,0,0,0.72)";
       ctx.beginPath();
       ctx.roundRect(p.x - w3 / 2 - 1, by - 1, w3 + 2, bh + 2, 3);
       ctx.fill();
       const hpCol = hpPct > 0.5 ? "#3dff8e" : hpPct > 0.25 ? "#ffd23f" : "#ff4d5e";
-      const hpGrad = ctx.createLinearGradient(0, by, 0, by + bh);
-      hpGrad.addColorStop(0, "#ffffffaa");
-      hpGrad.addColorStop(0.35, hpCol);
-      hpGrad.addColorStop(1, hpCol);
-      ctx.fillStyle = hpGrad;
+      if (dense) {
+        // a flat colour on packed boards: one gradient object per enemy per
+        // frame is exactly the kind of allocation that shows up in a profile
+        ctx.fillStyle = hpCol;
+      } else {
+        const hpGrad = ctx.createLinearGradient(0, by, 0, by + bh);
+        hpGrad.addColorStop(0, "#ffffffaa");
+        hpGrad.addColorStop(0.35, hpCol);
+        hpGrad.addColorStop(1, hpCol);
+        ctx.fillStyle = hpGrad;
+      }
       ctx.beginPath();
       ctx.roundRect(p.x - w3 / 2, by, Math.max(1, w3 * hpPct), bh, 2);
       ctx.fill();
@@ -7753,130 +8090,53 @@ export default function Battle({
         ctx.translate(-W / 2, -H / 2);
       }
 
-      // --- build pads: raised hex-tech platforms with notched corners ---
+      // --- build pads: a cached layer, re-rendered only when the board or the
+      // drag hover changes (see renderPads above) ---
       const drag = dragRef.current;
       const showGuides = saveRef.current.guides;
-      for (let c = 0; c < COLS && showGuides; c++) {
-        for (let r = 0; r < ROWS; r++) {
-          if (isPathCell(c, r)) continue;
-          const x = OX + c * C;
-          const y = OY + r * C;
-          const occupied = g.towers.some((t) => t.cell && t.cell.c === c && t.cell.r === r);
-          let face = "rgba(31,22,74,0.72)";
-          let edge = "rgba(96,76,190,0.5)";
-          let inner = "rgba(53,224,255,0.07)";
-          if (drag && drag.moved) {
-            const over = drag.x >= x && drag.x < x + C && drag.y >= y && drag.y < y + C;
-            if (over) {
-              face = occupied ? "rgba(255,77,94,0.3)" : "rgba(61,255,142,0.28)";
-              edge = occupied ? "rgba(255,77,94,0.9)" : "rgba(61,255,142,0.95)";
-              inner = occupied ? "rgba(255,77,94,0.2)" : "rgba(61,255,142,0.22)";
-            } else {
-              face = "rgba(31,22,74,0.55)";
-              inner = "rgba(53,224,255,0.1)";
-            }
-          }
-          const pxs = x + 4;
-          const pys = y + 4;
-          const ps = C - 8;
-          const n = 7; // corner notch
-          // the pad's thickness, drawn as a dark lip beneath it
-          ctx.fillStyle = "rgba(0,0,0,0.5)";
-          ctx.beginPath();
-          ctx.roundRect(pxs, pys + 4, ps, ps, 8);
-          ctx.fill();
-          // notched octagonal face
-          ctx.beginPath();
-          ctx.moveTo(pxs + n, pys);
-          ctx.lineTo(pxs + ps - n, pys);
-          ctx.lineTo(pxs + ps, pys + n);
-          ctx.lineTo(pxs + ps, pys + ps - n);
-          ctx.lineTo(pxs + ps - n, pys + ps);
-          ctx.lineTo(pxs + n, pys + ps);
-          ctx.lineTo(pxs, pys + ps - n);
-          ctx.lineTo(pxs, pys + n);
-          ctx.closePath();
-          ctx.fillStyle = face;
-          ctx.fill();
-          ctx.strokeStyle = edge;
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          // inner ring + crosshair, so an empty pad reads as a socket
-          if (!occupied) {
-            ctx.strokeStyle = inner;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.arc(x + C / 2, y + C / 2, ps * 0.26, 0, Math.PI * 2);
-            ctx.stroke();
-            const bl = ps * 0.1;
-            ctx.beginPath();
-            ctx.moveTo(x + C / 2 - bl, y + C / 2);
-            ctx.lineTo(x + C / 2 + bl, y + C / 2);
-            ctx.moveTo(x + C / 2, y + C / 2 - bl);
-            ctx.lineTo(x + C / 2, y + C / 2 + bl);
-            ctx.stroke();
-          }
-          // top-edge highlight
-          ctx.strokeStyle = "rgba(255,255,255,0.07)";
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.moveTo(pxs + n, pys + 0.5);
-          ctx.lineTo(pxs + ps - n, pys + 0.5);
-          ctx.stroke();
+      {
+        const occupied = new Set<string>();
+        for (const t of g.towers) if (t.cell) occupied.add(t.cell.c + "," + t.cell.r);
+        const hover = drag && drag.moved ? { x: drag.x, y: drag.y } : null;
+        const sig = (showGuides ? "1" : "0") + "|" + [...occupied].join(";") + "|" + (hover ? Math.floor(hover.x / C) + "," + Math.floor(hover.y / C) : "-");
+        if (sig !== padSig) {
+          padSig = sig;
+          renderPads(occupied, hover, showGuides);
         }
+        if (showGuides && padCache) ctx.drawImage(padCache, 0, 0);
       }
 
-      // --- the lane: a sunken stone road with a live energy conduit ---
+      // --- the lane: cached road bed, live conduit pulses ---
+      ctx.drawImage(laneCacheFor(), 0, 0);
+      const pathStrokeLive = () => {
+        ctx.beginPath();
+        ctx.moveTo(WPX[0].x, WPX[0].y);
+        for (let i = 1; i < WPX.length; i++) ctx.lineTo(WPX[i].x, WPX[i].y);
+        ctx.stroke();
+      };
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      // trench shadow
-      ctx.strokeStyle = "rgba(0,0,0,0.6)";
-      ctx.lineWidth = C * 0.92;
-      pathStroke();
-      // road bed
-      ctx.strokeStyle = "#1d1646";
-      ctx.lineWidth = C * 0.82;
-      pathStroke();
-      ctx.strokeStyle = "#2a2064";
-      ctx.lineWidth = C * 0.68;
-      pathStroke();
-      // kerb lines down both edges of the road
-      ctx.save();
-      ctx.globalAlpha = 0.5;
-      ctx.strokeStyle = "#4a3aa0";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([]);
-      pathStroke();
-      ctx.restore();
-      // paving ticks across the road
-      ctx.save();
-      ctx.globalAlpha = 0.22;
-      ctx.strokeStyle = "#0a0722";
-      ctx.lineWidth = C * 0.68;
-      ctx.setLineDash([3, 30]);
-      pathStroke();
-      ctx.restore();
       // the conduit: a glowing channel running the length of the lane
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.strokeStyle = "rgba(120,90,255,0.22)";
       ctx.lineWidth = 12;
       ctx.setLineDash([]);
-      pathStroke();
+      pathStrokeLive();
       ctx.strokeStyle = "rgba(53,224,255,0.3)";
       ctx.lineWidth = 3.5;
-      pathStroke();
+      pathStrokeLive();
       // energy pulses flowing from spawn toward the exit
       ctx.strokeStyle = "rgba(180,230,255,0.9)";
       ctx.lineWidth = 5;
       ctx.setLineDash([22, 150]);
       ctx.lineDashOffset = -((now / 4) % 172);
-      pathStroke();
+      pathStrokeLive();
       ctx.lineWidth = 2;
       ctx.strokeStyle = "rgba(255,255,255,0.85)";
       ctx.setLineDash([10, 162]);
       ctx.lineDashOffset = -((now / 4) % 172);
-      pathStroke();
+      pathStrokeLive();
       ctx.restore();
       ctx.setLineDash([]);
 
@@ -7886,7 +8146,7 @@ export default function Battle({
       const padW = COLS * C + C * 1.1;
       const padH = ROWS * C + C * 1.1;
       const T = now / 1000;
-      if (!saveRef.current.powerSaver) {
+      if (!saveRef.current.powerSaver && fxQ() >= 0.7) {
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       for (let i = 0; i < 26; i++) {
@@ -9111,7 +9371,7 @@ export default function Battle({
       const n = f.chips?.[k] || 0;
       if (n > 0) rows.push({ icon: <ChipIcon id={k} size={16} />, label: k + " chip modules", val: "x" + n, color: "#8fe9ff" });
     });
-    if (mode !== "battle" && f.rounds)
+    if (!isRunMode(mode) && f.rounds)
       rows.push({
         icon: <span className="text-[14px]">~</span>,
         label: "Waves survived",
@@ -9123,6 +9383,13 @@ export default function Battle({
       if (f.gauntlet.record)
         rows.push({ icon: <span className="text-[14px]">★</span>, label: "New gauntlet record", val: "BEST", color: "#ffd23f" });
     }
+    if (mode === "hardcore")
+      rows.push({
+        icon: <span className="text-[14px]">✖</span>,
+        label: "Hardcore best",
+        val: `${Math.max(save.hardcoreBest, f.rounds)}/${BATTLE_ROUNDS}`,
+        color: "#ff315c",
+      });
     if (mode === "battle")
       rows.push({
         icon: <TrophyIcon size={16} />,
@@ -9149,6 +9416,7 @@ export default function Battle({
       s.runs++;
       if (mode === "endless") s.bestEndless = Math.max(s.bestEndless, f.rounds);
       else if (mode === "gauntlet") s.gauntletBest = Math.max(s.gauntletBest, f.rounds);
+      else if (mode === "hardcore") s.hardcoreBest = Math.max(s.hardcoreBest, f.rounds);
       else if (mode !== "gemrush") s.best = Math.max(s.best, f.rounds);
       if (f.won) s.wins++;
       if (f.chips) addChips(s, f.chips);
@@ -9164,7 +9432,7 @@ export default function Battle({
       bumpTask(s, "waves", f.rounds);
       bumpTask(s, "kills", g.kills);
       bumpTask(s, "skill", g.skillCasts);
-      if (mode === "battle" && f.won) bumpTask(s, "win", 1);
+      if (isRunMode(mode) && f.won) bumpTask(s, "win", 1);
     });
     sfx.coin();
     onExit();
@@ -9182,7 +9450,7 @@ export default function Battle({
   return (
     <div className="app-bg relative flex h-full flex-col">
       <Toasts toasts={toasts} />
-      {g?.roulette && !g.final && !g.cut && (() => {
+      {g?.roulette && !g.final && !g.cut && !g.enemies.some((e) => !e.dead && isBossType(e.type)) && (() => {
         const elapsed = Math.max(0, g.roulette.total - g.roulette.t);
         const progress = Math.min(1, elapsed / Math.max(0.01, g.roulette.total));
         const settled = g.roulette.t <= 0.55;
@@ -9192,13 +9460,23 @@ export default function Battle({
           ? g.roulette.type
           : BOSS_TYPES[(g.roulette.type + reelStep + 1) % BOSS_TYPES.length] ?? g.roulette.type;
         const displayType = settled ? g.roulette.type : rollingType;
+        // COMPACT ROULETTE: one thin strip pinned under the HUD. The reel, a
+        // small portrait, the name and a hairline progress bar share a single
+        // row, so it never covers the arena the way the old card did.
         return <div className="boss-roulette-overlay" data-testid="boss-roulette" role="status" aria-live="polite">
-          <div className={`boss-roulette-card ${settled ? "is-locked" : "is-spinning"}`}>
-            <div className="boss-roulette-kicker">NEXT BOSS · RIFT ENCOUNTER DRAW</div>
-            <div className="boss-roulette-spinner"><div className="boss-roulette-wheel" style={{ animation: `bossRouletteSpin ${g.roulette.total}s cubic-bezier(.08,.68,.22,1) both` }} /><span>✦</span></div>
+          <div className={`boss-roulette-card ${settled ? "is-locked" : "is-spinning"}`} style={{ borderColor: settled ? undefined : `${ENEMY_TYPES[displayType].color}88` }}>
+            <div className="boss-roulette-spinner">
+              <div className="boss-roulette-wheel" style={{ animation: `bossRouletteSpin ${g.roulette.total}s cubic-bezier(.08,.68,.22,1) both` }} />
+              <span>✦</span>
+            </div>
             <div className="boss-roulette-focus" style={{ color: ENEMY_TYPES[displayType].color }}><BossPortrait type={displayType} /></div>
-            <div className="boss-roulette-result" style={{ color: ENEMY_TYPES[displayType].color }}>{settled ? ENEMY_TYPES[g.roulette.type].name.toUpperCase() : "SCANNING BOSS ARCHETYPES…"}</div>
-            <div className="boss-roulette-caption">{settled ? "TARGET LOCKED · NO REPEAT DRAW" : "RANDOMIZED DECK · SPINNING"}</div>
+            <div className="boss-roulette-copy">
+              <div className="boss-roulette-kicker">NEXT BOSS{settled ? "" : " · DRAWING"}</div>
+              <div className="boss-roulette-result" style={{ color: ENEMY_TYPES[displayType].color }}>
+                {settled ? ENEMY_TYPES[g.roulette.type].name.toUpperCase() : "SCANNING…"}
+              </div>
+            </div>
+            <div className="boss-roulette-caption">{settled ? "LOCKED" : `${Math.round(progress * 100)}%`}</div>
             <div className="boss-roulette-track"><span style={{ width: `${progress * 100}%` }} /></div>
           </div>
         </div>;
@@ -9243,6 +9521,12 @@ export default function Battle({
                 <em>left</em>
               </span>
               {mode === "gemrush" && <span className="hud-pill" style={{ color: "#35e0ff" }} data-testid="gem-rush-earned"><GemIcon size={14} /><b className="num">{g.gemRushGems.toLocaleString()}</b><em>earned</em></span>}
+              {mode === "hardcore" && (
+                <span className="hud-pill hud-hardcore" data-testid="hardcore-plays" title={`Hardcore · ${HARDCORE_DAILY_PLAYS} attempts per day · best round ${save.hardcoreBest}`}>
+                  <b className="num">{hardcorePlaysLeft(save)}</b>
+                  <em>/ {HARDCORE_DAILY_PLAYS} left</em>
+                </span>
+              )}
               <span className="hud-pill hud-dim" style={{ color: "#8effc4" }} data-testid="towers-on-board" title="Towers deployed">
                 <b className="num">{g.towers.filter((t) => t.cell).length}</b>
                 <em>towers</em>
@@ -9259,13 +9543,30 @@ export default function Battle({
               <span
                 className="hud-pill"
                 data-testid={mode === "gemrush" ? "gem-rush-timer" : undefined}
-                style={{ color: mode === "gauntlet" ? "#3dff8e" : mode === "endless" ? "#ff9be9" : mode === "gemrush" ? "#35e0ff" : "#ffcf4d" }}
-                title={mode === "gauntlet" ? `Gauntlet · best wave ${save.gauntletBest}` : undefined}
+                style={{
+                  color:
+                    mode === "gauntlet"
+                      ? "#3dff8e"
+                      : mode === "endless"
+                        ? "#ff9be9"
+                        : mode === "gemrush"
+                          ? "#35e0ff"
+                          : mode === "hardcore"
+                            ? "#ff315c"
+                            : "#ffcf4d",
+                }}
+                title={
+                  mode === "gauntlet"
+                    ? `Gauntlet · best wave ${save.gauntletBest}`
+                    : mode === "hardcore"
+                      ? `Hardcore · best round ${save.hardcoreBest}`
+                      : undefined
+                }
               >
                 <b className="num">
-                  {mode === "battle" ? Math.min(g.round, maxRounds) + "/" + maxRounds : mode === "gemrush" ? `${String(Math.floor(gemRushClock / 60)).padStart(2, "0")}:${String(gemRushClock % 60).padStart(2, "0")}` : "W" + g.round}
+                  {isRunMode(mode) ? Math.min(g.round, maxRounds) + "/" + maxRounds : mode === "gemrush" ? `${String(Math.floor(gemRushClock / 60)).padStart(2, "0")}:${String(gemRushClock % 60).padStart(2, "0")}` : "W" + g.round}
                 </b>
-                <em>{mode === "battle" ? "round" : mode === "gauntlet" ? "gauntlet" : mode === "gemrush" ? "remaining" : "endless"}</em>
+                <em>{isRunMode(mode) ? (mode === "hardcore" ? "hardcore" : "round") : mode === "gauntlet" ? "gauntlet" : mode === "gemrush" ? "remaining" : "endless"}</em>
               </span>
               {mode === "gauntlet" && (
                 <span className="hud-pill hud-dim" style={{ color: "#3dff8e" }} data-testid="gauntlet-boons" title="Boons taken this run">
@@ -9333,7 +9634,7 @@ export default function Battle({
       {g && !g.final && (
         <div className="wave-strip" data-testid="wave-strip">
           <span className="wave-strip-label">
-            {mode === "battle" ? "ROUND" : "WAVE"} <b className="num">{g.round}</b>
+            {isRunMode(mode) ? "ROUND" : "WAVE"} <b className="num">{g.round}</b>
             {g.phase === "boon" ? (
               <> · <span style={{ color: "#3dff8e" }}>BOON READY</span></>
             ) : g.phase === "wave" ? (
@@ -9355,7 +9656,8 @@ export default function Battle({
               }}
             />
           </span>
-          <span className="wave-strip-hp">HP ×{mode === "gemrush" ? GEM_RUSH_HP_MUL : Math.pow(HP_GROWTH, Math.max(0, g.round - 1)).toFixed(1)}</span>
+          <span className="wave-strip-hp">HP ×{mode === "gemrush" ? GEM_RUSH_HP_MUL : mode === "hardcore" ? (Math.pow(HP_GROWTH, Math.max(0, g.round - 1)) * HARDCORE_HP_MUL).toFixed(1) : Math.pow(HP_GROWTH, Math.max(0, g.round - 1)).toFixed(1)}</span>
+          {mode === "hardcore" && <span className="wave-strip-hp hud-hardcore" data-testid="hardcore-rules">5× HP · 2× SPAWNS · NO CRITS · 100× REWARDS</span>}
           {mode === "gemrush" && <span className="wave-strip-hp" data-testid="gem-rush-rules">50 GEMS/KILL · ELITE ×5 · BOSS ×10 · 1.5× SPEED</span>}
           {g.round % 4 === 0 && <span className="wave-strip-boss">BOSS</span>}
           {save.powerSaver && <span className="wave-strip-saver" title="Power Saving Mode is on">SAVER</span>}
@@ -9402,7 +9704,7 @@ export default function Battle({
             <div className="font-disp text-4xl text-[#ffcf4d]" style={{ textShadow: "0 0 26px rgba(255,179,36,.7)" }}>
               {g.phase === "deploy"
                 ? "DEPLOY TOWERS"
-                : `${mode === "battle" ? "ROUND" : "WAVE"} ${g.round} CLEARED`}
+                : `${isRunMode(mode) ? "ROUND" : "WAVE"} ${g.round} CLEARED`}
             </div>
             <div className="mt-1 text-base font-bold tracking-[0.25em] text-[var(--txt)]">
               {g.phase === "deploy" ? "PRESS SUMMON — TOWERS DROP STRAIGHT ONTO THE GRID" : `NEXT WAVE IN ${Math.ceil(g.phaseT)}`}
@@ -9533,7 +9835,7 @@ export default function Battle({
         {g && g.phase === "wave" && (
           <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 text-center">
             <div className="font-disp text-xl text-[#ff4fd8]" style={{ textShadow: "0 0 18px rgba(255,79,216,.6)" }}>
-              {mode === "battle" ? "ROUND" : "WAVE"} {g.round}
+              {isRunMode(mode) ? "ROUND" : "WAVE"} {g.round}
             </div>
             <div className="text-[11px] font-bold tracking-[0.2em] text-[#ff9be9]/80">
               ENEMY HP ×{Math.pow(HP_GROWTH, g.round - 1).toFixed(1)} · +{Math.round((HP_GROWTH - 1) * 100)}% PER WAVE
@@ -9724,8 +10026,8 @@ export default function Battle({
           <div className="panel anim-pop w-[380px] max-w-full p-5 text-center" style={{ borderColor: "#35e0ff88" }}>
             <div className="font-disp text-3xl text-[#35e0ff]">PAUSED</div>
             <div className="mt-1 text-[12px] font-semibold text-[var(--dim)]">
-              {mode === "gauntlet" ? "GAUNTLET" : mode === "endless" ? "ENDLESS" : "BATTLE"} ·{" "}
-              {mode === "battle" ? "ROUND" : "WAVE"} {g.round} ·{" "}
+              {mode === "gauntlet" ? "GAUNTLET" : mode === "endless" ? "ENDLESS" : mode === "hardcore" ? "HARDCORE" : "BATTLE"} ·{" "}
+              {isRunMode(mode) ? "ROUND" : "WAVE"} {g.round} ·{" "}
               <span className="num">{g.kills}</span> kills · <span className="num">{g.lives}</span> lives
             </div>
             <div className="mt-4 flex flex-col gap-2">
@@ -9991,17 +10293,17 @@ export default function Battle({
       {g?.final && (
         <div className="gameover" data-testid="game-over">
           <div className="gameover-bg" />
-          <div className={"gameover-card " + (g.final.won ? "won" : "lost") + (mode !== "battle" ? " endless" : "")}>
+          <div className={"gameover-card " + (g.final.won ? "won" : "lost") + (!isRunMode(mode) ? " endless" : "")}>
             <div className="gameover-rays" />
             <div className="gameover-head">
               <div className="gameover-eyebrow">
-                {mode === "gemrush" ? "SUNDAY GEM RUSH" : mode === "gauntlet" ? "GAUNTLET RUN" : mode === "endless" ? "ENDLESS RUN" : g.final.won ? "THE RIFT CLOSED" : "THE LINE BROKE"}
+                {mode === "gemrush" ? "SUNDAY GEM RUSH" : mode === "gauntlet" ? "GAUNTLET RUN" : mode === "endless" ? "ENDLESS RUN" : mode === "hardcore" ? "HARDCORE RUN" : g.final.won ? "THE RIFT CLOSED" : "THE LINE BROKE"}
               </div>
               <div className="gameover-title">
-                {mode === "gemrush" ? "GEM RUSH OVER" : mode === "gauntlet" ? "RUN OVER" : mode === "endless" ? "RUN OVER" : g.final.won ? "VICTORY" : "DEFEAT"}
+                {mode === "gemrush" ? "GEM RUSH OVER" : mode === "gauntlet" ? "RUN OVER" : mode === "endless" ? "RUN OVER" : mode === "hardcore" ? (g.final.won ? "HARDCORE CLEARED" : "HARDCORE OVER") : g.final.won ? "VICTORY" : "DEFEAT"}
               </div>
               <div className="gameover-sub">
-                {mode === "gemrush" ? `SURVIVED ${String(Math.floor((GEM_RUSH_SECONDS - g.gemRushRemaining) / 60)).padStart(2, "0")}:${String(Math.floor((GEM_RUSH_SECONDS - g.gemRushRemaining) % 60)).padStart(2, "0")}` : mode !== "battle" ? "REACHED WAVE " + g.final.rounds : g.final.won ? "THE LINE HELD" : "FELL ON ROUND " + g.round} ·{" "}
+                {mode === "gemrush" ? `SURVIVED ${String(Math.floor((GEM_RUSH_SECONDS - g.gemRushRemaining) / 60)).padStart(2, "0")}:${String(Math.floor((GEM_RUSH_SECONDS - g.gemRushRemaining) % 60)).padStart(2, "0")}` : !isRunMode(mode) ? "REACHED WAVE " + g.final.rounds : g.final.won ? "THE LINE HELD" : "FELL ON ROUND " + g.round} ·{" "}
                 <span className="num">{g.kills.toLocaleString("en-US")}</span> KILLS ·{" "}
                 <span className="num">{g.crits.toLocaleString("en-US")}</span> CRITS
               </div>
