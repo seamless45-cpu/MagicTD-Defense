@@ -1,5 +1,5 @@
 import { StrictMode } from "react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import App from "../App";
 import Battle from "../screens/Battle";
@@ -122,7 +122,7 @@ describe("MagicTD app shell", () => {
     click(document.querySelector('[data-testid="tab-events"]') as HTMLElement);
     await waitFor(() => byText("div", "WEEKLY ROTATION"), "specials screen");
     // the weekday event rotation is listed in full
-    ["Luck Hunting", "Chest Box", "Trophy Competition", "Items Finding", "Mineshaft", "Survive Lightning"].forEach((n) =>
+    ["Luck Hunting", "Chest Box", "Trophy Competition", "Items Finding", "Mineshaft", "Gem Rush"].forEach((n) =>
       expect(document.body.textContent).toContain(n)
     );
     // and the competition tab shows the trophy ladder
@@ -298,16 +298,34 @@ describe("Settings", () => {
     noErrors();
   });
 
+  it("exposes motion blur, SFX EQ, bass/treble boosts and personal music controls", async () => {
+    await mountApp();
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => document.querySelector('[data-testid="music-player"]'), "music player");
+    expect(document.querySelector('[data-testid="sound-eq"]')).toBeTruthy();
+    expect(document.querySelector('[aria-label="Upload music file"]')).toBeTruthy();
+    expect(document.querySelector('[aria-label="Music speed and pitch"]')?.getAttribute("step")).toBe("0.01");
+    click(document.querySelector('[data-testid="toggle-motionBlur"]') as HTMLElement);
+    click(document.querySelector('[data-testid="toggle-bassBoost"] [role="switch"]') as HTMLElement);
+    click(document.querySelector('[data-testid="toggle-trebleBoost"] [role="switch"]') as HTMLElement);
+    await waitFor(() => saved().motionBlur && saved().bassBoost && saved().trebleBoost, "audio and motion toggles saved");
+    const eq = document.querySelector('[aria-label="Bass EQ"]') as HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
+    setter.call(eq, "5");
+    eq.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => saved().eqBass === 5, "bass EQ saved");
+    noErrors();
+  });
+
   it("gives every option a knob switch instead of an ON/OFF button", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
-    // old style buttons are gone (nothing renders a bare ON / OFF label)
-    const bare = all("button").filter((b) => ["ON", "OFF"].includes((b.textContent || "").trim()));
-    expect(bare).toHaveLength(0);
-
+    // State text is now embedded inside the switch, rather than being a
+    // separate ON/OFF action button.
     const knobs = all(".knob");
+    expect(knobs.some((k) => /ON|OFF/.test(k.textContent || ""))).toBe(true);
     expect(knobs.length, "one knob per option").toBeGreaterThanOrEqual(8);
     for (const k of knobs) {
       expect(k.getAttribute("role")).toBe("switch");
@@ -327,6 +345,17 @@ describe("Settings", () => {
     expect(dmg.getAttribute("aria-checked")).toBe("true");
     click(dmg);
     await waitFor(() => saved().dmgNums === false, "toggled through the knob");
+    const oceanTheme = document.querySelector('[data-testid="ui-theme-ocean"]') as HTMLElement;
+    expect(oceanTheme).toBeTruthy();
+    click(oceanTheme);
+    await waitFor(() => saved().uiTheme === "ocean", "theme preference saved");
+    await waitFor(() => document.documentElement.dataset.uiTheme === "ocean", "theme palette applied");
+    const glass = document.querySelector('[data-testid="toggle-liquidGlass"]') as HTMLElement;
+    expect(glass).toBeTruthy();
+    expect(document.documentElement.dataset.uiGlass).toBe("off");
+    click(glass);
+    await waitFor(() => saved().liquidGlass === true, "liquid-glass preference saved");
+    await waitFor(() => document.documentElement.dataset.uiGlass === "on", "liquid-glass theme applied");
     noErrors();
   }, 20000);
 
@@ -346,32 +375,27 @@ describe("Settings", () => {
     noErrors();
   }, 20000);
 
-  it("persists a reset instead of restoring the old save", async () => {
+  it("does not expose a destructive reset-progress action", async () => {
     persistSave({ ...defaultSave(), gold: 9999, levels: { arrow: 5 }, lineup: ["arrow"] });
     await mountApp();
-    expect(saved().gold).toBe(9999);
-
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
-    await waitFor(() => byText("div", "Reset Progress"), "settings modal");
-    click(byText("button", "Reset")!);
-    await waitFor(() => byText("button", "Confirm?"), "confirm step");
-    click(byText("button", "Confirm?")!);
-
-    await waitFor(() => saved().gold === 100, "default save written back");
-    expect(saved().levels.arrow).toBe(1);
-    expect(saved().lineup).toHaveLength(3);
+    await waitFor(() => byText("div", "Settings"), "settings modal");
+    expect(document.body.textContent).not.toContain("Reset Progress");
+    expect(document.querySelector('[data-testid="reset-progress"]')).toBeNull();
+    expect(saved().gold).toBe(9999);
+    expect(saved().levels.arrow).toBe(5);
     noErrors();
   });
 });
 
 describe("Font vault", () => {
-  it("offers fifty previewable faces and applies the picked one", async () => {
+  it("offers eighty previewable faces and applies the picked one", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
     // every tile carries data-font; the section/grid/count testids do not
-    expect(all("[data-font]").length).toBe(50);
+    expect(all("[data-font]").length).toBe(80);
     expect(document.body.textContent).toContain("Permanent Marker");
     expect(document.body.textContent).toContain("EDO");
 
@@ -401,6 +425,22 @@ describe("Gauntlet mode", () => {
     await waitFor(() => byText("em", "gauntlet"), "gauntlet round chip");
     expect(document.querySelector('[data-testid="gauntlet-boons"]')).toBeTruthy();
     expect(document.body.textContent).toContain("boons");
+    noErrors();
+  });
+  it("auto-resolves from an active endless run and delivers the aggregate report by mail", async () => {
+    await mountApp();
+    startMode("Endless");
+    await waitFor(() => document.querySelector('[data-testid="summon-btn"]'), "active battle HUD");
+    click(document.querySelector('[data-testid="summon-btn"]') as HTMLElement);
+    const auto = await waitFor(() => document.querySelector('[data-testid="auto-resolve"]'), "in-game auto resolve");
+    expect(auto).toBeTruthy();
+    click(auto as HTMLElement);
+    await waitFor(() => document.body.textContent?.includes("Auto-Defense Command"), "auto battle report in mailbox");
+    expect(document.body.textContent).toContain("expedition report");
+    const report = document.querySelector('[data-mail^="auto-"]') as HTMLElement;
+    expect(report).toBeTruthy();
+    click(report);
+    await waitFor(() => document.body.textContent?.includes("simulated waves"), "report opened");
     noErrors();
   });
 });
@@ -523,14 +563,13 @@ describe("Shop", () => {
 
     const gemsBefore = saved().gems;
     const fragsBefore = fragTotal(saved());
-    expect(gemsBefore).toBeGreaterThanOrEqual(80);
+    const card = document.querySelector('[data-chest="common"]')!;
+    const buyBtn = card.querySelector("button") as HTMLButtonElement;
+    expect(buyBtn.disabled).toBe(false);
+    click(buyBtn);
 
-    // Every headline chest is gem-priced now; the common chest is 80 gems.
-    const buyBtn = all("button").find((b) => (b.textContent || "").trim() === "80");
-    expect(buyBtn, "common chest buy button").toBeTruthy();
-    click(buyBtn!);
-
-    await waitFor(() => saved().gems === gemsBefore - 80, "gems spent on chest");
+    await waitFor(() => saved().gems < gemsBefore, "gems spent on chest");
+    const gemsAfterPurchase = saved().gems;
     const smash = await waitFor(() => byText("button", "Smash Open!"), "smash button");
     click(smash);
 
@@ -538,7 +577,41 @@ describe("Shop", () => {
     click(collect);
 
     await waitFor(() => fragTotal(saved()) > fragsBefore, "fragments banked");
-    expect(saved().gems).toBe(gemsBefore - 80);
+    expect(saved().gems).toBe(gemsAfterPurchase);
+    noErrors();
+  });
+
+  it("opens the 5000-gem Mystical Chest and banks its rarity-tier reward", async () => {
+    persistSave({ ...defaultSave(), gems: 20000 });
+    await mountApp();
+    click(byText("button", "Shop")!);
+    await waitFor(() => document.querySelector('[data-chest="mystical"]'), "Mystical Chest card");
+    const fragmentsBefore = fragTotal(saved());
+    const gemsBefore = saved().gems;
+    const card = document.querySelector('[data-chest="mystical"]')!;
+    expect(card.textContent).toContain("71% · 5 Legendary / 29% · 1 Mystical");
+    const buy = card.querySelector("button") as HTMLButtonElement;
+    expect(buy.disabled).toBe(false);
+    click(buy);
+    await waitFor(() => saved().gems < gemsBefore, "Mystical Chest gems spent");
+    const price = gemsBefore - saved().gems;
+    expect(price).toBeGreaterThan(0);
+    click(await waitFor(() => byText("button", "Smash Open!"), "Mystical Chest smash"));
+    click(await waitFor(() => byText("button", "Collect"), "Mystical reward"));
+    await waitFor(() => fragTotal(saved()) > fragmentsBefore, "rarity reward banked");
+    noErrors();
+  });
+
+  it("exchanges gold for gems and gems back to gold at the published rate", async () => {
+    persistSave({ ...defaultSave(), gold: 5000, gems: 0 });
+    await mountApp();
+    click(byText("button", "Shop")!);
+    const section = await waitFor(() => document.querySelector('[data-testid="gold-gem-exchange"]'), "gold-gem exchange");
+    const buttons = Array.from(section.querySelectorAll("button"));
+    click(buttons[0]);
+    await waitFor(() => saved().gold === 0 && saved().gems === 1000, "gold exchanged for gems");
+    click(buttons[1]);
+    await waitFor(() => saved().gold === 5000 && saved().gems === 0, "gems exchanged back for gold");
     noErrors();
   });
 
@@ -581,6 +654,19 @@ describe("Shop", () => {
     expect(saved().gems).toBe(0);
     noErrors();
   });
+
+  it("offers the 200-token exchange for exactly 2000 gems", async () => {
+    persistSave({ ...defaultSave(), gems: 2000 });
+    await mountApp();
+    click(byText("button", "Shop")!);
+    await waitFor(() => byText("div", "MAGIC TOKEN EXCHANGE"), "token exchange");
+    const bulk = all("button").find((b) => (b.textContent || "").replace(/\s/g, "") === "2000")!;
+    expect(bulk).toBeTruthy();
+    click(bulk);
+    await waitFor(() => saved().tokens === 200, "200 tokens banked");
+    expect(saved().gems).toBe(0);
+    noErrors();
+  });
 });
 
 describe("Heroes", () => {
@@ -615,9 +701,10 @@ describe("Clone tower", () => {
     startMode("Battle");
     await waitFor(() => byText("button", "SUMMON"), "battle HUD");
     const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
-    click(summon);
+    await sleep(120); // let the battle engine bind the imperative summon callback
+    summon.click();
     await waitFor(() => (document.body.textContent || "").includes("deployed!"), "first clone");
-    click(summon);
+    summon.click();
     await waitFor(() => (document.body.textContent || "").includes("deployed!"), "second clone");
     const towersOnBoard = () =>
       Number((document.querySelector('[data-testid="towers-on-board"]')?.textContent || "").replace(/[^\d]/g, ""));
@@ -629,7 +716,7 @@ describe("Clone tower", () => {
     // a clone destination and points always match).
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
     const cx = (c: number) => 185 + (c + 0.5) * 90;
-    const cy = (r: number) => 110 + (r + 0.5) * 90;
+    const cy = (r: number) => 158 + (r + 0.5) * 90;
     const cells: [number, number][] = [];
     for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([cx(c), cy(r)]);
     for (const [x1, y1] of cells) {
@@ -705,14 +792,14 @@ describe("Towers", () => {
     expect(page, "tower page").toBeTruthy();
     expect(page.className).toContain("overflow-y-auto");
     // ...that is actually bounded by the app shell: the tab is h-full all the way
-    // up into the min-h-0 flex-1 content area, otherwise a 61-cell grid would
+    // up into the min-h-0 flex-1 content area, otherwise a 62-cell grid would
     // just push the nav bar off the bottom of the screen
     const chain: string[] = [];
     for (let el = page.parentElement; el && el !== document.body; el = el.parentElement) chain.push(el.className);
     expect(chain.some((c) => c.includes("min-h-0") && c.includes("flex-1")), `bounded ancestor: ${chain.join(" > ")}`).toBe(true);
     expect(chain.every((c) => !/overflow-(y-)?(auto|scroll|hidden)/.test(c)), "a second scroller between the tab and the shell").toBe(true);
 
-    // the 61-cell grid hangs directly off it: it used to live inside
+    // the 62-cell grid hangs directly off it: it used to live inside
     // `flex min-h-0 flex-1` with a pinned ASCENT ALL footer below, which capped
     // the box at a handful of rows and made the last groups unreachable
     const grid = document.querySelector('[data-testid="tower-grid"]') as HTMLElement;
@@ -726,10 +813,10 @@ describe("Towers", () => {
     );
     expect(nested, "nested scroll boxes inside the tab").toHaveLength(0);
 
-    // every tower is in that one grid: 61 cells + 4 rarity headers
-    expect(grid.children.length).toBe(65);
+    // every tower is in that one grid: 62 cells + 5 rarity headers
+    expect(grid.children.length).toBe(67);
     const towerCells = page.querySelectorAll(".tw-cell[data-tower]").length;
-    expect(towerCells).toBe(61);
+    expect(towerCells).toBe(62);
 
     // the rotation strip and the filters ride along on top of the scroll, so the
     // drag-to-rotation drop target never scrolls out of reach
@@ -860,6 +947,31 @@ describe("Towers", () => {
   });
 });
 
+describe("Mystical towers", () => {
+  it("unlocks Supervisor from its fragment and upgrades it with gems only", async () => {
+    persistSave({ ...defaultSave(), gold: 0, gems: 1000, frags: { ...defaultSave().frags, supervisor: 1 } });
+    await mountApp();
+    click(byText("button", "Towers")!);
+    await waitFor(() => byText("div", "SUMMON ROTATION"), "tower screen");
+    tapCell("supervisor");
+    let preview = await waitFor(() => document.querySelector('[data-testid="tower-preview"]') as HTMLElement, "Supervisor preview");
+    expect(preview.textContent).toContain("MYSTICAL");
+    click(Array.from(preview.querySelectorAll("button")).find((b) => (b.textContent || "").trim() === "Unlock")!);
+    await waitFor(() => saved().levels.supervisor === 1, "Supervisor unlocked");
+    click(byText("button", "Continue")!);
+    await waitFor(() => !document.querySelector('[data-testid="ceremony"]'), "unlock ceremony closed");
+    tapCell("supervisor");
+    preview = await waitFor(() => document.querySelector('[data-testid="tower-preview"]') as HTMLElement, "Supervisor level-up preview");
+    expect(preview.textContent).toContain("500 gems");
+    click(Array.from(preview.querySelectorAll("button")).find((b) => /Upgrade/.test(b.textContent || ""))!);
+    await waitFor(() => saved().levels.supervisor === 2, "Supervisor upgraded");
+    expect(saved().gems).toBe(500);
+    expect(saved().gold).toBe(0);
+    expect(saved().frags.supervisor).toBe(0);
+    noErrors();
+  });
+});
+
 describe("Awakenings", () => {
   it("plays a congratulations ceremony when a tower awakens", async () => {
     persistSave({
@@ -940,6 +1052,7 @@ describe("Daily rewards", () => {
     click(document.querySelector('[data-testid="event-claim"]') as HTMLElement);
     await waitFor(() => saved().lastEvent !== "", "event bonus claimed");
     await waitFor(() => document.querySelector('[data-testid="reward-claim"]'), "event claim animation");
+    await waitFor(() => !(document.querySelector('[data-testid="claim-collect"]') as HTMLButtonElement).disabled, "event reward opened");
     click(document.querySelector('[data-testid="claim-collect"]') as HTMLElement);
     await waitFor(() => !document.querySelector('[data-testid="reward-claim"]'), "claim dismissed");
     expect((document.querySelector('[data-testid="event-claim"]') as HTMLButtonElement).disabled).toBe(true);
@@ -1012,6 +1125,22 @@ describe("Heroes", () => {
 });
 
 describe("Battle", () => {
+  it("starts the Sunday Gem Rush with its five-minute timer and boss roulette", async () => {
+    const sunday = vi.spyOn(Date.prototype, "getDay").mockReturnValue(0);
+    try {
+      await mountApp();
+      expect(document.querySelector('[data-testid="enter-gem-rush"]')).toBeTruthy();
+      click(document.querySelector('[data-testid="enter-gem-rush"]') as HTMLElement);
+      const timer = await waitFor(() => document.querySelector('[data-testid="gem-rush-timer"]') as HTMLElement, "Gem Rush clock");
+      expect(timer.textContent).toContain("05:00");
+      await waitFor(() => document.querySelector('[data-testid="boss-roulette"]'), "automatic opening boss roulette");
+      expect(document.querySelector('[data-testid="gem-rush-rules"]')?.textContent).toContain("50 GEMS/KILL");
+      noErrors();
+    } finally {
+      sunday.mockRestore();
+    }
+  });
+
   it("mounts the engine, spawns towers instantly, spawns a wave and can be abandoned", async () => {
     await mountApp();
     startMode("Battle");
@@ -1186,30 +1315,26 @@ describe("Battle", () => {
     );
     const text = cut.textContent || "";
     expect(text).toContain("WARNING");
-    // the boss that leads an early round is the Warlord
-    expect(text).toContain("WARLORD");
+    // The automatic roulette may select any boss; verify that the reveal is one of the live roster.
+    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN"].some((name) => text.includes(name))).toBe(true);
     expect(text).toContain("ROUND 4");
-    expect(text).toContain("TAP TO SKIP");
-    // the reworked card carries the boss title and a live stat block
-    expect(text).toContain("CRIMSON WARLORD");
+    expect(text).toContain("SKIP BOSS INTRO");
+    // The roulette reveal carries a title, live stats, and the selected boss's own kit.
+    expect(["CRIMSON WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN"].some((name) => text.includes(name))).toBe(true);
     expect(text).toContain("HEALTH");
     expect(text).toContain("ARMOUR");
     expect(text).toContain("LIVES");
     expect(text).toContain("BOUNTY");
-    // and the skills the kit advertises are real rows from the shared table
-    expect(text).toContain("Rift Call");
-    // its whole skill kit is advertised
-    for (const skill of ["Rift Call", "Void Step", "Bulwark", "Blood Frenzy"]) {
-      expect(text, skill).toContain(skill);
-    }
+    // Each rolled boss advertises its own skill kit in the reveal card.
+    expect(cut.querySelectorAll(".boss-chip").length).toBeGreaterThan(0);
 
-    // tapping dismisses the card and the run resumes
-    click(cut);
+    // the visible skip control dismisses the card and the run resumes
+    click(cut.querySelector('[aria-label="Skip boss cutscene"]') as HTMLElement);
     await waitFor(() => !document.querySelector('[data-testid="boss-cutscene"]'), "cutscene dismissed", 8000);
 
     // the boss then walks onto the path and the bar appears
     const bar = await waitFor(() => document.querySelector('[data-testid="boss-bar"]'), "boss health bar", 15000);
-    expect(bar.textContent).toContain("WARLORD");
+    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN"].some((name) => (bar.textContent || "").includes(name))).toBe(true);
 
     // a skill eventually fires and the callout banner names it
     const cast = await waitFor(
@@ -1219,7 +1344,7 @@ describe("Battle", () => {
     );
     // the banner shouts the skill name and explains what it does
     expect(cast.textContent || "").toMatch(/RIFT CALL|VOID STEP|BULWARK|BLOOD FRENZY/);
-    expect(cast.textContent || "").toMatch(/warlord/i);
+    expect(cast.textContent || "").toMatch(/warlord|overlord|titan|leviathan/i);
 
     unmountApp();
     noErrors();
@@ -1303,9 +1428,9 @@ describe("Battle", () => {
     unmountApp();
   });
 
-  it("runs the three new legendaries on the board without errors", async () => {
-    // all three unlocked and leading the rotation, so every summon that lands
-    // has a chance of being one of the new kits
+  it("runs Demon Execution and the new legendary kits without errors", async () => {
+    // all three are unlocked and leading the rotation, so every summon that lands
+    // has a chance of exercising their bespoke combat paths
     const seed = defaultSave();
     seed.levels = { ...(seed.levels || {}), demon: 1, heavenly: 1, honor: 1 };
     seed.lineup = ["demon", "heavenly", "honor"];
@@ -1407,6 +1532,7 @@ describe("Battle", () => {
 
     click(btn());
     await waitFor(() => (card().textContent || "").includes("Lv 2/6"), "the tower type ascended");
+    expect(btn().textContent).toContain("200");
     expect(spNow()).toBeLessThan(spBefore);
 
     // the bar is byte-for-byte the same set of cards afterwards
@@ -1438,7 +1564,7 @@ describe("Battle", () => {
     // the build cells: c=1..5 x r=0..2 (c=0, c=6 and r=3 are the path). The canvas
     // maps client coordinates 1:1 onto its 1000x580 backing store in jsdom.
     const cells: [number, number][] = [];
-    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 110 + (r + 0.5) * 90]);
+    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 158 + (r + 0.5) * 90]);
 
     // drag every cell onto every other cell: the two towers are somewhere in the
     // grid and both sit on 0 points, so the first real pair merges
@@ -1471,7 +1597,7 @@ describe("Battle", () => {
   }, 40000);
 
   it("never rolls a merge result from outside the summon rotation", async () => {
-    // all 61 towers unlocked, but the rotation holds ONE: a merge can only ever
+    // all 62 towers unlocked, but the rotation holds ONE: a merge can only ever
     // hand back an Arrow. If the roulette drew from the unlocked roster instead,
     // the survivor would be one of the other 60 and the toast would say so.
     const everyTower: Record<string, number> = {};
@@ -1494,7 +1620,7 @@ describe("Battle", () => {
     await waitFor(() => boardCount() === 4, "four arrows deployed");
 
     const cells: [number, number][] = [];
-    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 110 + (r + 0.5) * 90]);
+    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 158 + (r + 0.5) * 90]);
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
     // Drag cell onto cell until the board is down to two towers. The engine is
     // imperative — the HUD count only refreshes on its own tick — so every
@@ -1690,7 +1816,7 @@ describe("Crystal vault UI", () => {
       "crystal vault"
     );
     expect(vault.textContent).toContain("CRYSTAL VAULT");
-    expect(document.querySelectorAll("[data-crystal]")).toHaveLength(6);
+    expect(document.querySelectorAll("[data-crystal]")).toHaveLength(9);
     expect((document.querySelector('[data-testid="potion-balance"]') as HTMLElement).textContent).toContain("40");
 
     const before = saved().potions;

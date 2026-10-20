@@ -6,13 +6,14 @@ import { CHESTS, CHIPS, HERO_BY_ID, TOWERS, TOWER_BY_ID, RARITY, eventBonus, eve
 import { ChipIcon, CoinIcon, ClaimChest, GemIcon, Modal, RewardClaim, ShardIcon, TokenIcon, TowerIcon, type ClaimData } from "../components/ui";
 
 /** gold price of one fragment of each rarity */
-const FRAG_PRICE: Record<Rarity, number> = { normal: 120, decent: 320, epic: 750, legendary: 1400 };
+const FRAG_PRICE: Record<Rarity, number> = { normal: 120, decent: 320, epic: 750, legendary: 1400, mystical: 999999 };
 
 // gem prices scaled up hard (balance patch: magic token exchange +16x again)
 const TOKEN_PACKS = [
   { tokens: 1, gems: 32 },
   { tokens: 5, gems: 128 },
   { tokens: 12, gems: 272 },
+  { tokens: 200, gems: 2000 },
 ];
 
 export default function Shop({
@@ -78,6 +79,22 @@ export default function Shop({
       s.frags[picked.id] = (s.frags[picked.id] || 0) + fragQty;
     });
     push(`+${fragQty} ${picked.name} fragments`, RARITY[picked.rarity].color);
+  };
+
+  const GOLD_GEM_BATCH = 2000;
+  const GOLD_PER_GEM = 5;
+  const exchangeGoldForGems = () => {
+    const cost = GOLD_GEM_BATCH * GOLD_PER_GEM;
+    if (save.gold < cost) { sfx.error(); push(`Need ${cost.toLocaleString()} gold`, "#ff4d5e"); return; }
+    sfx.gem();
+    mutate((s) => { s.gold -= cost; s.gems += GOLD_GEM_BATCH; bumpTask(s, "spend", cost); });
+    push(`Exchanged ${cost.toLocaleString()} gold for ${GOLD_GEM_BATCH} gems`, "#35e0ff");
+  };
+  const exchangeGemsForGold = () => {
+    if (save.gems < GOLD_GEM_BATCH) { sfx.error(); push(`Need ${GOLD_GEM_BATCH} gems`, "#ff4d5e"); return; }
+    sfx.coin();
+    mutate((s) => { s.gems -= GOLD_GEM_BATCH; s.gold += GOLD_GEM_BATCH * GOLD_PER_GEM; });
+    push(`Exchanged ${GOLD_GEM_BATCH} gems for ${(GOLD_GEM_BATCH * GOLD_PER_GEM).toLocaleString()} gold`, "#ffcf4d");
   };
 
   const buyTokens = (tokens: number, gems: number) => {
@@ -161,9 +178,8 @@ export default function Shop({
                 </div>
                 <div className="mt-0.5 text-center text-[11px] font-bold text-[var(--dim)]">{c.blurb}</div>
                 <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[10.5px] font-bold text-[var(--dim)]">
-                  <span className="text-[#ffcf4d]">
-                    {c.gold[0]}–{c.gold[1]}g
-                  </span>
+                  {c.gold[1] > 0 && <span className="text-[#ffcf4d]">{c.gold[0]}–{c.gold[1]}g</span>}
+                  {c.special === "mystical" && <span className="text-[#ff315c]">71% · 5 Legendary / 29% · 1 Mystical</span>}
                   {c.frags[1] > 0 && (
                     <span>
                       · {c.frags[0]}–{c.frags[1]} frags
@@ -253,7 +269,7 @@ export default function Shop({
         </div>
         <div className="tile p-4">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-            {TOWERS.map((t) => {
+            {TOWERS.filter((t) => t.rarity !== "mystical").map((t) => {
               const on = t.id === fragPick;
               const rc = RARITY[t.rarity];
               return (
@@ -299,6 +315,21 @@ export default function Shop({
             >
               <span className="inline-flex items-center gap-1.5"><CoinIcon size={14} /> {fragCost}</span>
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* GOLD ↔ GEM EXCHANGE */}
+      <div data-testid="gold-gem-exchange">
+        <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">GOLD ↔ GEM EXCHANGE</div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="tile flex items-center justify-between gap-3 p-4">
+            <div><div className="font-disp text-base text-[#35e0ff]">1,000 Gems</div><div className="text-[11px] font-semibold text-[var(--dim)]">Trade 5,000 gold · 5 gold per gem</div></div>
+            <button className={`btn flex items-center gap-1.5 px-3 py-2 text-xs ${save.gold >= 5000 ? "btn-cyan" : ""}`} disabled={save.gold < 5000} onClick={exchangeGoldForGems}><CoinIcon size={14} /> 5,000 → 1,000 <GemIcon size={14} /></button>
+          </div>
+          <div className="tile flex items-center justify-between gap-3 p-4">
+            <div><div className="font-disp text-base text-[#ffcf4d]">5,000 Gold</div><div className="text-[11px] font-semibold text-[var(--dim)]">Trade 1,000 gems · 5 gold per gem</div></div>
+            <button className={`btn flex items-center gap-1.5 px-3 py-2 text-xs ${save.gems >= 1000 ? "btn-gold" : ""}`} disabled={save.gems < 1000} onClick={exchangeGemsForGold}><GemIcon size={14} /> 1,000 → 5,000 <CoinIcon size={14} /></button>
           </div>
         </div>
       </div>

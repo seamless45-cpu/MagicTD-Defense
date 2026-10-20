@@ -47,22 +47,21 @@ describe("reworked in-battle upgrades", () => {
 });
 
 describe("crystal vault", () => {
-  it("ships six crystals with small per-level buffs", () => {
-    expect(CRYSTALS).toHaveLength(6);
+  it("ships the six base crystals and three capped Super Crystals", () => {
+    expect(CRYSTALS).toHaveLength(9);
     expect(CRYSTALS.map((c) => c.id)).toEqual([
-      "ruby",
-      "sapphire",
-      "emerald",
-      "topaz",
-      "amethyst",
-      "diamond",
+      "ruby", "sapphire", "emerald", "topaz", "amethyst", "diamond",
+      "magicianKing", "superbolt", "superCrit",
     ]);
     for (const c of CRYSTALS) {
       expect(c.max).toBeGreaterThan(0);
       expect(c.perLevel).toBeGreaterThan(0);
-      expect(c.max).toBeLessThanOrEqual(CRYSTAL_MAX_LEVEL);
     }
+    expect(CRYSTALS.slice(0, 6).every((c) => c.max <= CRYSTAL_MAX_LEVEL)).toBe(true);
     expect(CRYSTALS.find((c) => c.id === "diamond")!.max).toBe(10);
+    expect(CRYSTALS.find((c) => c.id === "magicianKing")!.max).toBe(11);
+    expect(CRYSTALS.find((c) => c.id === "superbolt")!.max).toBe(10);
+    expect(CRYSTALS.find((c) => c.id === "superCrit")!.max).toBe(31);
   });
 
   it("prices every level in crystal potions and clamps at max", () => {
@@ -95,7 +94,7 @@ describe("crystal vault", () => {
     expect(b.aspd).toBeCloseTo(0.02);
     expect(b.lives).toBe(6);
     // an empty vault is neutral
-    expect(crystalBonus({})).toEqual({ atk: 0, crit: 0, sp: 0, gold: 0, aspd: 0, lives: 0 });
+    expect(crystalBonus({})).toEqual({ atk: 0, crit: 0, sp: 0, gold: 0, aspd: 0, lives: 0, magicianKing: 0, lightning: 0, critDamage: 0, superCritChance: 0 });
     expect(crystalBuffText(CRYSTALS[0], 0)).toContain("Not awakened");
     expect(crystalBuffText(CRYSTALS[0], 5)).toContain("%");
   });
