@@ -81,7 +81,7 @@ export default function Shop({
     push(`+${fragQty} ${picked.name} fragments`, RARITY[picked.rarity].color);
   };
 
-  const GOLD_GEM_BATCH = 2000;
+  const GOLD_GEM_BATCH = 1000;
   const GOLD_PER_GEM = 5;
   const exchangeGoldForGems = () => {
     const cost = GOLD_GEM_BATCH * GOLD_PER_GEM;
@@ -179,7 +179,7 @@ export default function Shop({
                 <div className="mt-0.5 text-center text-[11px] font-bold text-[var(--dim)]">{c.blurb}</div>
                 <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[10.5px] font-bold text-[var(--dim)]">
                   {c.gold[1] > 0 && <span className="text-[#ffcf4d]">{c.gold[0]}–{c.gold[1]}g</span>}
-                  {c.special === "mystical" && <span className="text-[#ff315c]">71% · 5 Legendary / 29% · 1 Mystical</span>}
+                  {c.special === "mystical" && <span className="text-[#ff315c]">65% · 5 Legendary / 35% · 1 Mystical</span>}
                   {c.frags[1] > 0 && (
                     <span>
                       · {c.frags[0]}–{c.frags[1]} frags

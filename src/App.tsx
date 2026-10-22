@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { deliverAutoBattleReport, loadSave, mailReady, persistSave, seasonReady, tasksReady, weekStr, type SaveData } from "./game/save";
+import { deliverAutoBattleReport, hardcorePlaysLeft, loadSave, mailReady, persistSave, seasonReady, spendHardcorePlay, tasksReady, weekStr, type SaveData } from "./game/save";
 import { estimateAutoBattle } from "./game/autobattle";
 import { applyFont } from "./game/fonts";
 import { sfx, setSfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost, initAudio } from "./game/audio";
@@ -36,7 +36,7 @@ const MODES = {
   gauntlet: { mode: "gauntlet" as const, title: "GAUNTLET", rounds: "roguelite" },
   gemrush: { mode: "gemrush" as const, title: "GEM RUSH", rounds: "5 minutes" },
   hardcore: { mode: "hardcore" as const, title: "HARDCORE", rounds: "12 rounds · 10× HP" },
-  superhardcore: { mode: "superhardcore" as const, title: "SUPER HARDCORE", rounds: "12 rounds · 1 life" },
+  superhardcore: { mode: "superhardcore" as const, title: "SUPER HARDCORE", rounds: "12 rounds · one life" },
 };
 
 const NAV: { id: Screen; label: string; icon: React.ReactNode }[] = [
@@ -139,7 +139,8 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>(() => (loadSave().reducedMotion ? "loading" : "intro"));
   const [save, setSave] = useState<SaveData>(() => loadSave());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { toasts, push } = useToasts();
+  // "Hide Notifications" mutes every toast in the app and in battle
+  const { toasts, push } = useToasts(!save.hideNotifs);
 
   useEffect(() => {
     setSfx(save.sfx);
@@ -299,8 +300,22 @@ export default function App() {
             onEndless={() => setScreen("endless")}
             onGauntlet={() => setScreen("gauntlet")}
             onGemRush={() => setScreen("gemrush")}
-            onHardcore={() => setScreen("hardcore")}
-            onSuperHardcore={() => setScreen("superhardcore")}
+            onHardcore={() => {
+              const left = hardcorePlaysLeft(save);
+              if (left <= 0) {
+                sfx.error();
+                push("HARDCORE LOCKED · 3 runs used today — resets at 07:00", "#ff315c");
+                return;
+              }
+              // the attempt is banked on entry, so leaving early still spends it
+              mutate((s) => {
+                spendHardcorePlay(s);
+              });
+              sfx.boss();
+              push(`HARDCORE · run started · ${left - 1} left today`, "#ff315c");
+              setScreen("hardcore");
+            }}
+            onSuperHardcore={() => { sfx.boss(); setScreen("superhardcore"); }}
           />
         )}
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}

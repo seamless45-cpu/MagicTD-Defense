@@ -17,6 +17,7 @@ import {
 } from "../game/save";
 import {
   todayStr,
+  hardcorePlaysLeft,
   defaultSave,
   importSave,
   persistSave,
@@ -46,6 +47,8 @@ import {
   questProgress,
   resetCountdown,
   upgradeHero,
+  awakenHero,
+  heroAwkTier,
   weekStr,
   buyGuildItem,
   claimCompetition,
@@ -77,6 +80,7 @@ import {
 import {
   TOWERS,
   BATTLE_ROUNDS,
+  HARDCORE_DAILY_PLAYS,
   CHIPS,
   COMPETITION_TIERS,
   DAILY_REWARDS,
@@ -103,6 +107,10 @@ import {
   guildLevel,
   heroCooldown,
   heroPower,
+  heroAwakenCost,
+  heroAwkSpec,
+  heroAwkText,
+  HERO_AWAKENING_MAX_TIER,
   heroUpgradeCost,
   leagueFor,
   nextLeague,
@@ -494,17 +502,20 @@ export function Home({
       sfx.error();
       return push(`${hero.name} is already max level`, "#ff4d5e");
     }
-    const ok = mutate((s) => {
-      upgradeHero(s, hero.id);
-    });
+    // affordability is checked BEFORE the mutation — otherwise the hero levelled
+    // up for free and only the toast complained about the missing gold
     if (save.gold < cost) {
       sfx.error();
-      return push(`Need ${cost} gold to upgrade ${hero.name}`, "#ff4d5e");
+      return push(`Need ${cost.toLocaleString("en-US")} gold to upgrade ${hero.name}`, "#ff4d5e");
     }
+    mutate((s) => {
+      // upgradeHero re-checks the price on the cloned save, so two taps in the
+      // same frame can never buy the same level twice
+      upgradeHero(s, hero.id);
+    });
     sfx.awaken();
     setUpg(heroUpgData(lv, "LEVEL UP"));
     push(`${hero.name} reached Lv ${lv + 1}`, hero.color);
-    return ok;
   };
 
   /**
@@ -584,6 +595,28 @@ export function Home({
     push(`${hero.name} reached Lv ${lv + 1} with shards`, hero.color);
   };
 
+  /** hero awakening tier + purchase (Magic Tokens) */
+  const awkTierOf = (slot: 0 | 1) => heroAwkTier(save, hero.id, slot);
+  const doHeroAwaken = (slot: 0 | 1) => {
+    const spec = heroAwkSpec(hero.id, slot);
+    if (!spec) return;
+    const cur = awkTierOf(slot);
+    if (cur >= HERO_AWAKENING_MAX_TIER) {
+      sfx.error();
+      return push(`${spec.name} is already maxed`, "#ff4d5e");
+    }
+    const cost = heroAwakenCost(cur + 1);
+    if (save.tokens < cost) {
+      sfx.error();
+      return push(`Need ${cost} Magic Tokens for ${spec.name}`, "#ff4d5e");
+    }
+    mutate((s) => {
+      awakenHero(s, hero.id, slot);
+    });
+    sfx.ceremony();
+    push(`${hero.name} · ${spec.name} ${["", "I", "II", "III", "IV", "V", "VI"][cur + 1]}`, "#ff4fd8");
+  };
+
   return (
     <div className="scroll-thin relative flex h-full flex-col gap-3 overflow-y-auto py-1 pr-1">
       <div className="anim-slideup text-center">
@@ -640,6 +673,69 @@ export function Home({
           </button>
         </div>
 
+        {/* HERO AWAKENING — two exclusive token-bought paths per hero */}
+        {heroAwkSpec(hero.id, 0) && (
+          <div className="mt-3 rounded-xl border border-[#7ce7ff44] bg-[#04181f]/60 p-2.5" data-testid="hero-awakening">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-disp text-[15px] text-[#7ce7ff]">AWAKENING</span>
+              <span className="text-[10.5px] font-bold tracking-[0.18em] text-[var(--dim)]">MAGIC TOKENS</span>
+              <span className="pill-dark ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-[#ff4fd8]">
+                <TokenIcon size={12} />
+                <b className="num">{save.tokens}</b>
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {([0, 1] as const).map((slot) => {
+                const spec = heroAwkSpec(hero.id, slot)!;
+                const tier = awkTierOf(slot);
+                const maxed = tier >= HERO_AWAKENING_MAX_TIER;
+                const cost = heroAwakenCost(tier + 1);
+                const afford = save.tokens >= cost;
+                return (
+                  <div
+                    key={slot}
+                    data-testid={`hero-awakening-${slot}`}
+                    className="rounded-lg border border-[#7ce7ff33] bg-black/35 p-2"
+                    style={tier > 0 ? { borderColor: "#ff4fd88c", boxShadow: "0 0 16px #ff4fd826" } : undefined}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11.5px] font-bold text-[#ff9be9]">
+                        {slot === 0 ? "1" : "2"}. {spec.name}
+                      </span>
+                      {spec.passive && <span className="rounded bg-[#7ce7ff] px-1 text-[8.5px] font-black leading-tight text-black">PASSIVE</span>}
+                    </div>
+                    <div className="mt-1 flex gap-1">
+                      {Array.from({ length: HERO_AWAKENING_MAX_TIER }, (_, i) => (
+                        <i
+                          key={i}
+                          className="h-1.5 flex-1 rounded-full"
+                          style={{ background: i < tier ? "linear-gradient(90deg,#7ce7ff,#ff4fd8)" : "rgba(255,255,255,0.12)" }}
+                        />
+                      ))}
+                    </div>
+                    <p className="mt-1 text-[10.5px] font-semibold leading-snug text-[var(--dim)]">{spec.desc}</p>
+                    <div className="mt-1 text-[10.5px] font-bold" style={{ color: tier > 0 ? "#8effc4" : "var(--line2)" }}>
+                      {heroAwkText(hero.id, slot, tier)}
+                    </div>
+                    <button
+                      className={`btn mt-1.5 w-full py-1 text-[11px] ${!maxed && afford ? "btn-cyan" : ""}`}
+                      data-testid={`hero-awaken-${slot}`}
+                      disabled={maxed || !afford}
+                      onClick={() => doHeroAwaken(slot)}
+                    >
+                      {maxed ? "MAX TIER" : (
+                        <span className="inline-flex items-center gap-1">
+                          <TokenIcon size={11} /> {cost} · TIER {["", "I", "II", "III", "IV", "V", "VI"][tier + 1]}
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* hero switcher */}
         <div className="mt-3 flex gap-2 overflow-x-auto scroll-thin pb-1">
           {HEROES.map((h) => {
@@ -676,7 +772,7 @@ export function Home({
       </div>
 
       {/* MODES */}
-      <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <ModeCard
           accent="#ffcf4d"
           title="Battle"
@@ -695,13 +791,22 @@ export function Home({
           badge={`BEST ${save.bestEndless}`}
         />
         <ModeCard
-          accent="#ff7b54"
+          accent="#3dff8e"
+          title="Gauntlet"
+          sub="Roguelite · boons every wave"
+          body="No wave cap. Pick a boon after every clear and stack the run until it breaks you."
+          onClick={onGauntlet}
+          delay="120ms"
+          badge={`BEST ${save.gauntletBest}`}
+        />
+        <ModeCard
+          accent="#ff315c"
           title="Hardcore"
-          sub="12 rounds · 10× enemy HP"
-          body="Enemies move 25% faster. Survive for 120× rewards. Standard lives."
+          sub={`${BATTLE_ROUNDS} rounds · 3 runs a day${save.hardcoreBest ? ` · best R${save.hardcoreBest}` : ""}`}
+          body="Double spawns, 10× enemy HP, enemies immune to crits, 25% faster enemies — and 120× the rewards."
           onClick={onHardcore}
           delay="180ms"
-          badge="HIGH RISK"
+          badge={hardcorePlaysLeft(save) > 0 ? `${hardcorePlaysLeft(save)}/${HARDCORE_DAILY_PLAYS} LEFT` : "NO RUNS LEFT"}
         />
         <ModeCard
           accent="#ff315c"
@@ -711,15 +816,6 @@ export function Home({
           onClick={onSuperHardcore}
           delay="240ms"
           badge="EXTREME"
-        />
-        <ModeCard
-          accent="#3dff8e"
-          title="Gauntlet"
-          sub="Roguelite · boons every wave"
-          body="No wave cap. Pick a boon after every clear and stack the run until it breaks you."
-          onClick={onGauntlet}
-          delay="120ms"
-          badge={`BEST ${save.gauntletBest}`}
         />
       </div>
 
@@ -1591,6 +1687,7 @@ interface ChatMsg {
 }
 
 const CH_ROLE_COLOR: Record<string, string> = { LEADER: "#ffcf4d", OFFICER: "#ff9be9", MEMBER: "#35e0ff" };
+
 const QUICK_CHAT = ["o7", "Need a party", "Boss strategy?", "GG ✨"];
 
 const CHANNELS: [ChatChannel, string, string][] = [
@@ -1640,9 +1737,8 @@ function ChatBubble({ msg, onReact }: { msg: ChatMsg; onReact: () => void }) {
 }
 
 /**
- * The guild chat: three live channels, member roles, an online strip, flowing
- * replies that read the message you sent, a typing indicator, quick-chat and
- * tap-to-react. Replaces the old flat list of canned lines.
+ * Three persistent local channels, member roles, a same-browser tab presence
+ * strip, quick-chat and tap-to-react. Remote multiplayer requires a server.
  */
 function ChatPanel({ guildId, guildName, color }: { guildId: string; guildName: string; color: string }) {
   const [ch, setCh] = useState<ChatChannel>("guild");
@@ -2341,12 +2437,12 @@ export function SettingsModal({
     ["Dynamic Shadows", "shadowFx", "Canvas glow and shadow rendering", "fx", "#b98bff"],
     ["Anti-aliasing", "antiAlias", "Smooth edges and scaled canvas output", "fx", "#8effc4"],
     ["Damage Numbers", "dmgNums", "Floating damage values over every hit", "dmg", "#ffcf4d"],
-    ["Screen Shake", "shakeFx", "Impact shake on explosions and hero skills", "shake", "#ff8a3d"],
-    ["Camera Motion Blur", "motionBlur", "Directional trail smear only while camera shake is active", "shake", "#ff315c"],
     ["Battlefield Guides", "guides", "Grid, buildable-cell and range circles", "guides", "#8effc4"],
     ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves", "fast", "#b98bff"],
+    ["Auto-Skip Boss Cutscene", "autoSkipBossCut", "Bosses engage immediately — a one-line callout replaces the cutscene card", "boss", "#ff8a3d"],
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
     ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
+    ["Hide Notifications", "hideNotifs", "Mutes toast popups and battle callouts — rewards still land", "bell", "#ff9be9"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
     ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffcf4d"],
     ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
@@ -2474,11 +2570,85 @@ export function SettingsModal({
         </div>
       </div>
 
+      {/* CAMERA SHAKE — its own section: the on/off switch, the high-frequency
+          intensity slider, and the trail smear that only runs while shaking. */}
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]" data-testid="camera-shake-section">CAMERA SHAKE</div>
+      <div className="mt-1.5 space-y-2 rounded-xl border border-[var(--line)] bg-black/25 p-3">
+        <div className="flex items-center gap-3">
+          <SetIcon name="shake" color="#ff8a3d" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Screen Shake</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">High-frequency random jitter on both camera axes for impacts and hero skills</div>
+          </div>
+          <KnobToggle
+            on={save.shakeFx}
+            label="Screen Shake"
+            testId="toggle-shakeFx"
+            onToggle={() => {
+              const next = !save.shakeFx;
+              mutate((s) => { s.shakeFx = next; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="shake-intensity-row">
+          <SetIcon name="shake" color="#ffcf4d" />
+          <div className="min-w-[150px] flex-1">
+            <div className="font-bold">Shake Intensity</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">How hard the arena kicks · {Math.round((save.shakeIntensity ?? 1) * 100)}%</div>
+          </div>
+          <input
+            className="w-40 accent-[#ff8a3d]"
+            type="range"
+            min="0"
+            max="200"
+            step="5"
+            value={Math.round((save.shakeIntensity ?? 1) * 100)}
+            aria-label="Shake intensity"
+            data-testid="shake-intensity"
+            disabled={!save.shakeFx}
+            onChange={(e) => {
+              const value = Number(e.target.value) / 100;
+              mutate((s) => { s.shakeIntensity = value; });
+            }}
+          />
+          <button
+            className="btn shrink-0 px-2.5 py-1 text-[11px]"
+            disabled={!save.shakeFx || Math.abs((save.shakeIntensity ?? 1) - 1) < 0.01}
+            onClick={() => { sfx.uiTab(); mutate((s) => { s.shakeIntensity = 1; }); }}
+          >
+            RESET
+          </button>
+        </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3">
+          <SetIcon name="shake" color="#ff315c" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Camera Motion Blur</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Directional trail smear only while camera shake is active</div>
+          </div>
+          <KnobToggle
+            on={save.motionBlur}
+            label="Camera Motion Blur"
+            testId="toggle-motionBlur"
+            onToggle={() => {
+              const next = !save.motionBlur;
+              mutate((s) => { s.motionBlur = next; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+        <div className="text-[10px] font-semibold text-[var(--dim)]">
+          Shake is pure random offset per axis at 120 Hz — no sway, rotation or zoom. Intensity 0% keeps the FX but holds the camera still.
+        </div>
+      </div>
+
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
       <div className="row-card mt-1.5" data-testid="pixel-ratio-row">
         <SetIcon name="perf" color="#54f4ff" />
-        <div className="min-w-0 flex-1"><div className="font-bold">Pixel Ratio</div><div className="text-[11px] font-semibold text-[var(--dim)]">Canvas render resolution · {save.pixelRatio.toFixed(2)}×</div></div>
-        <input className="w-36" type="range" min="0.75" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
+        <div className="min-w-0 flex-1"><div className="font-bold">Pixel Ratio</div><div className="text-[11px] font-semibold text-[var(--dim)]">Canvas render resolution · {save.pixelRatio.toFixed(2)}× · 0.25 = fastest, 2.00 = sharpest</div></div>
+        <input className="w-36" type="range" min="0.25" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
       </div>
       <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
         <div className="mb-2 flex items-center justify-between gap-2">

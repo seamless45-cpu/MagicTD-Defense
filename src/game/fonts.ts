@@ -172,7 +172,33 @@ export function applyFont(id: string): void {
   ensureFontLoaded(f.id);
   if (typeof document === "undefined") return;
   const root = document.documentElement;
-  root.style.setProperty("--font-ui", fontStack(f.id));
+  const stack = fontStack(f.id);
+  root.style.setProperty("--font-ui", stack);
   root.style.setProperty("--font-disp", fontDisplayStack(f.id));
   root.dataset.magictdFont = f.id;
+  // Cache the resolved stack so the static boot splash in app.html can paint
+  // the player's face before React (and the font stylesheet) have loaded.
+  try {
+    localStorage.setItem("magictd_font_stack", stack);
+    localStorage.setItem("magictd_font_id", f.id);
+    localStorage.setItem("magictd_font_google", f.google || "");
+  } catch {
+    /* private mode / quota: the splash just uses the default face */
+  }
+  // Canvas text is cached as a font shorthand in Battle.tsx. Tell the arena a
+  // face changed even when it mounted before the picker was used.
+  try {
+    document.dispatchEvent(new CustomEvent("magictd-font", { detail: { id: f.id, stack } }));
+  } catch {
+    /* old browsers without CustomEvent */
+  }
+  if (typeof document.fonts?.ready?.then === "function") {
+    document.fonts.ready.then(() => {
+      try {
+        document.dispatchEvent(new CustomEvent("magictd-font", { detail: { id: f.id, stack } }));
+      } catch {
+        /* ignore */
+      }
+    }).catch(() => {});
+  }
 }

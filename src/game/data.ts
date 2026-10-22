@@ -72,7 +72,9 @@ export type TowerKind =
   | "scythe"
   | "sandstorm"
   | "bloodstone"
-  | "venom";
+  | "venom"
+  | "eclipse"
+  | "seraph";
 
 export type GameMode = "battle" | "endless" | "gauntlet" | "gemrush" | "hardcore" | "superhardcore";
 
@@ -85,6 +87,42 @@ export const MODE_RULES: Record<GameMode, ModeRules> = {
   hardcore: { hpMul: 10, rewardMul: 120, speedMul: 1.25, lives: null },
   superhardcore: { hpMul: 710, rewardMul: 720, speedMul: 1.75, lives: 1 },
 };
+
+/** HARDCORE is a campaign-shaped run (12 rounds) with brutal modifiers. */
+export const isRunMode = (mode: GameMode) => mode === "battle" || mode === "hardcore" || mode === "superhardcore";
+
+/** every enemy walks 20% faster than its data sheet, in every mode */
+export const ENEMY_SPEED_MUL = 1.2;
+
+// ---------- hardcore rules ----------
+/** enemies spawn in pairs: two bodies per spawn slot */
+export const HARDCORE_SPAWN_MUL = 2;
+/** ten times the health of the same enemy in Battle */
+export const HARDCORE_HP_MUL = 10;
+/** Super Hardcore enemy-health multiplier. */
+export const SUPER_HARDCORE_HP_MUL = 710;
+/** rewards for Hardcore, as requested */
+export const HARDCORE_REWARD_MUL = 120;
+export const SUPER_HARDCORE_REWARD_MUL = 720;
+export const HARDCORE_SPEED_MUL = 1.25;
+export const SUPER_HARDCORE_SPEED_MUL = 1.75;
+export const modeSpeedMul = (mode: GameMode) => mode === "hardcore" ? HARDCORE_SPEED_MUL : mode === "superhardcore" ? SUPER_HARDCORE_SPEED_MUL : 1;
+/** the mode is a daily ladder: three attempts per calendar day */
+export const HARDCORE_DAILY_PLAYS = 3;
+export const HARDCORE_LIVES = 12;
+/** enemies are immune to crits: crit chance and crit damage never apply */
+export const HARDCORE_CRIT_IMMUNE = true;
+
+/** the single source of truth for every hardcore modifier, used by Battle */
+export const hardcoreEnemyHp = (base: number, mode: GameMode) =>
+  base * (mode === "hardcore" ? HARDCORE_HP_MUL : mode === "superhardcore" ? SUPER_HARDCORE_HP_MUL : 1);
+/** hardcore fields two bodies per slot, so the wave is doubled in place */
+export const hardcoreSpawnPlan = (comp: number[], mode: GameMode) =>
+  mode === "hardcore" ? comp.flatMap((type) => [type, type]) : comp;
+/** every payout — gold, gems, potions, fragments, tokens — scales with this */
+export const payoutMul = (mode: GameMode) => mode === "hardcore" ? HARDCORE_REWARD_MUL : mode === "superhardcore" ? SUPER_HARDCORE_REWARD_MUL : 1;
+/** crits are rolled and applied only when the mode allows them */
+export const critAllowed = (mode: GameMode) => !(mode === "hardcore" && HARDCORE_CRIT_IMMUNE);
 
 /**
  * How an awakening behaves, so one implementation in the battle engine can
@@ -1017,6 +1055,35 @@ export const TOWERS: TowerDef[] = [
       fmt: (m) => `19% merge chance · instant kill within ${m}m`,
     },
   },
+  // ---------- the mystical court: two new endgame summons ----------
+  {
+    id: "eclipse", name: "Eclipse Oracle", rarity: "mystical", kind: "eclipse", art: "eclipse", accent: "#b06bff",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Hurls a collapsing dark moon. On impact it implodes: a violet singularity tears nearby enemies backward along the lane, slows them and burns a share of their maximum health.",
+    dmg: 780, upDmg: 22, ascDmg: 30, rate: 1.5, upRate: 0.025, ascRate: 0.03,
+    aspd: 0.04, upAspd: 0.008, ascAspd: 0.012,
+    splash: 120, upSplash: 6, ascSplash: 8,
+    pctHp: 0.06, upPctHp: 0.006, ascPctHp: 0.008,
+    slow: 0.5, upSlow: 0.012, ascSlow: 0.016, slowDur: 2.6,
+    awk1: awking("Total Eclipse", "splash",
+      "Chance the dark moon swallows a far wider patch of lane", [0.35, 1], [0.4, 1.5]),
+    awk2: awking("Event Horizon", "execute",
+      "Chance the implosion drags anything beneath a health threshold across the event horizon", [0.12, 0.42], [0.18, 0.36]),
+  },
+  {
+    id: "seraph", name: "Astral Seraph", rarity: "mystical", kind: "seraph", art: "seraph", accent: "#8ff0ff",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Spears the lane with a lance of starlight: it pierces four enemies, arcs a choir of holy bolts through the pack, and every kill it lands restores grid SP.",
+    dmg: 520, upDmg: 18, ascDmg: 26, rate: 0.95, upRate: 0.02, ascRate: 0.025,
+    aspd: 0.06, upAspd: 0.01, ascAspd: 0.015,
+    pierce: 4, upPierce: 1, ascPierce: 1,
+    chain: 3, upChain: 1, ascChain: 1,
+    spGain: 6,
+    awk1: awking("Ascension", "critup",
+      "Chance the lance descends as a guaranteed critical starfall", [0.12, 0.45], [1, 1]),
+    awk2: awking("Choir of Stars", "chain",
+      "Chance the holy arc forks into extra enemies", [0.2, 0.7], [1, 4]),
+  },
 ];
 
 /** Tier VI extends every tower's two awakening paths beyond the original five tiers.
@@ -1272,6 +1339,14 @@ export function towerStatRows(def: TowerDef, menuLv: number, battleLv = 1): Stat
     rows.push({ label: "Superbuff", value: "20% chance · +6,000% amplified", better: "up" });
     rows.push({ label: "Merge Strike", value: "Executes up to 10 path enemies", better: "up" });
   }
+  if (def.id === "eclipse") {
+    rows.push({ label: "Implosion", value: "Dragged back up the lane · slowed", better: "up" });
+    rows.push({ label: "Dark Moon", value: "Burns a share of maximum health on every hit", better: "up" });
+  }
+  if (def.id === "seraph") {
+    rows.push({ label: "Holy Choir", value: "Every hit arcs to nearby enemies", better: "up" });
+    rows.push({ label: "Soul Tithe", value: `+${def.spGain || 0} SP per kill`, better: "up" });
+  }
 
   const special: [string, number, number, (v: number) => string][] = [];
   if (def.splash) special.push(["Splash Radius", def.splash, def.upSplash || 0, (v) => `${n0(v)}m`]);
@@ -1496,7 +1571,7 @@ export function crystalBuffText(def: CrystalDef, level: number): string {
   return `+${(Math.round(v * 1000) / 10).toFixed(1).replace(/\.0$/, "")}% ${def.stat}`;
 }
 
-export type EnemyShape = "slime" | "runner" | "knight" | "mage" | "warlord" | "overlord" | "titan" | "hound" | "wraith" | "golem" | "leviathan";
+export type EnemyShape = "slime" | "runner" | "knight" | "mage" | "warlord" | "overlord" | "titan" | "hound" | "wraith" | "golem" | "leviathan" | "herald";
 
 export interface EnemyType {
   name: string;
@@ -1738,8 +1813,33 @@ const LEVIATHAN: EnemyType = {
 ENEMY_TYPES.push(LEVIATHAN);
 export const LEVIATHAN_TYPE = ENEMY_TYPES.length - 1;
 
+/**
+ * THE FIFTH BOSS — Storm Herald. An iron-skied executioner that rides a
+ * personal thunderhead. It is the only boss that attacks the player's economy
+ * (SP siphon), the only one that can knock every tower offline at once, and it
+ * drags the horde forward behind it. Three skills, all exclusive to it.
+ */
+const HERALD: EnemyType = {
+  name: "Storm Herald",
+  title: "Sovereign of the Iron Sky",
+  color: "#7ce7ff",
+  accent: "#ffffff",
+  shade: "#08313d",
+  shape: "herald",
+  hpMul: 52,
+  speed: 25,
+  r: 35,
+  armor: 0.32,
+  lives: 12,
+  gold: 140,
+  legs: 0,
+  bobRate: 0.5,
+};
+ENEMY_TYPES.push(HERALD);
+export const HERALD_TYPE = ENEMY_TYPES.length - 1;
+
 /** every boss index, in the order they enter the campaign */
-export const BOSS_TYPES = [4, 5, 6, TITAN_TYPE, LEVIATHAN_TYPE];
+export const BOSS_TYPES = [4, 5, 6, TITAN_TYPE, LEVIATHAN_TYPE, HERALD_TYPE];
 export const BOSS_TYPE = 4;
 export const isBossType = (type: number) => BOSS_TYPES.includes(type);
 
@@ -1752,7 +1852,15 @@ export type BossSkillId =
   | "devour"
   | "meteor"
   | "chains"
-  | "warp";
+  | "warp"
+  | "warcry"
+  | "cleave"
+  | "banner"
+  | "quake"
+  | "undertow"
+  | "siphon"
+  | "overcharge"
+  | "maelstrom";
 
 export interface BossSkillRow {
   id: BossSkillId;
@@ -1778,21 +1886,33 @@ export const BOSS_SKILLS: BossSkillRow[] = [
   { id: "meteor", name: "Meteor Fall", tell: "drops burning rocks on the grid", color: "#ff7a3d", glyph: "☄" },
   { id: "chains", name: "Rift Chains", tell: "shields every minion beside it", color: "#4de8ff", glyph: "⛓" },
   { id: "warp", name: "Warp Surge", tell: "wrenches the whole horde forward", color: "#ff4fd8", glyph: "⇉" },
+  { id: "warcry", name: "War Cry", tell: "drives every nearby minion into a frenzy", color: "#ff9d4d", glyph: "♫" },
+  { id: "cleave", name: "Shield Cleave", tell: "hacks the nearest tower offline", color: "#ff5d5d", glyph: "⚔" },
+  { id: "banner", name: "Iron Banner", tell: "plates itself in living iron", color: "#ffd23f", glyph: "⚑" },
+  { id: "quake", name: "Foundation Quake", tell: "shatters the ground under the grid", color: "#22d3ee", glyph: "≋" },
+  { id: "undertow", name: "Undertow", tell: "drags the horde into its coils", color: "#2ee6c8", glyph: "🌀" },
+  { id: "siphon", name: "Soul Siphon", tell: "bleeds SP out of your grid", color: "#c98cff", glyph: "🩸" },
+  { id: "overcharge", name: "Overcharge", tell: "arcs lightning through your towers", color: "#7ce7ff", glyph: "⚡" },
+  { id: "maelstrom", name: "Maelstrom", tell: "hurls the whole horde down the lane", color: "#4de8ff", glyph: "🌪" },
 ];
 
 export const BOSS_SKILL_BY_ID: Record<BossSkillId, BossSkillRow> = Object.fromEntries(
   BOSS_SKILLS.map((s) => [s.id, s])
 ) as Record<BossSkillId, BossSkillRow>;
 
-/** boss type -> the kit it cycles. Type 4 is the Devil, 5 the Rift Overlord. */
+/**
+ * boss type -> ITS OWN kit. No two bosses share a skill: the Warlord fights
+ * with banners and cleaves, the Overlord with the rift, the Titan with the
+ * ground itself, the Leviathan with its coils, and the Storm Herald with the
+ * sky. Every entry here is exclusive to that boss.
+ */
 export const BOSS_KITS: Record<number, BossSkillId[]> = {
-  4: ["summon", "blink", "ward", "enrage", "nullfield", "meteor"],
-  5: ["summon", "blink", "ward", "enrage", "nullfield", "devour", "meteor", "chains", "warp"],
-  6: ["summon", "blink", "ward", "enrage", "nullfield", "devour", "meteor", "chains", "warp"],
+  4: ["warcry", "cleave", "banner"],
+  5: ["summon", "nullfield", "warp"],
+  6: ["quake", "meteor", "enrage"],
 };
-
-/** the Leviathan's kit is keyed by its real index once the monsters are in */
-BOSS_KITS[LEVIATHAN_TYPE] = ["summon", "blink", "ward", "enrage", "nullfield", "devour", "meteor", "chains", "warp"];
+BOSS_KITS[LEVIATHAN_TYPE] = ["devour", "chains", "undertow"];
+BOSS_KITS[HERALD_TYPE] = ["siphon", "overcharge", "maelstrom"];
 
 export const bossKit = (type: number): BossSkillId[] => BOSS_KITS[type] || BOSS_KITS[BOSS_TYPE];
 
@@ -1821,6 +1941,38 @@ export const BOSS_CHAINS_DR = 0.55;
 /** Warp Surge: drags the whole horde down the lane */
 export const BOSS_WARP_CD = 18;
 export const BOSS_WARP_DIST = 150;
+
+// ---------- boss-exclusive skills ----------
+/** War Cry: nearby minions sprint for a while */
+export const BOSS_WARCRY_CD = 12;
+export const BOSS_WARCRY_RADIUS = 320;
+export const BOSS_WARCRY_TIME = 5;
+export const BOSS_WARCRY_HASTE = 0.45;
+/** Shield Cleave: the nearest tower goes offline */
+export const BOSS_CLEAVE_CD = 11;
+export const BOSS_CLEAVE_DOWN = 2.2;
+/** Iron Banner: temporary armour plating */
+export const BOSS_BANNER_CD = 15;
+export const BOSS_BANNER_TIME = 6;
+export const BOSS_BANNER_ARMOR = 0.25;
+/** Foundation Quake: every tower near the boss is knocked out */
+export const BOSS_QUAKE_CD = 17;
+export const BOSS_QUAKE_RADIUS = 300;
+export const BOSS_QUAKE_DOWN = 2.6;
+/** Undertow: pulls the horde backwards into the boss */
+export const BOSS_UNDERTOW_CD = 14;
+export const BOSS_UNDERTOW_PULL = 90;
+/** Soul Siphon: steals run SP and heals */
+export const BOSS_SIPHON_CD = 13;
+export const BOSS_SIPHON_SP = 90;
+export const BOSS_SIPHON_HEAL = 0.025;
+/** Overcharge: lightning arcs knock towers offline */
+export const BOSS_OVERCHARGE_CD = 10;
+export const BOSS_OVERCHARGE_TARGETS = 3;
+export const BOSS_OVERCHARGE_DOWN = 2;
+/** Maelstrom: hurls the horde forward and hastes it */
+export const BOSS_MAELSTROM_CD = 16;
+export const BOSS_MAELSTROM_DIST = 130;
 
 export function roundHp(round: number) {
   return 46 * Math.pow(HP_GROWTH, round - 1);
@@ -1893,6 +2045,8 @@ export function waveComp(round: number, randomRoll: () => number = Math.random):
   if (round >= 16 && round % 4 === 0) bosses.push(round >= 32 ? 5 : 4);
   if (round >= 32 && round % 8 === 0) bosses.push(6);
   if (round >= 20 && round % 8 === 0) bosses.push(LEVIATHAN_TYPE);
+  // the Storm Herald takes the deepest slot: first seen on round 24
+  if (round >= 24 && round % 12 === 0) bosses.push(HERALD_TYPE);
 
   const regularCount = Math.max(0, WAVE_ENEMY_COUNT - bosses.length);
   const out: number[] = [];
@@ -2081,6 +2235,79 @@ export const heroPower = (lv: number) => 1 + 0.3 * (Math.max(1, lv) - 1);
 /** and shaves 3% off the cooldown, down to a floor of 60% */
 export const heroCooldown = (cd: number, lv: number) =>
   cd * Math.max(0.6, 1 - 0.03 * (Math.max(1, lv) - 1));
+
+// ---------- hero awakenings ----------
+/**
+ * Hero awakenings are a separate track from tower awakenings: they are bought
+ * with Magic Tokens, they are per-hero, and they can be taken at any hero
+ * level. Each hero gets two exclusive paths.
+ */
+export interface HeroAwkSpec {
+  id: string;
+  name: string;
+  /** true when the path is always on instead of riding the ultimate */
+  passive?: boolean;
+  /** one-line flavour shown on the card */
+  desc: string;
+  /** short label for the effect at a given tier (1..6) */
+  fmt: (tier: number) => string;
+}
+
+export const HERO_AWAKENING_MAX_TIER = 6;
+/** Magic Token price of one hero awakening tier */
+export function heroAwakenCost(tier: number) {
+  return Math.round(40 * Math.pow(1.6, Math.max(0, tier - 1)));
+}
+
+/** Electrical Induction: shield strip applied by any lightning strike */
+export const inductionShieldCut = (tier: number) => (tier > 0 ? 1.2 + 0.2 * (tier - 1) : 0);
+/** Electrical Induction: bonus SP and run gold on lightning kills */
+export const inductionBonus = (tier: number) => (tier > 0 ? 0.5 + 0.05 * (tier - 1) : 0);
+/** Bolt from the Blue: the health share that arms the passive bolt */
+export const boltThreshold = (tier: number) => (tier > 0 ? Math.max(0.4, 0.8 - 0.01 * (tier - 1)) : 0);
+/** Bolt from the Blue: chance a hero cast resets its own cooldown */
+export const boltResetChance = (tier: number) => (tier > 0 ? Math.min(0.95, 0.4 + 0.02 * (tier - 1)) : 0);
+/** Bolt from the Blue: the interval left on the cooldown after a reset */
+export const boltResetInterval = (tier: number) => (tier > 0 ? Math.max(0.2, 0.5 - 0.01 * (tier - 1)) : 0);
+
+const awkTier = (tier: number) => Math.max(1, Math.min(HERO_AWAKENING_MAX_TIER, tier));
+
+export const HERO_AWAKENINGS: Record<string, [HeroAwkSpec, HeroAwkSpec]> = {
+  thunder: [
+    {
+      id: "induction",
+      name: "Electrical Induction",
+      desc: "Every lightning strike stuns its target and strips their shield for 5s. Lightning kills pay +50% SP and run gold.",
+      fmt: (tier) => {
+        const t = awkTier(tier);
+        return `${Math.round(inductionShieldCut(t) * 100)}% shield cut · +${Math.round(inductionBonus(t) * 100)}% SP & gold on lightning kills`;
+      },
+    },
+    {
+      id: "boltblue",
+      name: "Bolt from the Blue",
+      passive: true,
+      desc: "Passive: enemies that fall below 80% health are struck by a thin bolt. Hero casts have a 40% chance to reset the cooldown to a 0.5s interval.",
+      fmt: (tier) => {
+        const t = awkTier(tier);
+        return `bolts below ${Math.round(boltThreshold(t) * 100)}% HP · ${Math.round(boltResetChance(t) * 100)}% cooldown reset at ${boltResetInterval(t).toFixed(2)}s`;
+      },
+    },
+  ],
+};
+
+export function heroAwkSpec(heroId: string, slot: 0 | 1): HeroAwkSpec | null {
+  const pair = HERO_AWAKENINGS[heroId];
+  return pair ? pair[slot] : null;
+}
+
+/** "+120% shield cut · +50% SP & gold …" for the hero card */
+export function heroAwkText(heroId: string, slot: 0 | 1, tier: number): string {
+  const spec = heroAwkSpec(heroId, slot);
+  if (!spec) return "";
+  if (tier <= 0) return spec.passive ? "Passive · not awakened" : "Not awakened";
+  return spec.fmt(awkTier(tier));
+}
 
 // ---------- daily rewards ----------
 // ---------- chip modules ----------
@@ -2771,7 +2998,7 @@ export const CHESTS: ChestDef[] = [
   },
   { id: "epic", name: "Epic Chest", cost: 800, gem: 1, color: "#c44dff", gold: [60, 140], frags: [5, 8], bias: 0.45, blurb: "Epic-leaning fragments." },
   { id: "legendary", name: "Legendary Chest", cost: 2000, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12], bias: 1, blurb: "Best odds at a legendary." },
-  { id: "mystical", name: "Mystical Chest", cost: 5000, gem: 1, color: "#ff315c", gold: [0, 0], frags: [0, 0], bias: 1, special: "mystical", blurb: "71%: five legendary fragments · 29%: one Supervisor fragment." },
+  { id: "mystical", name: "Mystical Chest", cost: 4000, gem: 1, color: "#ff315c", gold: [0, 0], frags: [0, 0], bias: 1, special: "mystical", blurb: "65%: five legendary fragments · 35%: one mystical fragment — Supervisor, Eclipse Oracle or Astral Seraph." },
 ];
 
 export const CHEST_BY_ID: Record<string, ChestDef> = Object.fromEntries(CHESTS.map((c) => [c.id, c]));

@@ -877,84 +877,122 @@ function TowerPreview({
           </div>
         </div>
 
-        {/* level upgrade */}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-3 py-2.5">
-          <div>
-            <div className="font-disp text-base text-[#ffcf4d]">Level Up</div>
-            <div className="text-[12px] font-semibold text-[var(--dim)]">
-              {locked
-                ? `Unlock with ${def.unlockFrags} fragments (you have ${have})`
-                : maxed
-                  ? "Menu level maxed — ascend it in battle"
-                  : mystical
-                    ? `${gems} gems · next level (you have ${save.gems})`
-                    : `${gold} gold + ${fr} fragments (you have ${have})`}
-            </div>
-          </div>
-          {locked ? (
-            <button
-              className="btn btn-gold px-5 py-2 text-[13px]"
-              style={{ borderColor: have >= def.unlockFrags ? "#3dff8e88" : undefined }}
-              onClick={onUnlock}
-            >
-              Unlock
-            </button>
-          ) : (
-            <button
-              className={`btn px-5 py-2 text-[13px] ${!maxed && (mystical ? save.gems >= gems : save.gold >= gold && have >= fr) ? "btn-gold" : ""}`}
-              disabled={maxed || (mystical ? save.gems < gems : save.gold < gold || have < fr)}
-              onClick={onUpgrade}
-            >
-              {maxed ? "MAX LEVEL" : (<span className="inline-flex items-center gap-1.5">{mystical ? <GemIcon size={14} /> : <CoinIcon size={14} />} Upgrade</span>)}
-            </button>
-          )}
-        </div>
-
-        {/* ascent / awakening section */}
-        <div className="mt-3 rounded-lg border border-[#ff4fd855] bg-[#2a0b33]/50 p-3">
-          <div className="flex items-center justify-between">
-            <div className="font-disp text-base text-[#ff9be9]">ASCENT · Awakenings</div>
-            <span className="text-[11px] font-bold text-[var(--dim)]">
-              Battle Lv 1–{MAX_BATTLE_LEVEL} · ×1.55 damage per level
+        {/* ================= LEVEL UP ================= */}
+        <div className="upg-block mt-4" data-testid="tower-upgrade-block">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-disp text-base text-[#ffcf4d]">LEVEL UP</span>
+            <span className="chip text-[11.5px]">{locked ? "LOCKED" : `Lv ${lv}/${MAX_MENU_LEVEL}`}</span>
+            {!locked && !maxed && (
+              <span className="text-[11px] font-bold text-[#3dff8e]">{gold > 0 ? `+1 → Lv ${lv + 1}` : `gems → Lv ${lv + 1}`}</span>
+            )}
+            <span className="ml-auto text-[10.5px] font-semibold text-[var(--dim)]">
+              {locked ? `Needs ${def.unlockFrags} fragments` : maxed ? "Menu level maxed" : "One level per purchase"}
             </span>
           </div>
-          {/* every tower in the game has two awakening paths now — the old
-              "exotic only" gate left 27 of them showing a dead panel */}
-          <div className="mt-2 space-y-2">
-              {([0, 1] as const).map((slot) => {
-                const spec = slot === 0 ? def.awk1! : def.awk2!;
-                const needLv = slot === 0 ? 10 : 15;
-                const tier = save.awn[def.id]?.[slot] || 0;
-                const avail = lv >= needLv;
-                const cost = awakenCost(tier + 1);
-                return (
-                  <div key={slot} className="rounded-md border border-[#ff4fd855] bg-black/30 px-2.5 py-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[12px] font-bold text-[#ff9be9]">
-                        {slot === 0 ? "1st" : "2nd"} Awakening · {spec.name}
-                      </span>
-                      <span className="font-disp text-[15px]" style={{ color: tier > 0 ? "#ff4fd8" : "var(--line2)" }}>
-                        {tier > 0 ? ROMAN[tier] : "—"}
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-[11px] font-semibold leading-snug text-[var(--dim)]">{spec.desc}</p>
-                    <div className="mt-1.5 flex items-center justify-between gap-2">
-                      <span className="text-[11px] font-bold text-[var(--dim)]">{tier > 0 ? awkText(def, slot, tier) : "Not awakened yet"}</span>
-                      {avail ? (
-                        tier < AWAKENING_MAX_TIER ? (
-                          <button className="btn flex shrink-0 items-center gap-1 px-2.5 py-1 text-[11px]" onClick={() => onAwaken(slot)}>
-                            <TokenIcon size={12} /> {cost} · Tier {ROMAN[tier + 1]}
-                          </button>
-                        ) : (
-                          <span className="text-[11px] font-bold text-[#ff4fd8]">MAX TIER {ROMAN[AWAKENING_MAX_TIER]}</span>
-                        )
-                      ) : (
-                        <span className="shrink-0 text-[11px] font-bold text-[var(--line2)]">Lv {needLv} needed</span>
-                      )}
-                    </div>
-                    {tier < AWAKENING_MAX_TIER && avail && <div className="mt-1 text-[10px] font-semibold text-[#ffd5f5]">Next · Tier {ROMAN[tier + 1]}: {awkText(def, slot, tier + 1)}</div>}
+          {/* level ladder: one pip per menu level, filled to the current level */}
+          <div className="upg-ladder mt-2" aria-hidden="true">
+            {Array.from({ length: MAX_MENU_LEVEL }, (_, i) => (
+              <i key={i} className={i < lv ? "on" : ""} style={i < lv ? { background: `linear-gradient(180deg, ${rc.color}, #ffffff)` } : undefined} />
+            ))}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {locked ? (
+              <span className="cost-chip" data-ok={have >= def.unlockFrags}>
+                ◈ {have} / {def.unlockFrags} fragments
+              </span>
+            ) : maxed ? (
+              <span className="cost-chip" data-ok>MAXED</span>
+            ) : mystical ? (
+              <span className="cost-chip" data-ok={save.gems >= gems}><GemIcon size={12} /> {gems.toLocaleString()} gems · have {save.gems.toLocaleString()}</span>
+            ) : (
+              <>
+                <span className="cost-chip" data-ok={save.gold >= gold}><CoinIcon size={12} /> {gold.toLocaleString()}</span>
+                <span className="cost-chip" data-ok={have >= fr}>◈ {fr} frags · have {have}</span>
+              </>
+            )}
+          </div>
+          <button
+            className={`upg-cta mt-2 w-full py-2 text-[13px] ${locked ? "btn btn-gold" : !maxed && (mystical ? save.gems >= gems : save.gold >= gold && have >= fr) ? "btn btn-gold" : "btn"}`}
+            disabled={!locked && (maxed || (mystical ? save.gems < gems : save.gold < gold || have < fr))}
+            onClick={locked ? onUnlock : onUpgrade}
+          >
+            {locked ? "Unlock" : maxed ? "MAX LEVEL" : (
+              <span className="inline-flex items-center gap-1.5">
+                {mystical ? <GemIcon size={14} /> : <CoinIcon size={14} />}
+                Upgrade
+                <span className="text-[11px] opacity-80">→ Lv {lv + 1}</span>
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* ================= ASCENT · AWAKENINGS ================= */}
+        <div className="awk-block mt-3" data-testid="tower-awakening-block">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-disp text-base text-[#ff9be9]">ASCENT · AWAKENINGS</span>
+            <span className="text-[10px] font-bold tracking-[0.16em] text-[var(--dim)]">MAGIC TOKENS</span>
+            <span className="pill-dark ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-[#ff4fd8]">
+              <TokenIcon size={12} />
+              <b className="num">{save.tokens}</b>
+            </span>
+          </div>
+          <p className="mt-0.5 text-[10.5px] font-semibold text-[var(--dim)]">
+            Battle Lv 1–{MAX_BATTLE_LEVEL} · ×1.55 damage per level · every tower has two exclusive paths
+          </p>
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {([0, 1] as const).map((slot) => {
+              const spec = slot === 0 ? def.awk1! : def.awk2!;
+              const needLv = slot === 0 ? 10 : 15;
+              const tier = save.awn[def.id]?.[slot] || 0;
+              const avail = lv >= needLv;
+              const cost = awakenCost(tier + 1);
+              const maxedAwk = tier >= AWAKENING_MAX_TIER;
+              const afford = save.tokens >= cost;
+              return (
+                <div
+                  key={slot}
+                  className={`awk-card ${tier > 0 ? "on" : ""} ${avail ? "" : "locked"}`}
+                  data-testid={`awakening-${slot}`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="awk-num">{slot === 0 ? "1" : "2"}</span>
+                    <span className="truncate text-[12px] font-bold text-[#ff9be9]">{spec.name}</span>
+                    <span className="ml-auto font-disp text-[13px]" style={{ color: tier > 0 ? "#ff4fd8" : "var(--line2)" }}>
+                      {tier > 0 ? ROMAN[tier] : "—"}
+                    </span>
                   </div>
-                );
+                  <div className="awk-pips mt-1" aria-hidden="true">
+                    {Array.from({ length: AWAKENING_MAX_TIER }, (_, i) => (
+                      <i key={i} className={i < tier ? "on" : ""} />
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[10.5px] font-semibold leading-snug text-[var(--dim)]">{spec.desc}</p>
+                  <div className="mt-1 min-h-[26px] text-[10.5px] font-bold leading-snug" style={{ color: tier > 0 ? "#8effc4" : "var(--line2)" }}>
+                    {tier > 0 ? awkText(def, slot, tier) : "Not awakened yet"}
+                    {tier > 0 && !maxedAwk && (
+                      <div className="text-[10px] font-semibold text-[#ffd5f5]">Next: {awkText(def, slot, tier + 1)}</div>
+                    )}
+                  </div>
+                  {maxedAwk ? (
+                    <div className="awk-max mt-1.5">MAX TIER {ROMAN[AWAKENING_MAX_TIER]}</div>
+                  ) : (
+                    <button
+                      className={`btn mt-1.5 w-full py-1 text-[11px] ${avail && afford ? "btn-cyan" : ""}`}
+                      disabled={!avail || !afford}
+                      onClick={() => onAwaken(slot)}
+                      title={avail ? `${cost} Magic Tokens` : `Requires Lv ${needLv}`}
+                    >
+                      {avail ? (
+                        <span className="inline-flex items-center gap-1">
+                          <TokenIcon size={11} /> {cost} · Tier {ROMAN[tier + 1]}
+                        </span>
+                      ) : (
+                        <span>Lv {needLv} required</span>
+                      )}
+                    </button>
+                  )}
+                </div>
+              );
             })}
           </div>
         </div>
