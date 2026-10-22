@@ -17,7 +17,6 @@ import {
 } from "../game/save";
 import {
   todayStr,
-  clearSave,
   defaultSave,
   importSave,
   persistSave,
@@ -52,8 +51,10 @@ import {
   claimCompetition,
   compClaimed,
   GUILD_DONATIONS_PER_DAY,
+  UI_THEMES,
 } from "../game/save";
-import { sfx, setVolume, setVolumeBoost } from "../game/audio";
+import { sfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost } from "../game/audio";
+import { clearMusic, getMusicSnapshot, loadSavedMusic, pauseMusic, subscribeMusic, setMusicSettings, toggleMusic, uploadMusic, type MusicSnapshot } from "../game/music";
 import {
   ChipIcon,
   CoinIcon,
@@ -192,6 +193,9 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
   return (
     <div className="boot-root" data-testid="launch-intro" aria-label="MagicTD Defense boot sequence">
       <div className="boot-vignette" />
+      <div className="boot-stars" aria-hidden="true">
+        {Array.from({ length: 18 }, (_, i) => <i key={i} style={{ left: `${(i * 47 + 11) % 100}%`, top: `${(i * 61 + 7) % 100}%`, animationDelay: `${(i % 7) * -0.43}s`, animationDuration: `${2.2 + (i % 5) * 0.6}s` }} />)}
+      </div>
       <div className={`boot-collapse ${beat >= 1 ? "on" : ""}`} />
       <div className={`boot-shock ${beat >= 2 ? "on" : ""}`} />
       {beat >= 6 && <div className="boot-wipe" />}
@@ -218,7 +222,7 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
 
         <div className={`boot-sub ${beat >= 4 ? "on" : ""}`}>DEFENSE</div>
         <div className={`boot-tagline ${beat >= 5 ? "on" : ""}`}>
-          HOLD THE LINE <span className="boot-dot">◆</span> MASTER THE ARCANE
+          DEFEND THE RIFT <span className="boot-dot">◆</span> COMMAND THE STORM
         </div>
       </div>
 
@@ -229,7 +233,7 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
 
 const LOAD_TIPS = [
   "Gold levels a tower up; fragments push it through ascension.",
-  "Endless waves scale enemy health ×1.8 every single round.",
+  "Endless waves scale enemy health ×2.2 every single round.",
   "Chilled enemies take 25% more damage from every source.",
   "Every tower upgrade adds +8% crit damage to your account.",
   "Bosses start throwing skills at you from round 16.",
@@ -442,6 +446,9 @@ export function Home({
   onBattle,
   onEndless,
   onGauntlet,
+  onGemRush,
+  onHardcore,
+  onSuperHardcore,
   push,
 }: {
   save: SaveData;
@@ -449,6 +456,9 @@ export function Home({
   onBattle: () => void;
   onEndless: () => void;
   onGauntlet: () => void;
+  onGemRush: () => void;
+  onHardcore: () => void;
+  onSuperHardcore: () => void;
   push: (m: string, c?: string) => void;
 }) {
   const hero = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
@@ -581,7 +591,7 @@ export function Home({
           Command Center
         </div>
         <div className="mt-0.5 text-[12px] font-semibold tracking-[0.28em] text-[var(--dim)]">
-          ENEMIES GROW +80% STRONGER EVERY WAVE · HOLD THE LINE
+          ENEMIES GROW +120% STRONGER EVERY WAVE · HOLD THE LINE
         </div>
       </div>
 
@@ -666,7 +676,7 @@ export function Home({
       </div>
 
       {/* MODES */}
-      <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <ModeCard
           accent="#ffcf4d"
           title="Battle"
@@ -685,6 +695,24 @@ export function Home({
           badge={`BEST ${save.bestEndless}`}
         />
         <ModeCard
+          accent="#ff7b54"
+          title="Hardcore"
+          sub="12 rounds · 10× enemy HP"
+          body="Enemies move 25% faster. Survive for 120× rewards. Standard lives."
+          onClick={onHardcore}
+          delay="180ms"
+          badge="HIGH RISK"
+        />
+        <ModeCard
+          accent="#ff315c"
+          title="Super Hardcore"
+          sub="12 rounds · one life"
+          body="710× enemy HP, 75% faster enemies and 720× rewards. One leak ends the run."
+          onClick={onSuperHardcore}
+          delay="240ms"
+          badge="EXTREME"
+        />
+        <ModeCard
           accent="#3dff8e"
           title="Gauntlet"
           sub="Roguelite · boons every wave"
@@ -697,7 +725,7 @@ export function Home({
 
       {/* TODAY'S EVENT */}
       <div className="tile event-card live relative p-3" data-testid="today-event" style={{ borderColor: liveEv.color + "77" }}>
-        <div className="relative flex flex-wrap items-center gap-3">
+        <div className="event-home-layout relative flex flex-wrap items-center gap-3">
           <EventGlyph id={liveEv.id} color={liveEv.color} size={46} />
           <div className="min-w-[200px] flex-1">
             <div className="flex items-center gap-2">
@@ -709,8 +737,8 @@ export function Home({
             </div>
             <div className="mt-1 text-[11.5px] font-bold text-[#8effc4]">{liveEv.perk}</div>
           </div>
-          <button className="cta-banner shrink-0 px-4 py-2.5 text-[13px]" data-testid="event-claim" disabled={!eventClaimable(save)} onClick={doEventClaim}>
-            {eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED"}
+          <button className="cta-banner shrink-0 px-4 py-2.5 text-[13px]" data-testid={liveEv.id === "gemrush" ? "enter-gem-rush" : "event-claim"} disabled={liveEv.id !== "gemrush" && !eventClaimable(save)} onClick={liveEv.id === "gemrush" ? onGemRush : doEventClaim}>
+            {liveEv.id === "gemrush" ? "ENTER GEM RUSH" : eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED"}
           </button>
         </div>
       </div>
@@ -914,11 +942,14 @@ export function EventGlyph({ id, color, size = 40 }: { id: string; color: string
           <path d="M5 18.5h5" />
         </g>
       )}
-      {id === "lightning" && (
+      {id === "gemrush" && (
         <g {...common}>
-          <path d="M13 4.5 8 13h3.5L10.5 19.5 16 11h-3.5z" fill={color + "44"} />
-          <path d="M4.5 9A3.5 3.5 0 0 1 8 6" />
+          <path d="M7 8.2 10 5h4l3 3.2-5 10.5z" fill={color + "44"} />
+          <path d="M7 8.2h10M10 5l2 13.7L14 5M5 12h2M17 12h2" />
         </g>
+      )}
+      {!(["luck", "chestbox", "trophy", "items", "mineshaft", "gemrush"] as string[]).includes(id) && (
+        <g {...common}><path d="M12 5 14.2 10l5.3 2-5.3 2-2.2 5-2.2-5-5.3-2 5.3-2z" fill={color + "66"} /></g>
       )}
     </svg>
   );
@@ -932,6 +963,7 @@ function ModeCard({
   onClick,
   delay,
   badge,
+  onAuto,
 }: {
   accent: string;
   title: string;
@@ -940,17 +972,15 @@ function ModeCard({
   onClick: () => void;
   delay: string;
   badge?: string;
+  onAuto?: () => void;
 }) {
   return (
-    <button
-      onClick={() => {
-        sfx.click();
-        onClick();
-      }}
+    <div
       className="tile tile-hover anim-pop group relative overflow-hidden p-4 text-left"
       style={{ animationDelay: delay, borderColor: accent }}
       data-mode={title}
     >
+      <button className="relative z-[1] w-full text-left" onClick={() => { sfx.click(); onClick(); }}>
       <div
         className="pointer-events-none absolute -right-8 -top-10 h-28 w-28 rounded-full opacity-30 transition-opacity group-hover:opacity-60"
         style={{ background: `radial-gradient(circle, ${accent}, transparent 70%)` }}
@@ -966,7 +996,9 @@ function ModeCard({
       <div className="relative mt-1 text-[11px] font-bold uppercase tracking-[0.2em] text-[var(--dim)]">{sub}</div>
       <p className="relative mt-2 text-[12.5px] font-semibold leading-snug text-[var(--txt)]/85">{body}</p>
       <span className="cta-banner relative mt-3 inline-block px-6 py-2 text-[14px]">DEPLOY</span>
-    </button>
+      </button>
+      {onAuto && <button className="btn btn-cyan relative z-[2] mt-2 w-full px-3 py-2 text-[11px] font-black tracking-wider" data-testid={`auto-${title.toLowerCase()}`} onClick={() => { sfx.awaken(); onAuto(); }}>⚡ AUTO BATTLE · MAIL REWARDS</button>}
+    </div>
   );
 }
 
@@ -978,10 +1010,12 @@ export function Specials({
   save,
   mutate,
   push,
+  onGemRush,
 }: {
   save: SaveData;
   mutate: (fn: (s: SaveData) => void) => void;
   push: (m: string, c?: string) => void;
+  onGemRush: () => void;
 }) {
   const [tab, setTab] = useState<"tasks" | "events" | "competition">("tasks");
   const ready = tasksReady(save);
@@ -1007,7 +1041,7 @@ export function Specials({
       {tab === "tasks" ? (
         <TasksPanel save={save} mutate={mutate} push={push} />
       ) : tab === "events" ? (
-        <EventsPanel save={save} mutate={mutate} push={push} />
+        <EventsPanel save={save} mutate={mutate} push={push} onGemRush={onGemRush} />
       ) : (
         <CompetitionPanel save={save} mutate={mutate} push={push} />
       )}
@@ -1166,10 +1200,12 @@ function EventsPanel({
   save,
   mutate,
   push,
+  onGemRush,
 }: {
   save: SaveData;
   mutate: (fn: (s: SaveData) => void) => void;
   push: (m: string, c?: string) => void;
+  onGemRush: () => void;
 }) {
   const [claim, setClaim] = useState<ClaimData | null>(null);
   const live = eventForDate();
@@ -1233,9 +1269,9 @@ function EventsPanel({
     <>
       <div className="panel event-card live relative overflow-hidden p-5" style={{ borderColor: live.color + "88" }} data-testid="event-live">
         <div className="absolute inset-0 opacity-30" style={{ background: `radial-gradient(620px 180px at 25% 0%, ${live.color}66, transparent 70%)` }} />
-        <div className="relative flex flex-wrap items-start gap-4">
+        <div className="event-live-layout relative flex flex-wrap items-start gap-4">
           <EventGlyph id={live.id} color={live.color} size={76} />
-          <div className="min-w-[220px] flex-1">
+          <div className="event-live-copy min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <span className="live-dot" style={{ background: live.color }} />
               <span className="text-[10px] font-bold tracking-[0.32em] text-[var(--dim)]">LIVE NOW · {live.tagline.toUpperCase()}</span>
@@ -1248,13 +1284,13 @@ function EventsPanel({
               {live.perk}
             </div>
           </div>
-          <div className="flex shrink-0 flex-col items-stretch gap-1.5">
-            <button className="cta-banner px-5 py-3 text-[14px]" disabled={!eventClaimable(save)} onClick={doClaim}>
-              {eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED TODAY"}
+          <div className="event-live-actions flex shrink-0 flex-col items-stretch gap-1.5">
+            <button className="cta-banner px-5 py-3 text-[14px]" disabled={live.id !== "gemrush" && !eventClaimable(save)} onClick={live.id === "gemrush" ? onGemRush : doClaim}>
+              {live.id === "gemrush" ? "ENTER GEM RUSH" : eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED TODAY"}
             </button>
-            <div className="rounded-lg border border-[var(--line)] bg-black/35 px-2 py-1 text-center text-[10.5px] font-bold tracking-wider text-[var(--dim)]" data-testid="event-streak">
+            {live.id !== "gemrush" ? <div className="rounded-lg border border-[var(--line)] bg-black/35 px-2 py-1 text-center text-[10.5px] font-bold tracking-wider text-[var(--dim)]" data-testid="event-streak">
               STREAK <span className="num" style={{ color: live.color }}>{save.eventStreak}</span>/7 · NEXT ×{eventStreakMul(streak).toFixed(1)} LOOT
-            </div>
+            </div> : <div className="rounded-lg border border-[var(--line)] bg-black/35 px-2 py-1 text-center text-[10.5px] font-bold tracking-wider text-[var(--dim)]">5:00 · SURVIVE FOR GEMS</div>}
             <div className="flex justify-center gap-1" aria-hidden="true">
               {Array.from({ length: 7 }, (_, i) => (
                 <span
@@ -1554,140 +1590,7 @@ interface ChatMsg {
   react?: string;
 }
 
-interface Chatter {
-  name: string;
-  role: string;
-}
-
-const CH_ROLE_COLOR: Record<string, string> = {
-  LEADER: "#ffcf4d",
-  OFFICER: "#ff9be9",
-  MEMBER: "#35e0ff",
-};
-
-/** who talks in each guild, and what they say when you first walk in */
-const GUILD_CHATTER: Record<string, { members: Chatter[]; lines: [string, string][] }> = {
-  vanguard: {
-    members: [
-      { name: "Kael", role: "LEADER" },
-      { name: "Mira", role: "OFFICER" },
-      { name: "Torin", role: "MEMBER" },
-      { name: "Juno", role: "MEMBER" },
-      { name: "Selka", role: "MEMBER" },
-    ],
-    lines: [
-      ["Kael", "Anyone farming endless waves tonight? We are three short."],
-      ["Mira", "Just hit Awakening II on my Lightning Princess. Feels absurd."],
-      ["Torin", "Power Plant next to a Chrono Spire is broken. In a good way."],
-      ["Selka", "Reminder: drop your rotation into the tower tab, summons follow it."],
-    ],
-  },
-  storm: {
-    members: [
-      { name: "Vesper", role: "LEADER" },
-      { name: "Lumen", role: "OFFICER" },
-      { name: "Rhen", role: "MEMBER" },
-      { name: "Cyra", role: "MEMBER" },
-      { name: "Odell", role: "MEMBER" },
-    ],
-    lines: [
-      ["Vesper", "Storm day doubles gems — do not sleep on Sunday."],
-      ["Lumen", "Thunder God at Lv 10 clears wave 20 on its own. Proved it."],
-      ["Rhen", "Donated the war chest, we are two levels off the next perk."],
-      ["Cyra", "Chain towers + any freeze = free boss phase. Trust."],
-    ],
-  },
-  ember: {
-    members: [
-      { name: "Volkan", role: "LEADER" },
-      { name: "Sable", role: "OFFICER" },
-      { name: "Brann", role: "MEMBER" },
-      { name: "Halla", role: "MEMBER" },
-      { name: "Ivar", role: "MEMBER" },
-    ],
-    lines: [
-      ["Volkan", "Burn comp only run. Who is in?"],
-      ["Sable", "Trophy day is tomorrow, bank your wins before the reset."],
-      ["Brann", "Hellstorm + Toxic Sprayer melts the Rift Overlord."],
-      ["Halla", "Crit band at 140% now, everything just pops."],
-    ],
-  },
-  null: {
-    members: [
-      { name: "Nyx", role: "LEADER" },
-      { name: "Oryx", role: "OFFICER" },
-      { name: "Quill", role: "MEMBER" },
-      { name: "Vane", role: "MEMBER" },
-      { name: "Rook", role: "MEMBER" },
-    ],
-    lines: [
-      ["Nyx", "Guild chest gave me four advanced chips. Null perk is real."],
-      ["Oryx", "We are rank 1 on the weekly board again. Keep pushing."],
-      ["Quill", "Reminder: three donations a day, every day."],
-      ["Vane", "Null Rip on a stacked lane is a free wave, every time."],
-    ],
-  },
-};
-
-/** world is one shared firehose no matter which banner you fly */
-const WORLD_LINES: [string, string][] = [
-  ["Riftwalker", "Trade channel: swapping 3 epic chips for legendary frags."],
-  ["Solene", "Day 41 endless. The boss scaling is genuinely evil now."],
-  ["Grukk", "New player here — what is the first tower I should max?"],
-  ["Aurex", "Answer: Arrow. It carries you to wave 12 by itself."],
-  ["Nine", "Weekly competition closes in 6h, top 10 is brutal this time."],
-];
-
-const PARTY_LINES: [string, string][] = [
-  ["You", "Party code MLTD-4821. Two slots open for a co-op rift."],
-  ["Kael", "Joining. I will bring the freeze spires."],
-];
-
-/** keyword -> what the guild says back, so chat reacts to what you actually ask */
-const CHAT_INTENTS: [RegExp, string[]][] = [
-  [/hi|hey|hello|yo\b|sup/i, [
-    "Hey! Welcome to the hall.",
-    "o/ what is up",
-    "Yo. Rift later?",
-  ]],
-  [/help|how do|how to|guide|advice|tip/i, [
-    "Stack the rotation on one damage type, then let the summon button work.",
-    "Open chests with gold you are not saving — fragments are the real wall.",
-    "Put your best tower first in the rotation; summons reach for the top of the list.",
-  ]],
-  [/boss|overlord|elite/i, [
-    "Save your hero skill for the second boss phase, it one-shots the shield.",
-    "Slow towers first, then drop everything on it. Standard recipe.",
-    "The Rift Overlord ignores armour. Bring pure dps and cry a little.",
-  ]],
-  [/wave|endless|run|farm/i, [
-    "Endless gives the best gold per minute once you clear wave 18.",
-    "Count me in, I am free after the donation reset.",
-    "Open the tower tab and push your crit band first — it carries the late waves.",
-  ]],
-  [/chest|reward|loot|frag/i, [
-    "Chests are the only real source of epic fragments. Buy them in bulk.",
-    "I opened 6 today, got 2 legendary drops. Decent odds.",
-  ]],
-  [/join|recruit|party|team|invite/i, [
-    "Invite sent. We raid at the daily reset.",
-    "Hop in, the war objectives are nearly done.",
-  ]],
-  [/thanks|thx|ty\b|gg|nice|cool/i, [
-    "gg ✨",
-    "np o7",
-    "That is how it is done.",
-  ]],
-];
-
-const CHAT_FALLBACK: string[] = [
-  "Fair point, honestly.",
-  "Say more, I am listening.",
-  "Same here — tell the others in the war tab.",
-  "Noted. I will test it after the reset.",
-  "That tracks with what I have seen.",
-];
-
+const CH_ROLE_COLOR: Record<string, string> = { LEADER: "#ffcf4d", OFFICER: "#ff9be9", MEMBER: "#35e0ff" };
 const QUICK_CHAT = ["o7", "Need a party", "Boss strategy?", "GG ✨"];
 
 const CHANNELS: [ChatChannel, string, string][] = [
@@ -1738,92 +1641,94 @@ function ChatBubble({ msg, onReact }: { msg: ChatMsg; onReact: () => void }) {
 
 /**
  * The guild chat: three live channels, member roles, an online strip, flowing
- * replies that read the message you sent, a typing indicator, quick-chat and
- * tap-to-react. Replaces the old flat list of canned lines.
+ * saved local messages, cross-tab live delivery, quick-chat and tap-to-react.
+ * Cross-device multiplayer needs a server, so the UI reports this local-only limit.
  */
 function ChatPanel({ guildId, guildName, color }: { guildId: string; guildName: string; color: string }) {
-  const data = GUILD_CHATTER[guildId] || GUILD_CHATTER.vanguard;
   const [ch, setCh] = useState<ChatChannel>("guild");
   const [input, setInput] = useState("");
-  const [typing, setTyping] = useState<string | null>(null);
   const [reacted, setReacted] = useState(0);
   const seq = useRef(0);
   const logRef = useRef<HTMLDivElement>(null);
-  const [logs, setLogs] = useState<Record<ChatChannel, ChatMsg[]>>(() => ({
-    guild: [
-      { id: ++seq.current, name: "", text: `${guildName} chat is live — say hello`, sys: true },
-      ...data.lines.map(([n, t]) => ({
-        id: ++seq.current,
-        name: n,
-        text: t,
-        role: GUILD_CHATTER[guildId]?.members.find((m) => m.name === n)?.role || "MEMBER",
-      })),
-    ],
-    world: [
-      { id: ++seq.current, name: "", text: "World chat · all guilds · be excellent to each other", sys: true },
-      ...WORLD_LINES.map(([n, t]) => ({ id: ++seq.current, name: n, text: t, role: "MEMBER" })),
-    ],
-    party: [
-      { id: ++seq.current, name: "", text: "No party yet — invite a guildmate to start one", sys: true },
-      ...PARTY_LINES.map(([n, t]) => ({ id: ++seq.current, name: n, text: t, me: n === "You", role: n === "You" ? "MEMBER" : "OFFICER" })),
-    ],
-  }));
+  const sessionId = useRef(`local-${Math.random().toString(36).slice(2, 9)}`);
+  const busRef = useRef<BroadcastChannel | null>(null);
+  const lastSeenRef = useRef(new Map<string, number>());
+  const [peerCount, setPeerCount] = useState(0);
+  const [logs, setLogs] = useState<Record<ChatChannel, ChatMsg[]>>(() => {
+    const seed: Record<ChatChannel, ChatMsg[]> = {
+      guild: [
+        { id: ++seq.current, name: "", text: `${guildName} · local room ready · open another game tab to chat`, sys: true },
+      ],
+      world: [{ id: ++seq.current, name: "", text: "World channel · messages are shared across your open game tabs", sys: true }],
+      party: [{ id: ++seq.current, name: "", text: "Party channel · messages are shared across tabs in your guild", sys: true }],
+    };
+    try {
+      const saved = localStorage.getItem(`magictd_chat_${guildId}`);
+      if (!saved) return seed;
+      const parsed = JSON.parse(saved) as Partial<Record<ChatChannel, ChatMsg[]>>;
+      for (const channel of ["guild", "world", "party"] as const) {
+        if (Array.isArray(parsed[channel])) seed[channel] = parsed[channel]!.filter((m) => typeof m?.text === "string").slice(-100);
+      }
+    } catch { /* local chat remains usable when storage is unavailable */ }
+    return seed;
+  });
 
-  // keep the newest line in view (the log scrolls, the page does not)
+  // The local link supports live chat between game tabs on this browser. It is
+  // intentionally not advertised as online matchmaking: no remote server exists.
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const bus = new BroadcastChannel("magictd-local-chat-v1");
+    busRef.current = bus;
+    const announce = (online: boolean) => bus.postMessage({ kind: "presence", guildId, senderId: sessionId.current, online, at: Date.now() });
+    const refreshPeers = () => {
+      const now = Date.now();
+      for (const [id, seen] of lastSeenRef.current) if (now - seen > 15000) lastSeenRef.current.delete(id);
+      setPeerCount(lastSeenRef.current.size);
+      announce(true);
+    };
+    bus.onmessage = (event: MessageEvent) => {
+      const payload = event.data as { kind?: string; guildId?: string; senderId?: string; online?: boolean; channel?: ChatChannel; text?: string; at?: number; name?: string };
+      if (!payload || payload.senderId === sessionId.current) return;
+      if (payload.kind === "presence") {
+        if (payload.guildId !== guildId) return;
+        if (payload.online) lastSeenRef.current.set(payload.senderId || "", Date.now());
+        else lastSeenRef.current.delete(payload.senderId || "");
+        setPeerCount(lastSeenRef.current.size);
+        return;
+      }
+      if (payload.kind !== "message" || typeof payload.text !== "string" || !payload.channel) return;
+      if (payload.channel !== "world" && payload.guildId !== guildId) return;
+      const text = payload.text.trim().slice(0, 140);
+      if (!text) return;
+      const msg: ChatMsg = { id: Date.now() + Math.floor(Math.random() * 1000), name: payload.name || `Guest ${payload.senderId?.slice(-4) || ""}`, text, role: "MEMBER" };
+      setLogs((prev) => ({ ...prev, [payload.channel!]: [...prev[payload.channel!], msg].slice(-100) }));
+    };
+    announce(true);
+    const heartbeat = window.setInterval(refreshPeers, 5000);
+    return () => {
+      window.clearInterval(heartbeat);
+      announce(false);
+      bus.close();
+      busRef.current = null;
+    };
+  }, [guildId]);
+
+  useEffect(() => {
+    try { localStorage.setItem(`magictd_chat_${guildId}`, JSON.stringify(logs)); } catch { /* storage quota/private mode */ }
+  }, [logs, guildId]);
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [logs, ch, typing]);
-
-  // idle chatter: the hall keeps talking while you are standing in it
-  useEffect(() => {
-    const t = setInterval(() => {
-      if (Math.random() < 0.45) return;
-      const who = data.members[Math.floor(Math.random() * data.members.length)];
-      const line = data.lines[Math.floor(Math.random() * data.lines.length)];
-      const msg: ChatMsg = { id: ++seq.current, name: who.name, text: line[1], role: who.role };
-      setLogs((l) => ({ ...l, guild: [...l.guild, msg] }));
-    }, 26000);
-    return () => clearInterval(t);
-  }, [data]);
-
-  const replyFor = (text: string): string => {
-    for (const [re, pool] of CHAT_INTENTS) {
-      if (re.test(text)) return pool[Math.floor(Math.random() * pool.length)];
-    }
-    return CHAT_FALLBACK[Math.floor(Math.random() * CHAT_FALLBACK.length)];
-  };
+  }, [logs, ch]);
 
   const send = (raw?: string) => {
-    const text = (raw ?? input).trim();
+    const text = (raw ?? input).trim().replace(/\s+/g, " ").slice(0, 140);
     if (!text) return;
     setInput("");
-    const mine: ChatMsg = { id: ++seq.current, name: "You", text, me: true, role: "MEMBER" };
-    setLogs((l) => ({ ...l, [ch]: [...l[ch], mine] }));
+    const mine: ChatMsg = { id: Date.now() + Math.floor(Math.random() * 1000), name: "You", text, me: true, role: "MEMBER" };
+    setLogs((prev) => ({ ...prev, [ch]: [...prev[ch], mine].slice(-100) }));
+    busRef.current?.postMessage({ kind: "message", channel: ch, guildId, senderId: sessionId.current, name: `Guest ${sessionId.current.slice(-4)}`, text, at: Date.now() });
     sfx.chatSend();
-    // world chat answers from strangers, party from whoever joined, guild by name
-    const who = data.members[Math.floor(Math.random() * data.members.length)];
-    setTyping(who.name);
-    sfx.chatTyping();
-    const delay = 700 + Math.random() * 700;
-    setTimeout(() => {
-      setTyping(null);
-      const msg: ChatMsg = { id: ++seq.current, name: who.name, text: replyFor(text), role: who.role };
-      setLogs((l) => ({ ...l, [ch]: [...l[ch], msg] }));
-      sfx.chatRecv();
-      // sometimes a second guildmate chimes in on top
-      if (Math.random() < 0.4) {
-        const other = data.members[Math.floor(Math.random() * data.members.length)];
-        setTimeout(() => {
-          setTyping(other.name);
-          setTimeout(() => {
-            setTyping(null);
-            setLogs((l) => ({ ...l, [ch]: [...l[ch], { id: ++seq.current, name: other.name, text: replyFor(text), role: other.role }] }));
-            sfx.chatRecv();
-          }, 900);
-        }, 500);
-      }
-    }, delay);
   };
 
   const react = (id: number) => {
@@ -1860,35 +1765,17 @@ function ChatPanel({ guildId, guildName, color }: { guildId: string; guildName: 
         </div>
       </div>
 
-      <div className="chat-online">
+      <div className="chat-online" data-testid="chat-connection">
         <span className="chat-online-dot" />
-        <span className="num">{data.members.length + 2}</span> online
-        <span className="chat-online-list">
-          {data.members.map((m) => (
-            <span key={m.name} className="chat-online-av" title={`${m.name} · ${m.role}`} style={{ borderColor: CH_ROLE_COLOR[m.role] || "#35e0ff" }}>
-              {m.name.slice(0, 1)}
-            </span>
-          ))}
-        </span>
+        <span className="num">{peerCount + 1}</span> local tab{peerCount === 0 ? "" : "s"} · {peerCount ? "LIVE LINK" : "OPEN ANOTHER TAB TO CHAT LIVE"}
+        <span className="ml-auto text-[9px] font-bold tracking-wider text-[var(--dim)]">SAME BROWSER ONLY · NO ONLINE MATCHMAKING SERVER</span>
       </div>
 
       <div className="chat-log scroll-thin" ref={logRef} data-testid="chat-log">
         {log.map((m) => (
           <ChatBubble key={m.id} msg={m} onReact={() => react(m.id)} />
         ))}
-        {typing && (
-          <div className="chat-typing" data-testid="chat-typing">
-            <span className="chat-av" style={{ borderColor: color, color, background: `linear-gradient(140deg, ${color}33, #0b0722)` }}>
-              {typing.slice(0, 1)}
-            </span>
-            <span className="chat-dots">
-              <i />
-              <i />
-              <i />
-            </span>
-            <span className="chat-typing-t">{typing} is typing</span>
-          </div>
-        )}
+
       </div>
 
       <div className="chat-quick">
@@ -2349,11 +2236,12 @@ function KnobToggle({
     >
       <span className="knob-rail">
         <span className="knob-glow" />
+        <span className="knob-state">{on ? "ON" : "OFF"}</span>
       </span>
       <span className="knob-head">
         <span className="knob-grip" />
       </span>
-      <span className="knob-ripple" />
+      <span className="knob-ripple" aria-hidden="true" />
     </button>
   );
 }
@@ -2407,12 +2295,30 @@ export function SettingsModal({
   mutate: (fn: (s: SaveData) => void) => void;
   onClose: () => void;
 }) {
-  const [confirmReset, setConfirmReset] = useState(false);
   const [diagOpen, setDiagOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
+  const [closing, setClosing] = useState(false);
+  const [music, setMusic] = useState<MusicSnapshot>(getMusicSnapshot);
+  const musicFileRef = useRef<HTMLInputElement>(null);
+  const closeTimer = useRef<number | null>(null);
   const { promptEvent, installed } = useInstallPrompt();
+  const requestClose = () => {
+    if (closing) return;
+    setClosing(true);
+    closeTimer.current = window.setTimeout(onClose, 220);
+  };
+  useEffect(() => {
+    void loadSavedMusic();
+    return subscribeMusic(setMusic);
+  }, []);
+  useEffect(() => {
+    if (music.duration > 0 && save.musicEnd <= 0) {
+      mutate((s) => { s.musicEnd = music.duration; if (!s.musicName) s.musicName = music.name; });
+    }
+  }, [music.duration, music.name, save.musicEnd, save.musicName, mutate]);
+  useEffect(() => () => { if (closeTimer.current !== null) window.clearTimeout(closeTimer.current); }, []);
   const fs = useFullscreen();
   const diagnostics = () => {
     const w = window as unknown as { __magictdBootErrors?: string[]; __magictdLastError?: string };
@@ -2431,20 +2337,30 @@ export function SettingsModal({
   const TOGGLES: [string, keyof SaveData & string, string, SetIconName, string][] = [
     ["Battle SFX", "sfx", "Sound effects during battle and menus", "sfx", "#35e0ff"],
     ["Rich FX", "fx", "Extra particles, smoke and hit effects", "fx", "#ff4fd8"],
+    ["Bloom", "bloomFx", "Soft light bloom on bright battlefield effects", "fx", "#54f4ff"],
+    ["Dynamic Shadows", "shadowFx", "Canvas glow and shadow rendering", "fx", "#b98bff"],
+    ["Anti-aliasing", "antiAlias", "Smooth edges and scaled canvas output", "fx", "#8effc4"],
     ["Damage Numbers", "dmgNums", "Floating damage values over every hit", "dmg", "#ffcf4d"],
     ["Screen Shake", "shakeFx", "Impact shake on explosions and hero skills", "shake", "#ff8a3d"],
+    ["Camera Motion Blur", "motionBlur", "Directional trail smear only while camera shake is active", "shake", "#ff315c"],
     ["Battlefield Guides", "guides", "Grid, buildable-cell and range circles", "guides", "#8effc4"],
     ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves", "fast", "#b98bff"],
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
     ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
     ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffcf4d"],
+    ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
   ];
   return (
-    <Modal onClose={onClose} w={470}>
-      <div className="font-disp text-2xl text-[#ffcf4d]">Settings</div>
+    <Modal onClose={requestClose} closing={closing} w={470}>
+      <div className="font-disp text-2xl text-[#ffcf4d]">{save.language === "th" ? "การตั้งค่า" : "Settings"}</div>
 
-      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">AUDIO</div>
+      <div className="row-card mt-3" data-testid="language-row">
+        <SetIcon name="guides" color="#54f4ff" />
+        <div className="min-w-0 flex-1"><div className="font-bold">{save.language === "th" ? "ภาษา" : "Language"}</div><div className="text-[11px] font-semibold text-[var(--dim)]">{save.language === "th" ? "เลือกภาษาของอินเทอร์เฟซ" : "Choose the interface language"}</div></div>
+        <select aria-label="Language" data-testid="language-select" className="rounded-lg border border-[var(--line)] bg-[#101329] px-3 py-2 text-sm font-bold" value={save.language} onChange={(e) => mutate((s) => { s.language = e.target.value === "th" ? "th" : "en"; })}><option value="en">English</option><option value="th">ไทย</option></select>
+      </div>
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">{save.language === "th" ? "เสียง" : "AUDIO"}</div>
       <div className="row-card mt-1.5">
         <SetIcon name="volume" color="#35e0ff" />
         <div className="min-w-0 flex-1">
@@ -2489,7 +2405,105 @@ export function SettingsModal({
         />
       </div>
 
+      <div className="mt-3 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="music-player">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Personal Music · Loop Player</div>
+            <div className="truncate text-[11px] font-semibold text-[var(--dim)]" title={music.name || save.musicName}>{music.name || save.musicName || "Upload an audio file from this device"}</div>
+          </div>
+          <button className="btn btn-cyan px-3 py-1.5 text-xs" onClick={() => musicFileRef.current?.click()}>Choose Audio</button>
+          {music.hasTrack && (music.playing
+            ? <button className="btn px-3 py-1.5 text-xs" aria-label="Pause personal music" onClick={() => { sfx.click(); pauseMusic(); }}>Pause</button>
+            : <button className="btn px-3 py-1.5 text-xs" aria-label="Play personal music" onClick={() => { sfx.click(); void toggleMusic(); }}>Play loop</button>)}
+          {music.hasTrack && <button className="btn px-3 py-1.5 text-xs text-[#ff8f9a]" onClick={() => { void clearMusic(); mutate((s) => { s.musicName = ""; s.musicStart = 0; s.musicEnd = 0; }); }}>Remove</button>}
+          <input ref={musicFileRef} type="file" accept="audio/*" className="hidden" aria-label="Upload music file" onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            void uploadMusic(file).then(() => {
+              mutate((s) => { s.musicName = file.name; s.musicStart = 0; s.musicEnd = 0; });
+              setMusicSettings({ volume: save.musicVol, start: 0, end: 0, rate: save.musicRate });
+            });
+            e.currentTarget.value = "";
+          }} />
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+          <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Music volume <span className="ml-auto text-[var(--txt)]">{Math.round(save.musicVol * 100)}%</span>
+            <input className="w-28 accent-[#35e0ff]" type="range" min="0" max="100" value={Math.round(save.musicVol * 100)} aria-label="Music volume" onChange={(e) => { const volume = Number(e.target.value) / 100; mutate((s) => { s.musicVol = volume; }); setMusicSettings({ volume }); }} />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Playback speed / pitch <span className="ml-auto text-[var(--txt)]">{save.musicRate.toFixed(2)}×</span>
+            <input className="w-28 accent-[#ff4fd8]" type="range" min="0.5" max="2" step="0.01" value={save.musicRate} aria-label="Music speed and pitch" onChange={(e) => { const rate = Number(e.target.value); mutate((s) => { s.musicRate = rate; }); setMusicSettings({ rate }); }} />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Loop start <span className="ml-auto text-[var(--txt)]">{Math.min(save.musicStart, music.duration).toFixed(1)}s</span>
+            <input className="w-28 accent-[#8effc4]" type="range" min="0" max={Math.max(0.1, music.duration)} step="0.1" value={Math.min(save.musicStart, Math.max(0, music.duration))} disabled={!music.hasTrack || !music.duration} aria-label="Music loop start" onChange={(e) => { const start = Math.min(Number(e.target.value), Math.max(0, Math.min(save.musicEnd || music.duration, music.duration) - 0.1)); mutate((s) => { s.musicStart = start; }); setMusicSettings({ start }); }} />
+          </label>
+          <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Loop end <span className="ml-auto text-[var(--txt)]">{Math.min(save.musicEnd || music.duration, music.duration).toFixed(1)}s</span>
+            <input className="w-28 accent-[#ffd76a]" type="range" min={Math.min(music.duration, save.musicStart + 0.1)} max={Math.max(0.1, music.duration)} step="0.1" value={Math.min(save.musicEnd || music.duration, Math.max(save.musicStart + 0.1, music.duration))} disabled={!music.hasTrack || !music.duration} aria-label="Music loop end" onChange={(e) => { const end = Math.max(save.musicStart + 0.1, Number(e.target.value)); mutate((s) => { s.musicEnd = end; }); setMusicSettings({ end }); }} />
+          </label>
+        </div>
+        <div className="mt-1 text-[10px] font-semibold text-[var(--dim)]">Track stored privately on this device. Playback loops between the trim points; speed changes also change pitch.</div>
+      </div>
+
+      <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {([['Bass Boost', 'bassBoost', 'Low-end +6 dB', setBassBoost], ['Treble Boost', 'trebleBoost', 'High-end +6 dB', setTrebleBoost]] as const).map(([label, key, desc, apply]) => (
+          <div key={key} className="row-card" data-testid={`toggle-${key}`}>
+            <SetIcon name="volume" color={key === "bassBoost" ? "#ff8a3d" : "#35e0ff"} />
+            <div className="min-w-0 flex-1"><div className="font-bold">{label}</div><div className="text-[11px] font-semibold text-[var(--dim)]">{desc}</div></div>
+            <KnobToggle on={save[key]} label={label} onToggle={() => { const next = !save[key]; mutate((s) => { s[key] = next; }); apply(next); }} />
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="sound-eq">
+        <div className="mb-2 font-bold">Sound EQ <span className="text-[10px] font-semibold text-[var(--dim)]">· Sound effects only</span></div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {([['Bass', 'eqBass'], ['Mids', 'eqMid'], ['Treble', 'eqTreble']] as const).map(([label, key]) => (
+            <label key={key} className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">{label}<span className="ml-auto min-w-8 text-right text-[var(--txt)]">{save[key] > 0 ? "+" : ""}{save[key]} dB</span>
+              <input className="w-24 accent-[#b98bff]" type="range" min="-12" max="12" step="1" value={save[key]} aria-label={`${label} EQ`} onChange={(e) => {
+                const value = Number(e.target.value);
+                mutate((s) => { s[key] = value; });
+                setAudioEQ(key === "eqBass" ? value : save.eqBass, key === "eqMid" ? value : save.eqMid, key === "eqTreble" ? value : save.eqTreble);
+              }} />
+            </label>
+          ))}
+        </div>
+      </div>
+
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
+      <div className="row-card mt-1.5" data-testid="pixel-ratio-row">
+        <SetIcon name="perf" color="#54f4ff" />
+        <div className="min-w-0 flex-1"><div className="font-bold">Pixel Ratio</div><div className="text-[11px] font-semibold text-[var(--dim)]">Canvas render resolution · {save.pixelRatio.toFixed(2)}×</div></div>
+        <input className="w-36" type="range" min="0.75" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
+      </div>
+      <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <div className="font-bold">Interface Theme <span className="text-[10px] font-bold tracking-widest text-[#54f4ff]">· SUPER THEMES</span></div>
+            <div className="text-[11px] font-semibold text-[var(--dim)]">Choose the arena control-room palette</div>
+          </div>
+          <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--dim)]">{save.uiTheme || "rift"}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="radiogroup" aria-label="Interface Theme">
+          {UI_THEMES.map((theme) => {
+            const active = (save.uiTheme || "rift") === theme.id;
+            return (
+              <button
+                key={theme.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                data-testid={`ui-theme-${theme.id}`}
+                onClick={() => { sfx.uiTab(); mutate((s) => { s.uiTheme = theme.id; if (theme.id === "super" || theme.id === "liquid") s.liquidGlass = true; }); }}
+                className={`theme-choice rounded-lg border p-1.5 text-left transition ${active ? "is-active" : ""}`}
+                style={{ borderColor: active ? theme.accent : "var(--line)", "--theme-accent": theme.accent } as React.CSSProperties}
+              >
+                <span className="mb-1.5 flex h-5 overflow-hidden rounded-md" aria-hidden="true">
+                  {theme.swatches.map((color) => <i key={color} className="h-full flex-1" style={{ background: color }} />)}
+                </span>
+                <span className="block truncate text-[10px] font-bold">{theme.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div className="mt-1.5 space-y-3">
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="max-fps-row">
           <SetIcon name="fps" color="#3dff8e" />
@@ -2541,6 +2555,14 @@ export function SettingsModal({
             ))}
           </div>
         </div>
+        <div className="rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="toggle-style-picker">
+          <div className="mb-2"><div className="font-bold">Toggle mechanism</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose how the switch looks and warms up when turned on.</div></div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {([ ["fluorescent", "Fluorescent tube", "Flicker-start glow"], ["incandescent", "Incandescent bulb", "Warm filament fade"], ["led", "LED bulb", "Instant diode"], ["halogen", "Halogen", "Quartz flash-on"] ] as const).map(([id, label, desc]) => (
+              <button key={id} type="button" aria-pressed={save.toggleStyle === id} data-testid={`toggle-style-${id}`} onClick={() => { sfx.uiTab(); mutate((s) => { s.toggleStyle = id; }); }} className={`toggle-style-choice ${save.toggleStyle === id ? "active" : ""}`}><span className={`toggle-style-lamp lamp-${id}`} aria-hidden="true" /><span className="block text-[10px] font-bold leading-tight">{label}</span><span className="mt-0.5 block text-[9px] text-[var(--dim)]">{desc}</span></button>
+            ))}
+          </div>
+        </div>
         {TOGGLES.map(([label, key, d, icon, color]) => (
           <div key={key} className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
             <SetIcon name={icon} color={color} />
@@ -2561,6 +2583,10 @@ export function SettingsModal({
             />
           </div>
         ))}
+        <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+          <div className="min-w-0 flex-1"><div className="font-bold">Interpolation Method</div><div className="text-xs font-semibold text-[var(--dim)]">Hermite uses velocity-aware, monotonic easing; Smoothstep or Linear remain available.</div></div>
+          <select aria-label="Interpolation Method" className="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-xs" value={save.interpolationMethod} onChange={(e) => mutate((s) => { const method = e.target.value; s.interpolationMethod = method === "linear" || method === "hermite" ? method : "smoothstep"; })}><option value="linear">Linear</option><option value="smoothstep">Smoothstep</option><option value="hermite">Hermite</option></select>
+        </div>
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">APP</div>
@@ -2613,7 +2639,7 @@ export function SettingsModal({
         />
       </div>
 
-      {/* FONT VAULT — fifty faces, each tile previews itself. Picking one applies
+      {/* FONT VAULT — eighty faces, each tile previews itself. Picking one applies
           it live (UI + headings) and lazily pulls the Google stylesheet. */}
       <div className="mt-4 flex items-center gap-2">
         <div className="text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">FONT</div>
@@ -2716,29 +2742,6 @@ export function SettingsModal({
             </button>
           </div>
         )}
-        <div className="flex items-center gap-3 rounded-lg border border-[#ff4d5e55] bg-black/30 px-4 py-3">
-          <SetIcon name="reset" color="#ff4d5e" />
-          <div className="min-w-0 flex-1">
-            <div className="font-bold text-[#ff4d5e]">Reset Progress</div>
-            <div className="text-xs font-semibold text-[var(--dim)]">Wipes gold, gems, tokens, towers and lineup</div>
-          </div>
-          <button
-            className="btn btn-danger px-4 py-1.5 text-sm"
-            onClick={() => {
-              if (!confirmReset) {
-                setConfirmReset(true);
-                sfx.error();
-                return;
-              }
-              clearSave();
-              window.dispatchEvent(new CustomEvent("magictd-reset"));
-              sfx.click();
-              onClose();
-            }}
-          >
-            {confirmReset ? "Confirm?" : "Reset"}
-          </button>
-        </div>
         <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
           <SetIcon name="replay" color="#ff9be9" />
           <div className="min-w-0 flex-1">
@@ -2750,7 +2753,7 @@ export function SettingsModal({
             onClick={() => {
               sfx.click();
               window.dispatchEvent(new CustomEvent("magictd-intro"));
-              onClose();
+              requestClose();
             }}
           >
             Replay
@@ -2796,7 +2799,7 @@ export function SettingsModal({
           )}
         </div>
       </div>
-      <button className="btn mt-4 w-full py-2" onClick={() => { sfx.click(); onClose(); }}>
+      <button className="btn mt-4 w-full py-2" onClick={() => { sfx.click(); requestClose(); }}>
         Close
       </button>
     </Modal>

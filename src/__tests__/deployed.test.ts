@@ -135,7 +135,7 @@ describe("published build (index.html)", () => {
       "Trophy Competition",
       "Items Finding",
       "Mineshaft",
-      "Survive Lightning",
+      "Gem Rush",
       "Support Chest",
       "Heroes Chest",
       "Advanced Chip Module",
