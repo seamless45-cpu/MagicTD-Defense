@@ -13,7 +13,7 @@
         height: 100%;
         background: #07051a;
         color: #eae6ff;
-        font-family: "Rajdhani", system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-family: var(--font-ui, "Rajdhani", system-ui, -apple-system, "Segoe UI", sans-serif);
       }
       /* The static splash mirrors the in-app loading screen so the hand-off is invisible. */
       #boot-splash {
@@ -196,6 +196,34 @@
         link("icon", "icons/favicon-64.png", { type: "image/png", sizes: "64x64" });
         link("icon", "icons/icon-192.png", { type: "image/png", sizes: "192x192" });
         link("apple-touch-icon", "icons/apple-touch-icon.png");
+      })();
+    </script>
+    <!--
+      Paint the face chosen in Settings before the app bundle runs. fonts.ts
+      caches the resolved stack on every pick, so the static splash and the
+      first React frame use the same typeface as the rest of the game.
+    -->
+    <script>
+      (function () {
+        try {
+          var stack = localStorage.getItem("magictd_font_stack");
+          if (!stack) return;
+          document.documentElement.style.setProperty("--font-ui", stack);
+          document.documentElement.style.setProperty("--font-disp", stack);
+          // pull the chosen Google family before the bundle runs, so the
+          // splash, the intro and the first menu frame all share one face
+          var google = localStorage.getItem("magictd_font_google");
+          if (google) {
+            var link = document.createElement("link");
+            link.rel = "stylesheet";
+            link.href = "https://fonts.googleapis.com/css2?family=" + google + "&display=swap";
+            link.media = "print";
+            link.onload = function () { this.media = "all"; };
+            document.head.appendChild(link);
+          }
+        } catch (err) {
+          /* storage blocked: the default face still renders */
+        }
       })();
     </script>
   </head>

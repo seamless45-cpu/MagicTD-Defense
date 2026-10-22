@@ -619,11 +619,31 @@ export function TowerIcon({
             <path d="M18 32h12" stroke={a} strokeWidth="3" strokeLinecap="round" />
           </g>
         );
+      case "eclipse":
+        return (
+          <g>
+            <circle cx="24" cy="24" r="15" fill="#12032a" stroke={c} strokeWidth="2.4" />
+            <path d="M31 12a14 14 0 1 0 0 24 12 12 0 1 1 0-24z" fill={a} opacity="0.9" />
+            <circle cx="24" cy="24" r="6.5" fill="#0a0115" stroke="#e6d6ff" strokeWidth="1.6" />
+            <circle cx="37" cy="15" r="3" fill="#d8c2ff" />
+            <path d="M12 36h7M29 36h7" stroke={a} strokeWidth="2.4" strokeLinecap="round" />
+          </g>
+        );
+      case "seraph":
+        return (
+          <g>
+            <ellipse cx="24" cy="11" rx="10" ry="3.2" fill="none" stroke="#ffe9a8" strokeWidth="2" />
+            <path d="M14 27c-6-6-10-2-10 3 4-1 8 0 10 4zM34 27c6-6 10-2 10 3-4-1-8 0-10 4z" fill={a} opacity="0.8" />
+            <rect x="21" y="18" width="6" height="20" rx="3" fill="#123244" stroke={c} strokeWidth="2" />
+            <path d="M24 5l5 10-5 5-5-5z" fill="#ffffff" stroke={c} strokeWidth="1.4" />
+            <circle cx="24" cy="20" r="3" fill={a} />
+          </g>
+        );
       default:
         return (
           <g>
             <circle cx="24" cy="24" r="16" fill="#11102a" stroke={c} strokeWidth="2.5" />
-            <text x="24" y="31" textAnchor="middle" fontSize="20" fontWeight="900" fill={a}>{id.slice(0, 1).toUpperCase()}</text>
+            <text x="24" y="31" textAnchor="middle" fontSize="20" fontWeight="900" fill={a} fontFamily="var(--font-ui, inherit)">{id.slice(0, 1).toUpperCase()}</text>
           </g>
         );
     }
@@ -713,20 +733,36 @@ export function Emblem({ size = 120 }: { size?: number }) {
   );
 }
 
-export function useToasts() {
+export function useToasts(enabled = true) {
   const [toasts, setToasts] = useState<{ id: number; msg: string; color?: string }[]>([]);
   const idRef = useRef(0);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
 
-  const push = useCallback((msg: string, color?: string) => {
-    const id = ++idRef.current;
-    setToasts((t) => [...t.slice(-4), { id, msg, color }]);
-    const timer = setTimeout(() => {
-      setToasts((t) => t.filter((x) => x.id !== id));
-      timersRef.current = timersRef.current.filter((x) => x !== timer);
-    }, 2400);
-    timersRef.current.push(timer);
-  }, []);
+  // flipping the setting on clears anything already on screen
+  useEffect(() => {
+    if (enabled) return;
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+    setToasts((t) => (t.length ? [] : t));
+  }, [enabled]);
+
+  const push = useCallback(
+    (msg: string, color?: string) => {
+      // the Hide Notifications setting turns every toast into a no-op, without
+      // touching the call sites (rewards, saves and sounds still happen)
+      if (!enabledRef.current) return;
+      const id = ++idRef.current;
+      setToasts((t) => [...t.slice(-4), { id, msg, color }]);
+      const timer = setTimeout(() => {
+        setToasts((t) => t.filter((x) => x.id !== id));
+        timersRef.current = timersRef.current.filter((x) => x !== timer);
+      }, 2400);
+      timersRef.current.push(timer);
+    },
+    []
+  );
 
   useEffect(
     () => () => {
@@ -919,6 +955,8 @@ export type SetIconName =
   | "interp"
   | "fps"
   | "bolt"
+  | "boss"
+  | "bell"
   | "download"
   | "expand"
   | "backup"
@@ -972,6 +1010,21 @@ const SET_PATHS: Record<SetIconName, ReactNode> = {
       <path d="M16 4l-1.5 16" />
       <path d="M4.6 9h15" />
       <path d="M3.9 15h15" />
+    </>
+  ),
+  bell: (
+    <>
+      <path d="M6 16.5V11a6 6 0 0 1 12 0v5.5l2 2.5H4z" />
+      <path d="M10 21h4" />
+      <path d="M3 3l18 18" />
+    </>
+  ),
+  boss: (
+    <>
+      <path d="M4 8.5 8 4v4h8V4l4 4.5v7L16 20v-4H8v4l-4-4.5z" />
+      <path d="M10 11h4" />
+      <circle cx="8.5" cy="9.4" r="0.9" fill="currentColor" />
+      <circle cx="15.5" cy="9.4" r="0.9" fill="currentColor" />
     </>
   ),
   shake: (

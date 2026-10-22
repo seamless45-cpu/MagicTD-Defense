@@ -18,6 +18,11 @@ import {
   HERO_BY_ID,
   HERO_MAX_LEVEL,
   HERO_SHARD_COST,
+  HERO_AWAKENING_MAX_TIER,
+  heroAwakenCost,
+  BATTLE_ROUNDS,
+  HARDCORE_DAILY_PLAYS,
+  heroAwkSpec,
   MAIL,
   MAIL_BY_ID,
   RARITY,
@@ -133,6 +138,8 @@ export interface SaveData {
   /** owned cosmetic battlefield scenes; no gameplay bonuses */
   scenes: string[];
   awn: Record<string, [number, number]>; // tower id -> [awk1Tier, awk2Tier] 0..5
+  /** hero id -> [awk1Tier, awk2Tier], bought with Magic Tokens */
+  heroAwn: Record<string, [number, number]>;
   hero: string; // selected hero id
   heroLv: Record<string, number>; // hero id -> level (1..HERO_MAX_LEVEL)
   /** hero id -> shards banked from Heroes Chests */
@@ -159,6 +166,12 @@ export interface SaveData {
   bestEndless: number;
   /** deepest wave ever reached in the Gauntlet roguelite mode */
   gauntletBest: number;
+  /** deepest round ever cleared in Hardcore */
+  hardcoreBest: number;
+  /** game-day stamp the Hardcore daily attempts belong to */
+  hardcoreDay: string;
+  /** Hardcore runs started today (max HARDCORE_DAILY_PLAYS) */
+  hardcoreUses: number;
   wins: number;
   runs: number;
   /** consecutive Battle victories */
@@ -191,9 +204,7 @@ export interface SaveData {
   liquidGlass: boolean;
   /** color palette selected in the theme picker */
   uiTheme: UiTheme;
-  /** interface language; English and Thai UI strings */
   language: "en" | "th";
-  /** physical style used by settings toggle knobs */
   toggleStyle: "fluorescent" | "incandescent" | "led" | "halogen";
   /** selected UI font id from the 80-font catalog in game/fonts.ts */
   font: string;
@@ -221,6 +232,10 @@ export interface SaveData {
   fxq: number;
   /** camera shake on explosions */
   shakeFx: boolean;
+  /** camera shake strength multiplier, 0 = off, 1 = 100%, 2 = 200% */
+  shakeIntensity: number;
+  /** skip the boss cutscene card and jump straight into the fight */
+  autoSkipBossCut: boolean;
   /** internal canvas resolution multiplier (0.75..2) */
   pixelRatio: number;
   bloomFx: boolean;
@@ -234,6 +249,8 @@ export interface SaveData {
   reducedMotion: boolean;
   /** fps + entity counter overlay */
   perf: boolean;
+  /** suppress every toast popup, including battle callouts */
+  hideNotifs: boolean;
   /** how many days in a row the daily reward has been claimed (1..7) */
   dailyStreak: number;
   lastDaily: string;
@@ -281,6 +298,7 @@ export function defaultSave(): SaveData {
     lineup: ["arrow", "cannon", "ice"],
     scenes: [],
     awn: {},
+    heroAwn: {},
     hero: "nova",
     heroLv: {},
     heroShards: {},
@@ -296,6 +314,9 @@ export function defaultSave(): SaveData {
     best: 0,
     bestEndless: 0,
     gauntletBest: 0,
+    hardcoreBest: 0,
+    hardcoreDay: "",
+    hardcoreUses: 0,
     wins: 0,
     runs: 0,
     streak: 0,
@@ -333,6 +354,8 @@ export function defaultSave(): SaveData {
     interpolationMethod: "smoothstep",
     fxq: 0,
     shakeFx: true,
+    shakeIntensity: 1,
+    autoSkipBossCut: false,
     pixelRatio: 1,
     bloomFx: true,
     shadowFx: true,
@@ -341,6 +364,7 @@ export function defaultSave(): SaveData {
     fastWaves: false,
     reducedMotion: false,
     perf: false,
+    hideNotifs: false,
     dailyStreak: 0,
     lastDaily: "",
     lastSeen: 0,
@@ -388,13 +412,26 @@ function normalise(s: SaveData): SaveData {
   }
   s.eventStreak = Math.max(0, Math.min(7, Number.isFinite(s.eventStreak) ? Math.round(s.eventStreak) : 0));
   s.zoom = clampZoom(s.zoom);
-  s.pixelRatio = Math.round(Math.max(0.75, Math.min(2, Number.isFinite(s.pixelRatio) ? s.pixelRatio : 1)) * 4) / 4;
+  // the floor is a quarter-resolution render (0.25) for low-end phones
+  s.pixelRatio = Math.round(Math.max(0.25, Math.min(2, Number.isFinite(s.pixelRatio) ? s.pixelRatio : 1)) * 4) / 4;
+  s.shakeIntensity = Math.round(Math.max(0, Math.min(2, Number.isFinite(s.shakeIntensity) ? s.shakeIntensity : 1)) * 20) / 20;
   s.bloomFx = s.bloomFx !== false;
   s.shadowFx = s.shadowFx !== false;
   s.antiAlias = s.antiAlias !== false;
   if (!UI_THEMES.some((theme) => theme.id === s.uiTheme)) s.uiTheme = "rift";
   s.language = s.language === "th" ? "th" : "en";
   if (!["fluorescent", "incandescent", "led", "halogen"].includes(s.toggleStyle)) s.toggleStyle = "led";
+  s.autoSkipBossCut = s.autoSkipBossCut === true;
+  s.heroAwn = s.heroAwn && typeof s.heroAwn === "object" ? s.heroAwn : {};
+  // clamp every hero awakening pair into 0..HERO_AWAKENING_MAX_TIER
+  for (const id of Object.keys(s.heroAwn)) {
+    const pair = s.heroAwn[id];
+    if (!Array.isArray(pair)) { delete s.heroAwn[id]; continue; }
+    s.heroAwn[id] = [
+      Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, Math.floor(Number(pair[0]) || 0))),
+      Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, Math.floor(Number(pair[1]) || 0))),
+    ];
+  }
   s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
   s.heroShards = s.heroShards && typeof s.heroShards === "object" ? s.heroShards : {};
   s.chips = { ...emptyChips(), ...(s.chips && typeof s.chips === "object" ? s.chips : {}) };
@@ -403,6 +440,15 @@ function normalise(s: SaveData): SaveData {
   s.best = Math.max(0, Math.floor(Number(s.best) || 0));
   s.bestEndless = Math.max(0, Math.floor(Number(s.bestEndless) || 0));
   s.gauntletBest = Math.max(0, Math.floor(Number(s.gauntletBest) || 0));
+  s.hardcoreBest = Math.max(0, Math.min(BATTLE_ROUNDS, Math.floor(Number(s.hardcoreBest) || 0)));
+  s.hardcoreDay = typeof s.hardcoreDay === "string" ? s.hardcoreDay : "";
+  s.hardcoreUses = Math.max(0, Math.min(HARDCORE_DAILY_PLAYS, Math.floor(Number(s.hardcoreUses) || 0)));
+  // a stale day stamp retires yesterday's attempts
+  if (s.hardcoreDay !== todayStr()) {
+    s.hardcoreDay = todayStr();
+    s.hardcoreUses = 0;
+  }
+  s.hideNotifs = s.hideNotifs === true;
   s.compClaimed = Array.isArray(s.compClaimed) ? s.compClaimed.map(String) : [];
   s.guild = { ...emptyGuild(), ...(s.guild && typeof s.guild === "object" ? s.guild : {}) };
   s.guild.quests = s.guild.quests && typeof s.guild.quests === "object" ? s.guild.quests : {};
@@ -660,6 +706,23 @@ export function rollSeason(s: SaveData): boolean {
  * 06:59 and again at 07:01 counts as two different days — which is the whole
  * point of a 7 A.M. reset.
  */
+/** Hardcore attempts left today (0..3), reset with the 07:00 game-day */
+export function hardcorePlaysLeft(s: SaveData, day = todayStr()): number {
+  const used = s.hardcoreDay === day ? Math.max(0, Math.min(HARDCORE_DAILY_PLAYS, s.hardcoreUses || 0)) : 0;
+  return Math.max(0, HARDCORE_DAILY_PLAYS - used);
+}
+
+/** Spend one Hardcore attempt. Returns false when the daily budget is gone. */
+export function spendHardcorePlay(s: SaveData, day = todayStr()): boolean {
+  if (s.hardcoreDay !== day) {
+    s.hardcoreDay = day;
+    s.hardcoreUses = 0;
+  }
+  if ((s.hardcoreUses || 0) >= HARDCORE_DAILY_PLAYS) return false;
+  s.hardcoreUses = (s.hardcoreUses || 0) + 1;
+  return true;
+}
+
 export function todayStr(d = new Date()) {
   const shifted = new Date(d.getTime() - DAILY_RESET_HOUR * 3600000);
   // local calendar date of the shifted instant
@@ -738,6 +801,28 @@ export function levelHeroWithShards(s: SaveData, id: string): boolean {
   return true;
 }
 
+/** hero awakening tier for one path (0 = not awakened) */
+export function heroAwkTier(s: SaveData, id: string, slot: 0 | 1): number {
+  return Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, s.heroAwn?.[id]?.[slot] || 0));
+}
+
+/**
+ * Buy one hero awakening tier with Magic Tokens. Returns the new tier, or 0
+ * when the purchase was refused (no path, maxed, or not enough tokens).
+ */
+export function awakenHero(s: SaveData, id: string, slot: 0 | 1): number {
+  if (!heroAwkSpec(id, slot)) return 0;
+  const cur = heroAwkTier(s, id, slot);
+  if (cur >= HERO_AWAKENING_MAX_TIER) return 0;
+  const cost = heroAwakenCost(cur + 1);
+  if (s.tokens < cost) return 0;
+  s.tokens -= cost;
+  const pair = s.heroAwn[id] || [0, 0];
+  pair[slot] = cur + 1;
+  s.heroAwn[id] = pair as [number, number];
+  return cur + 1;
+}
+
 export function addHeroShards(s: SaveData, id: string, n: number) {
   if (!HERO_BY_ID[id]) return;
   s.heroShards[id] = (s.heroShards[id] || 0) + n;
@@ -792,7 +877,8 @@ export function rollChest(chestId: string, fragBonus = 0, biasBonus = 0): ChestL
   const loot = emptyLoot();
   if (!c) return loot;
   if (c.special === "mystical") {
-    if (Math.random() < 0.71) {
+    // 65% five legendary fragments, 35% one mystical fragment
+    if (Math.random() < 0.65) {
       const legendaryIds = Object.keys(TOWER_BY_ID).filter((id) => TOWER_BY_ID[id].rarity === "legendary");
       for (let i = 0; i < 5; i++) {
         const id = legendaryIds[Math.floor(Math.random() * legendaryIds.length)];

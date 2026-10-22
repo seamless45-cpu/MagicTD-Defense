@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import App from "../App";
 import Battle from "../screens/Battle";
 import { canvasStats, consoleErrors } from "./setup";
-import { defaultSave, persistSave, type SaveData } from "../game/save";
+import { defaultSave, persistSave, todayStr, type SaveData } from "../game/save";
 import { upgradeGoldCost, monthlyEventBonus, monthlyEventForDate, TOWERS } from "../game/data";
 
 // ---------- tiny helpers (no testing-library dependency) ----------
@@ -273,7 +273,7 @@ describe("Settings", () => {
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
     // every new toggle is present and persisted
-    for (const label of ["Damage Numbers", "Screen Shake", "Battlefield Guides", "Auto-Start Waves", "Reduced Motion", "Performance HUD"]) {
+    for (const label of ["Damage Numbers", "Screen Shake", "Battlefield Guides", "Auto-Start Waves", "Reduced Motion", "Performance HUD", "Auto-Skip Boss Cutscene"]) {
       expect(document.body.textContent, label).toContain(label);
     }
     // the label sits in a wrapper div inside its option row — walk up to the row
@@ -291,6 +291,9 @@ describe("Settings", () => {
     await waitFor(() => saved().fastWaves === true, "auto-start on");
     click(rowFor("Performance HUD").querySelector("button")!);
     await waitFor(() => saved().perf === true, "perf hud on");
+    // boss cutscenes can be retired for good from settings
+    click(rowFor("Auto-Skip Boss Cutscene").querySelector("button")!);
+    await waitFor(() => saved().autoSkipBossCut === true, "auto-skip boss cutscenes on");
 
     // master volume slider
     const slider = document.querySelector('input[type="range"]') as HTMLInputElement;
@@ -489,13 +492,19 @@ describe("Gauntlet content", () => {
       20000
     );
     const text = (cut.textContent || "").toUpperCase();
-    // several bosses share wave 24 — the card introduces the marquee one
-    expect(text).toContain("ABYSS LEVIATHAN");
+    // several bosses share wave 24 — the card introduces the marquee one, and
+    // the Storm Herald is the deepest boss on the board (highest HP multiplier)
+    expect(text).toContain("STORM HERALD");
     expect(text).toContain("WAVE 24");
-    // its nine-skill kit is advertised on the card
-    for (const skill of ["Rift Call", "Void Step", "Bulwark", "Blood Frenzy", "Null Field", "Devour", "Meteor Fall", "Rift Chains", "Warp"]) {
+    // it advertises its OWN three-skill kit — nothing borrowed from another boss
+    for (const skill of ["Soul Siphon", "Overcharge", "Maelstrom"]) {
       expect(text, skill).toContain(skill.toUpperCase());
     }
+    for (const skill of ["Rift Call", "Void Step", "Bulwark", "Meteor Fall", "Rift Chains", "Warp", "Foundation Quake"]) {
+      expect(text, skill).not.toContain(skill.toUpperCase());
+    }
+    // the kit chips are exactly the three exclusive skills
+    expect(cut.querySelectorAll(".boss-chip").length).toBe(3);
 
     // the canvas keeps painting through the new silhouettes
     await waitFor(() => canvasStats.calls > 0, "canvas painting");
@@ -594,7 +603,7 @@ describe("Shop", () => {
     noErrors();
   });
 
-  it("opens the 5000-gem Mystical Chest and banks its rarity-tier reward", async () => {
+  it("opens the 4000-gem Mystical Chest and banks its rarity-tier reward", async () => {
     persistSave({ ...defaultSave(), gems: 20000 });
     await mountApp();
     click(byText("button", "Shop")!);
@@ -602,7 +611,7 @@ describe("Shop", () => {
     const fragmentsBefore = fragTotal(saved());
     const gemsBefore = saved().gems;
     const card = document.querySelector('[data-chest="mystical"]')!;
-    expect(card.textContent).toContain("71% · 5 Legendary / 29% · 1 Mystical");
+    expect(card.textContent).toContain("65% · 5 Legendary / 35% · 1 Mystical");
     const buy = card.querySelector("button") as HTMLButtonElement;
     expect(buy.disabled).toBe(false);
     click(buy);
@@ -826,10 +835,10 @@ describe("Towers", () => {
     );
     expect(nested, "nested scroll boxes inside the tab").toHaveLength(0);
 
-    // every tower is in that one grid: 62 cells + 5 rarity headers
-    expect(grid.children.length).toBe(67);
+    // every tower is in that one grid: 64 cells + 5 rarity headers
+    expect(grid.children.length).toBe(69);
     const towerCells = page.querySelectorAll(".tw-cell[data-tower]").length;
-    expect(towerCells).toBe(62);
+    expect(towerCells).toBe(64);
 
     // the rotation strip and the filters ride along on top of the scroll, so the
     // drag-to-rotation drop target never scrolls out of reach
@@ -1108,6 +1117,34 @@ describe("Guild", () => {
 });
 
 describe("Heroes", () => {
+  it("sells the Thunder God two token-bought awakening paths", async () => {
+    persistSave({ ...defaultSave(), hero: "thunder", tokens: 500 });
+    await mountApp();
+
+    const panel = await waitFor(
+      () => document.querySelector('[data-testid="hero-awakening"]') as HTMLElement,
+      "awakening panel"
+    );
+    const text = panel.textContent || "";
+    expect(text).toContain("Electrical Induction");
+    expect(text).toContain("Bolt from the Blue");
+    expect(text).toContain("PASSIVE");
+    // two independent tracks, each with its own token price
+    const first = panel.querySelector('[data-testid="hero-awaken-0"]') as HTMLButtonElement;
+    const second = panel.querySelector('[data-testid="hero-awaken-1"]') as HTMLButtonElement;
+    expect((first.textContent || "").toUpperCase()).toContain("TIER I");
+    expect(first.disabled).toBe(false);
+
+    const before = saved().tokens;
+    click(first);
+    await waitFor(() => saved().heroAwn?.thunder?.[0] === 1, "first tier bought");
+    expect(saved().tokens).toBeLessThan(before);
+    // the second path is still untouched and its button now asks for Tier I too
+    expect(saved().heroAwn?.thunder?.[1] || 0).toBe(0);
+    await waitFor(() => /TIER I/i.test(second.textContent || ""), "second path still at tier 0");
+    noErrors();
+  }, 30000);
+
   it("upgrades the equipped hero with gold", async () => {
     persistSave({ ...defaultSave(), gold: 5000 });
     await mountApp();
@@ -1142,7 +1179,7 @@ describe("Battle", () => {
     await mountApp();
     startMode("Super Hardcore");
     const rules = await waitFor(() => document.querySelector('[data-testid="superhardcore-rules"]') as HTMLElement, "Super Hardcore HUD");
-    expect(rules.textContent).toContain("710× HP · 720× REWARDS · +75% SPEED · 1 LIFE");
+    expect(rules.textContent).toContain("710× HP · +75% SPEED · 720× REWARDS · 1 LIFE");
     const lives = document.querySelector('[data-testid="hud-lives"]') as HTMLElement;
     expect(lives.textContent).toContain("1");
     noErrors();
@@ -1287,7 +1324,8 @@ describe("Battle", () => {
     // bosses arrive from round 16; the kit is data-driven, so assert on the table
     const kit = document.querySelector('[data-testid="boss-kit"]');
     if (kit) {
-      expect(kit.children.length).toBeGreaterThanOrEqual(6);
+      // every boss runs exactly its own three exclusive skills
+      expect(kit.children.length).toBe(3);
     }
     click(byText("button", "Abandon")!);
     await waitFor(() => byText("div", "Command Center"), "back home");
@@ -1339,11 +1377,11 @@ describe("Battle", () => {
     const text = cut.textContent || "";
     expect(text).toContain("WARNING");
     // The automatic roulette may select any boss; verify that the reveal is one of the live roster.
-    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN"].some((name) => text.includes(name))).toBe(true);
+    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN", "STORM HERALD"].some((name) => text.includes(name))).toBe(true);
     expect(text).toContain("ROUND 4");
     expect(text).toContain("SKIP BOSS INTRO");
     // The roulette reveal carries a title, live stats, and the selected boss's own kit.
-    expect(["CRIMSON WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN"].some((name) => text.includes(name))).toBe(true);
+    expect(["CRIMSON WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN", "STORM HERALD"].some((name) => text.includes(name))).toBe(true);
     expect(text).toContain("HEALTH");
     expect(text).toContain("ARMOUR");
     expect(text).toContain("LIVES");
@@ -1357,7 +1395,7 @@ describe("Battle", () => {
 
     // the boss then walks onto the path and the bar appears
     const bar = await waitFor(() => document.querySelector('[data-testid="boss-bar"]'), "boss health bar", 15000);
-    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN"].some((name) => (bar.textContent || "").includes(name))).toBe(true);
+    expect(["WARLORD", "RIFT OVERLORD", "VOID TITAN", "ABYSS LEVIATHAN", "STORM HERALD"].some((name) => (bar.textContent || "").includes(name))).toBe(true);
 
     // a skill eventually fires and the callout banner names it
     const cast = await waitFor(
@@ -1366,12 +1404,39 @@ describe("Battle", () => {
       25000
     );
     // the banner shouts the skill name and explains what it does
-    expect(cast.textContent || "").toMatch(/RIFT CALL|VOID STEP|BULWARK|BLOOD FRENZY/);
-    expect(cast.textContent || "").toMatch(/warlord|overlord|titan|leviathan/i);
+    expect(cast.textContent || "").toMatch(/RIFT CALL|WAR CRY|SHIELD CLEAVE|IRON BANNER|FOUNDATION QUAKE|BLOOD FRENZY|SOUL SIPHON|OVERCHARGE|MAELSTROM|UNDERTOW|METEOR|RIFT CHAINS|SOUL DEVOUR|NULL FIELD|WARP SURGE/);
+    expect(cast.textContent || "").toMatch(/warlord|overlord|titan|leviathan|herald/i);
 
     unmountApp();
     noErrors();
   }, 60000);
+
+  it("skips the cutscene entirely when auto-skip is on", async () => {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const s = defaultSave();
+    s.autoSkipBossCut = true;
+    root.render(
+      <StrictMode>
+        <Battle mode="battle" save={s} mutate={() => {}} onExit={() => {}} debugRound={4} />
+      </StrictMode>
+    );
+
+    // the banner names the boss and its signature skill ...
+    const cast = await waitFor(
+      () => document.querySelector('[data-testid="boss-cast"]') as HTMLElement,
+      "auto-skip callout",
+      20000
+    );
+    const text = cast.textContent || "";
+    expect(text).toMatch(/ROUND 4|WAVE 4/);
+    expect(text).toMatch(/RIFT CALL|WAR CRY|SHIELD CLEAVE|SOUL SIPHON|OVERCHARGE|MAELSTROM|FOUNDATION QUAKE|METEOR FALL|SOUL DEVOUR|RIFT CHAINS|UNDERTOW/i);
+    // ... and the card never mounts
+    expect(document.querySelector('[data-testid="boss-cutscene"]')).toBeNull();
+
+    unmountApp();
+  }, 40000);
 
   it("zooms the arena in and out", async () => {
     await mountApp();
@@ -1469,6 +1534,8 @@ describe("Battle", () => {
       Number((document.querySelector('[data-testid="towers-on-board"]')!.textContent || "0").replace(/[^\d]/g, ""));
 
     for (let i = 0; i < 3; i++) {
+      // the button stays disabled until the engine binds its summon handle
+      await waitFor(() => !summon.disabled, "summon enabled");
       click(summon);
       await sleep(150);
     }
@@ -1909,5 +1976,91 @@ describe("Battle controls", () => {
     expect(document.querySelector('[data-testid="call-wave"]')).toBeTruthy();
     noErrors();
     unmountApp();
+  }, 30000);
+});
+
+
+describe("Hardcore", () => {
+  it("spends a daily attempt to enter and shows the mode rules", async () => {
+    await mountApp();
+    const card = document.querySelector('[data-mode="Hardcore"]') as HTMLElement;
+    expect(card, "hardcore mode card").toBeTruthy();
+    expect(card.textContent).toContain("3/3 LEFT");
+
+    click(card.querySelector("button") as HTMLElement);
+    await waitFor(() => saved().hardcoreUses === 1, "attempt banked");
+    // the HUD advertises the remaining daily attempts and the rule set
+    const plays = await waitFor(
+      () => document.querySelector('[data-testid="hardcore-plays"]') as HTMLElement,
+      "hardcore HUD pill"
+    );
+    expect(plays.textContent || "").toContain("2");
+    expect(plays.textContent || "").toContain("/ 3 left");
+    expect((document.querySelector('[data-testid="hardcore-rules"]') as HTMLElement).textContent).toContain("120× REWARDS");
+
+    // the first wave fields two bodies per slot: twenty enemies, not ten
+    const fielded = await waitFor(() => {
+      const n = Number((document.querySelector('[data-testid="enemies-left"]')?.textContent || "").replace(/[^\d]/g, ""));
+      return n >= 20 ? n : 0;
+    }, "double-spawn wave", 20000);
+    expect(fielded).toBe(20);
+
+    // abandoning does not refund the attempt
+    click(byText("button", "Abandon") as HTMLElement);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    expect(saved().hardcoreUses).toBe(1);
+    expect((document.querySelector('[data-mode="Hardcore"]') as HTMLElement).textContent).toContain("2/3 LEFT");
+    noErrors();
+  }, 40000);
+
+  it("locks the mode out after three runs in one day", async () => {
+    persistSave({ ...defaultSave(), hardcoreUses: 3, hardcoreDay: todayStr() });
+    await mountApp();
+    const card = document.querySelector('[data-mode="Hardcore"]') as HTMLElement;
+    expect(card.textContent).toContain("NO RUNS LEFT");
+    click(card.querySelector("button") as HTMLElement);
+    await sleep(250);
+    // still on the home screen, and the budget was not overspent
+    expect(document.querySelector('[data-testid="hud"]')).toBeNull();
+    expect(saved().hardcoreUses).toBe(3);
+    noErrors();
+  }, 20000);
+});
+
+describe("Notifications", () => {
+  it("suppresses every toast when notifications are hidden", async () => {
+    persistSave({ ...defaultSave(), hideNotifs: true });
+    await mountApp();
+    // equipping a hero normally raises an "equipped" toast
+    const glacier = all("button").find((b) => (b.textContent || "").includes("Glacier")) as HTMLElement;
+    click(glacier);
+    await waitFor(() => saved().hero === "glacier", "hero saved");
+    await sleep(200);
+    expect(document.querySelectorAll(".toast")).toHaveLength(0);
+    // the setting round-trips through the Settings toggle
+    click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await waitFor(() => byText("div", "Settings"), "settings modal");
+    expect(document.body.textContent).toContain("Hide Notifications");
+    noErrors();
+  }, 30000);
+});
+
+describe("Boss roulette strip", () => {
+  it("draws a compact single-row reel above the arena", async () => {
+    await mountApp();
+    startMode("Battle");
+    const reel = await waitFor(
+      () => document.querySelector('[data-testid="boss-roulette"]') as HTMLElement,
+      "boss roulette"
+    );
+    // one row: copy block, small portrait, hairline progress track
+    expect(reel.querySelector(".boss-roulette-copy")).toBeTruthy();
+    expect(reel.textContent || "").toContain("NEXT BOSS");
+    expect(reel.querySelectorAll(".boss-roulette-kicker")).toHaveLength(1);
+    expect(reel.querySelector(".boss-roulette-track")).toBeTruthy();
+    expect(reel.querySelector(".boss-roulette-result")).toBeTruthy();
+    click(byText("button", "Abandon") as HTMLElement);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
   }, 30000);
 });
