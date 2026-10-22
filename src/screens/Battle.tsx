@@ -527,7 +527,7 @@ interface G {
   gemRushRemaining: number;
   /** provisional gems earned by kills; paid only when the event ends */
   gemRushGems: number;
-  /** temporary tower immunity granted by Thunder God */
+  /** temporary immunity from every boss skill, granted by Thunder God */
   bossImmunityT: number;
   /** selected next boss and its automatic roulette animation */
   nextBossType: number | null;
@@ -643,8 +643,8 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     phaseT: mode === "endless" || mode === "gemrush" ? 6 : 7,
     round: Math.max(1, startRound),
     // endless and gauntlet have no final wave; maxRounds is display only
-    maxRounds: ["battle", "hardcore", "superhardcore"].includes(mode) ? BATTLE_ROUNDS : 0,
-    lives: mode === "superhardcore" ? 1 : (mode === "endless" || mode === "gemrush" ? 15 : mode === "gauntlet" ? 12 : 20) + Math.round(crystal.lives),
+    maxRounds: isCampaignMode(mode) ? BATTLE_ROUNDS : 0,
+    lives: MODE_RULES[mode].lives ?? ((mode === "endless" || mode === "gemrush" ? 15 : mode === "gauntlet" ? 12 : 20) + Math.round(crystal.lives)),
     // small field-kit budget so the run shop is useful from wave 1
     gold: 120,
     bonusAspd: crystal.aspd + crystal.magicianKing,
@@ -675,8 +675,8 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     bossIntro: 0,
     gemRushRemaining: mode === "gemrush" ? GEM_RUSH_SECONDS : 0,
     gemRushGems: 0,
-    nextBossType: openingBoss,
     bossImmunityT: 0,
+    nextBossType: openingBoss,
     bossDeck: shuffledBossDeck(openingBoss),
     roulette: { type: openingBoss, t: 2.8, total: 2.8 },
     shake: 0,
@@ -712,7 +712,7 @@ function ptColor(p: number) {
   return "#5a6b8a";
 }
 
-// Optimized jagged bolts: offsets live in a Float32Array and re-jitter at 100 Hz.
+// optimized tall jagged bolts: offsets live in a Float32Array, re-jittered only on the 5ms tick
 function randBolt(x0: number, y0: number, x1: number, y1: number, color: string, w: number, max: number, now: number): Bolt {
   const b: Bolt = {
     x0, y0, x1, y1, n: 12,
@@ -732,10 +732,10 @@ function jitBolt(b: Bolt, now: number) {
   const dx = b.x1 - b.x0;
   const dy = b.y1 - b.y0;
   const L = Math.max(1, Math.hypot(dx, dy));
-  const amp = Math.min(40.8, L * 0.168); // 20% above the original 34 / 0.14 envelope
+  const amp = Math.min(28.8, L * 0.12); // 20% above the original jaggedness envelope
   for (let i = 0; i < b.n; i++) {
     if (i === 0 || i === b.n - 1) b.off[i] = 0;
-    else b.off[i] = (Math.random() - 0.5) * 2 * amp * 1.3 * Math.sin((Math.PI * i) / (b.n - 1)); // +30% jitter
+    else b.off[i] = (Math.random() - 0.5) * 2 * amp * 1.3 * Math.sin((Math.PI * i) / (b.n - 1)); // 30% more jitter
   }
 }
 function boltPts(b: Bolt, out: { x: number; y: number }[]) {
@@ -1442,7 +1442,7 @@ export default function Battle({
       // Items Finding drops chip modules on a win (one extra advanced on boss waves)
       const chips: ChipBag | null =
         won && EV_BONUS.chipDrop
-          ? Object.fromEntries(Object.entries({ ...EV_BONUS.chipDrop, ...(rounds >= 4 ? { advanced: 1 } : {}) }).map(([key, value]) => [key, Math.round(value * modeRules.rewardMul)])) as unknown as ChipBag
+          ? { ...EV_BONUS.chipDrop, ...(rounds >= 4 ? { advanced: 1 } : {}) }
           : null;
       // trophies only move in Battle; Endless is a score mode with no ladder stake
       const trophies = mode === "battle" ? trophyDelta(won, EV_BONUS, saveRef.current.streak) : 0;
@@ -1456,7 +1456,7 @@ export default function Battle({
         rounds,
         trophies,
         potions: Math.round(potions * modeRules.rewardMul),
-        chips,
+        chips: chips ? Object.fromEntries(Object.entries(chips).map(([key, value]) => [key, Math.round(value * modeRules.rewardMul)])) as unknown as ChipBag : null,
         gauntlet: gauntletPay ? { boons: g.boons.length, record: gauntletPay.record } : undefined,
       };
       if (mode === "gemrush") toastRef.current(`GEM RUSH OVER · ${g.gemRushGems.toLocaleString()} GEMS READY TO CLAIM`, "#35e0ff");
@@ -3754,7 +3754,7 @@ export default function Battle({
               if (isBossType(q.type) && ENEMY_TYPES[q.type].hpMul > ENEMY_TYPES[marquee].hpMul) marquee = q.type;
             }
             const met = ENEMY_TYPES[marquee];
-            g.cut = { type: marquee, name: met.name, sub: `${isCampaignMode(mode) ? "ROUND" : "WAVE"} ${g.round} · BOSS INCOMING`, t: 3.4, total: 3.4 };
+            g.cut = { type: marquee, name: met.name, sub: `${campaignMode ? "ROUND" : "WAVE"} ${g.round} · BOSS INCOMING`, t: 3.4, total: 3.4 };
             g.shake = fxShake(10);
             sfx.boss();
           }
@@ -4478,7 +4478,7 @@ export default function Battle({
               g.shake = fxShake(5);
             } else {
               const tw2 = g.towers.find((t) => t.uid === m.uid);
-              if (tw2 && g.bossImmunityT <= 0) {
+              if (tw2) {
                 tw2.downT = Math.max(tw2.downT, BOSS_METEOR_DOWN);
                 tw2.flash = 0.3;
               }
@@ -7974,8 +7974,8 @@ export default function Battle({
       const shakeVelocity = Math.hypot(shakeX - lastShakeX, shakeY - lastShakeY);
       const blurStrength = Math.min(0.28, shakeVelocity * 0.024);
       const useMotionBlur =
-        hasPreviousFrame && blurStrength > 0.015 && g.shake > 0.3 &&
-        saveRef.current.motionBlur && saveRef.current.shakeFx;
+        hasPreviousFrame && blurStrength > 0.025 && g.shake > 1.5 && fxOn() && fxQ() >= 0.7 &&
+        saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver;
       const tw = trailCanvas.width;
       const th = trailCanvas.height;
       currentCtx.clearRect(0, 0, tw, th);
@@ -8286,7 +8286,7 @@ export default function Battle({
       const n = f.chips?.[k] || 0;
       if (n > 0) rows.push({ icon: <ChipIcon id={k} size={16} />, label: k + " chip modules", val: "x" + n, color: "#8fe9ff" });
     });
-    if (!isCampaignMode(mode) && f.rounds)
+    if (mode !== "battle" && f.rounds)
       rows.push({
         icon: <span className="text-[14px]">~</span>,
         label: "Waves survived",
@@ -8404,7 +8404,7 @@ export default function Battle({
                 <CoinIcon size={14} />
                 <b className="num">{Math.floor(g.gold)}</b>
               </span>
-              <span className="hud-pill" style={{ color: g.lives <= 5 ? "#ff4d5e" : "#ff8f9a" }}>
+              <span className="hud-pill" data-testid="hud-lives" style={{ color: g.lives <= 5 ? "#ff4d5e" : "#ff8f9a" }}>
                 <svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true">
                   <path
                     d="M10 17S2 11.5 2 6.6C2 4 4 2.5 6 2.5c1.6 0 3 .8 4 2.2 1-1.4 2.4-2.2 4-2.2 2 0 4 1.5 4 4.1C18 11.5 10 17 10 17z"
@@ -8532,10 +8532,11 @@ export default function Battle({
           </span>
           <span className="wave-strip-hp">HP ×{mode === "gemrush" ? GEM_RUSH_HP_MUL : Math.pow(HP_GROWTH, Math.max(0, g.round - 1)).toFixed(1)}</span>
           {mode === "gemrush" && <span className="wave-strip-hp" data-testid="gem-rush-rules">50 GEMS/KILL · ELITE ×5 · BOSS ×10 · 1.5× SPEED</span>}
-          {g.round % 4 === 0 && <span className="wave-strip-boss">BOSS</span>}
-          {save.powerSaver && <span className="wave-strip-saver" title="Power Saving Mode is on">SAVER</span>}
           {mode === "hardcore" && <span className="wave-strip-boss" data-testid="hardcore-rules">HARDCORE · 10× HP · 120× REWARDS · +25% SPEED</span>}
           {mode === "superhardcore" && <span className="wave-strip-boss" data-testid="superhardcore-rules">SUPER HARDCORE · 710× HP · 720× REWARDS · +75% SPEED · 1 LIFE</span>}
+          {g.bossImmunityT > 0 && <span className="wave-strip-hp" data-testid="thunder-ward">THUNDER WARD · {g.bossImmunityT.toFixed(1)}s</span>}
+          {g.round % 4 === 0 && <span className="wave-strip-boss">BOSS</span>}
+          {save.powerSaver && <span className="wave-strip-saver" title="Power Saving Mode is on">SAVER</span>}
           {(mode === "endless" || mode === "gauntlet") && (() => {
             const uses = save.mail.autoWeek === weekStr() ? save.mail.autoUses : 0;
             const deployed = g.towers.filter((t) => !!t.cell && t.downT <= 0 && t.hexT <= 0);
@@ -8579,7 +8580,7 @@ export default function Battle({
             <div className="font-disp text-4xl text-[#ffcf4d]" style={{ textShadow: "0 0 26px rgba(255,179,36,.7)" }}>
               {g.phase === "deploy"
                 ? "DEPLOY TOWERS"
-                : `${isCampaignMode(mode) ? "ROUND" : "WAVE"} ${g.round} CLEARED`}
+                : `${mode === "battle" ? "ROUND" : "WAVE"} ${g.round} CLEARED`}
             </div>
             <div className="mt-1 text-base font-bold tracking-[0.25em] text-[var(--txt)]">
               {g.phase === "deploy" ? "PRESS SUMMON — TOWERS DROP STRAIGHT ONTO THE GRID" : `NEXT WAVE IN ${Math.ceil(g.phaseT)}`}
@@ -8880,7 +8881,7 @@ export default function Battle({
           <div className="panel anim-pop w-[380px] max-w-full p-5 text-center" style={{ borderColor: "#35e0ff88" }}>
             <div className="font-disp text-3xl text-[#35e0ff]">PAUSED</div>
             <div className="mt-1 text-[12px] font-semibold text-[var(--dim)]">
-              {mode === "gauntlet" ? "GAUNTLET" : mode === "endless" ? "ENDLESS" : mode === "hardcore" ? "HARDCORE" : mode === "superhardcore" ? "SUPER HARDCORE" : "BATTLE"} ·{" "}
+              {mode === "gauntlet" ? "GAUNTLET" : mode === "endless" ? "ENDLESS" : "BATTLE"} ·{" "}
               {isCampaignMode(mode) ? "ROUND" : "WAVE"} {g.round} ·{" "}
               <span className="num">{g.kills}</span> kills · <span className="num">{g.lives}</span> lives
             </div>
@@ -9137,14 +9138,14 @@ export default function Battle({
       {g?.final && (
         <div className="gameover" data-testid="game-over">
           <div className="gameover-bg" />
-          <div className={"gameover-card " + (g.final.won ? "won" : "lost") + (!isCampaignMode(mode) ? " endless" : "")}>
+          <div className={"gameover-card " + (g.final.won ? "won" : "lost") + (mode !== "battle" ? " endless" : "")}>
             <div className="gameover-rays" />
             <div className="gameover-head">
               <div className="gameover-eyebrow">
-                {mode === "gemrush" ? "SUNDAY GEM RUSH" : mode === "gauntlet" ? "GAUNTLET RUN" : mode === "endless" ? "ENDLESS RUN" : mode === "hardcore" ? "HARDCORE RUN" : mode === "superhardcore" ? "SUPER HARDCORE RUN" : g.final.won ? "THE RIFT CLOSED" : "THE LINE BROKE"}
+                {mode === "gemrush" ? "SUNDAY GEM RUSH" : mode === "hardcore" ? "HARDCORE RUN" : mode === "superhardcore" ? "SUPER HARDCORE RUN" : mode === "gauntlet" ? "GAUNTLET RUN" : mode === "endless" ? "ENDLESS RUN" : g.final.won ? "THE RIFT CLOSED" : "THE LINE BROKE"}
               </div>
               <div className="gameover-title">
-                {mode === "gemrush" ? "GEM RUSH OVER" : mode === "gauntlet" || mode === "endless" ? "RUN OVER" : g.final.won ? "VICTORY" : "DEFEAT"}
+                {mode === "gemrush" ? "GEM RUSH OVER" : mode === "hardcore" || mode === "superhardcore" ? g.final.won ? "VICTORY" : "DEFEAT" : mode === "gauntlet" ? "RUN OVER" : mode === "endless" ? "RUN OVER" : g.final.won ? "VICTORY" : "DEFEAT"}
               </div>
               <div className="gameover-sub">
                 {mode === "gemrush" ? `SURVIVED ${String(Math.floor((GEM_RUSH_SECONDS - g.gemRushRemaining) / 60)).padStart(2, "0")}:${String(Math.floor((GEM_RUSH_SECONDS - g.gemRushRemaining) % 60)).padStart(2, "0")}` : !isCampaignMode(mode) ? "REACHED WAVE " + g.final.rounds : g.final.won ? "THE LINE HELD" : "FELL ON ROUND " + g.round} ·{" "}

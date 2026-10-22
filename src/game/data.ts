@@ -2052,8 +2052,8 @@ export const HEROES: HeroDef[] = [
     kind: "thunder",
     skillName: "STORM SOVEREIGN",
     castTime: 2.4,
-    desc: "A storm front walks the lane. Every cast empowers two random towers and grants a 10-second ward against boss skills.",
-    scaling: "+1 bolt, +1 chain and +25% damage per level · cast grants +1–3 points to two towers",
+    desc: "A storm front walks the lane, marking everything it touches so deaths re-arc into the next target.",
+    scaling: "+1 bolt, +1 chain and +25% damage per level",
     phases: [
       { at: 0, label: "STORM FRONT" },
       { at: 0.3, label: "BOLT WALK" },
@@ -2064,7 +2064,6 @@ export const HEROES: HeroDef[] = [
       "Every bolt chains between everything within its radius",
       "Struck enemies are marked with static for 6s",
       "A marked enemy that dies re-arcs its static into nearby enemies",
-      "Passive: every cast grants 1–3 points to two random deployed towers and blocks boss skills for 10s",
     ],
   },
 ];

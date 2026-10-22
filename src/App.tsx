@@ -167,9 +167,9 @@ export default function App() {
     root.dataset.uiTheme = save.uiTheme || "rift";
     root.dataset.reducedMotion = save.reducedMotion ? "on" : "off";
     root.dataset.powerSaver = save.powerSaver ? "on" : "off";
+    root.dataset.shadows = save.shadowFx ? "on" : "off";
     root.dataset.toggleStyle = save.toggleStyle || "led";
     root.lang = save.language === "th" ? "th" : "en";
-    root.dataset.shadows = save.shadowFx ? "on" : "off";
   }, [save.liquidGlass, save.uiTheme, save.reducedMotion, save.powerSaver, save.shadowFx, save.toggleStyle, save.language]);
 
   // the static splash in index.html is only there until the app has painted

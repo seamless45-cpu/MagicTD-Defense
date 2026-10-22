@@ -1138,6 +1138,16 @@ describe("Heroes", () => {
 });
 
 describe("Battle", () => {
+  it("starts Super Hardcore with one life and its published scaling", async () => {
+    await mountApp();
+    startMode("Super Hardcore");
+    const rules = await waitFor(() => document.querySelector('[data-testid="superhardcore-rules"]') as HTMLElement, "Super Hardcore HUD");
+    expect(rules.textContent).toContain("710× HP · 720× REWARDS · +75% SPEED · 1 LIFE");
+    const lives = document.querySelector('[data-testid="hud-lives"]') as HTMLElement;
+    expect(lives.textContent).toContain("1");
+    noErrors();
+  }, 25000);
+
   it("starts the Sunday Gem Rush with its five-minute timer and boss roulette", async () => {
     const sunday = vi.spyOn(Date.prototype, "getDay").mockReturnValue(0);
     try {

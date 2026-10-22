@@ -1641,8 +1641,8 @@ function ChatBubble({ msg, onReact }: { msg: ChatMsg; onReact: () => void }) {
 
 /**
  * The guild chat: three live channels, member roles, an online strip, flowing
- * saved local messages, cross-tab live delivery, quick-chat and tap-to-react.
- * Cross-device multiplayer needs a server, so the UI reports this local-only limit.
+ * replies that read the message you sent, a typing indicator, quick-chat and
+ * tap-to-react. Replaces the old flat list of canned lines.
  */
 function ChatPanel({ guildId, guildName, color }: { guildId: string; guildName: string; color: string }) {
   const [ch, setCh] = useState<ChatChannel>("guild");
@@ -2353,14 +2353,21 @@ export function SettingsModal({
   ];
   return (
     <Modal onClose={requestClose} closing={closing} w={470}>
-      <div className="font-disp text-2xl text-[#ffcf4d]">{save.language === "th" ? "การตั้งค่า" : "Settings"}</div>
-
-      <div className="row-card mt-3" data-testid="language-row">
-        <SetIcon name="guides" color="#54f4ff" />
-        <div className="min-w-0 flex-1"><div className="font-bold">{save.language === "th" ? "ภาษา" : "Language"}</div><div className="text-[11px] font-semibold text-[var(--dim)]">{save.language === "th" ? "เลือกภาษาของอินเทอร์เฟซ" : "Choose the interface language"}</div></div>
+      <div className="font-disp text-2xl text-[#ffcf4d]">Settings</div>
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--line)] bg-black/25 p-3">
+        <div><div className="font-bold">Language</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose the interface language</div></div>
         <select aria-label="Language" data-testid="language-select" className="rounded-lg border border-[var(--line)] bg-[#101329] px-3 py-2 text-sm font-bold" value={save.language} onChange={(e) => mutate((s) => { s.language = e.target.value === "th" ? "th" : "en"; })}><option value="en">English</option><option value="th">ไทย</option></select>
       </div>
-      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">{save.language === "th" ? "เสียง" : "AUDIO"}</div>
+      <div className="mt-2 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="toggle-style-picker">
+        <div className="mb-2"><div className="font-bold">Toggle mechanism</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose how the switch looks and warms up when turned on.</div></div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {([ ["fluorescent", "Fluorescent tube", "Flicker-start glow"], ["incandescent", "Incandescent bulb", "Warm filament fade"], ["led", "LED bulb", "Instant diode"], ["halogen", "Halogen", "Quartz flash-on"] ] as const).map(([id, label, desc]) => (
+            <button key={id} type="button" aria-pressed={save.toggleStyle === id} data-testid={`toggle-style-${id}`} onClick={() => { sfx.uiTab(); mutate((s) => { s.toggleStyle = id; }); }} className={`toggle-style-choice ${save.toggleStyle === id ? "active" : ""}`}><span className={`toggle-style-lamp lamp-${id}`} aria-hidden="true" /><span className="block text-[10px] font-bold leading-tight">{label}</span><span className="mt-0.5 block text-[9px] text-[var(--dim)]">{desc}</span></button>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">AUDIO</div>
       <div className="row-card mt-1.5">
         <SetIcon name="volume" color="#35e0ff" />
         <div className="min-w-0 flex-1">
@@ -2552,14 +2559,6 @@ export function SettingsModal({
               >
                 {lvl === 0 ? "ALL" : lvl === 1 ? "REDUCED" : "MINIMAL"}
               </button>
-            ))}
-          </div>
-        </div>
-        <div className="rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="toggle-style-picker">
-          <div className="mb-2"><div className="font-bold">Toggle mechanism</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose how the switch looks and warms up when turned on.</div></div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {([ ["fluorescent", "Fluorescent tube", "Flicker-start glow"], ["incandescent", "Incandescent bulb", "Warm filament fade"], ["led", "LED bulb", "Instant diode"], ["halogen", "Halogen", "Quartz flash-on"] ] as const).map(([id, label, desc]) => (
-              <button key={id} type="button" aria-pressed={save.toggleStyle === id} data-testid={`toggle-style-${id}`} onClick={() => { sfx.uiTab(); mutate((s) => { s.toggleStyle = id; }); }} className={`toggle-style-choice ${save.toggleStyle === id ? "active" : ""}`}><span className={`toggle-style-lamp lamp-${id}`} aria-hidden="true" /><span className="block text-[10px] font-bold leading-tight">{label}</span><span className="mt-0.5 block text-[9px] text-[var(--dim)]">{desc}</span></button>
             ))}
           </div>
         </div>
