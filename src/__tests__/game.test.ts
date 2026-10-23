@@ -352,9 +352,11 @@ describe("tower data", () => {
     expect(byRarity("legendary")).toHaveLength(2);
     // the roster includes the established towers, the Mystical Supervisor and
     // the two new mystical summons (Eclipse Oracle / Astral Seraph)
-    expect(TOWERS).toHaveLength(64);
+    expect(TOWERS).toHaveLength(65);
     expect(TOWER_BY_ID.supervisor.rarity).toBe("mystical");
     expect(TOWER_BY_ID.supervisor.unlockFrags).toBe(1);
+    expect(TOWER_BY_ID["mystical-meteor"].awk1?.name).toBe("Asteroid Drop");
+    expect(TOWER_BY_ID["mystical-meteor"].awk2?.name).toBe("Meteor Shower");
     // mechanics actually differ between them
     expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
     expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
@@ -531,10 +533,11 @@ describe("tower data", () => {
     expect(BATTLE_ROUNDS).toBe(12);
     expect(MODE_RULES.hardcore).toEqual({ hpMul: 10, rewardMul: 120, speedMul: 1.25, lives: null });
     expect(MODE_RULES.superhardcore).toEqual({ hpMul: 710, rewardMul: 720, speedMul: 1.75, lives: 1 });
+    expect(MODE_RULES.sandbox).toEqual({ hpMul: 1, rewardMul: 0, speedMul: 1, lives: null });
   });
 
   it("levels heroes up: cost, power and cooldown all move together", () => {
-    expect(HERO_MAX_LEVEL).toBe(20);
+    expect(HERO_MAX_LEVEL).toBe(25);
     expect(heroUpgradeCost(1)).toBeGreaterThan(0);
     expect(heroUpgradeCost(5)).toBeGreaterThan(heroUpgradeCost(1));
     expect(heroPower(1)).toBe(1);

@@ -379,6 +379,8 @@ interface Met {
   blast?: number;
   tw?: BT;
   heavy?: boolean;
+  asteroid?: boolean;
+  directId?: number;
 }
 
 interface Proj {
@@ -397,6 +399,8 @@ interface Proj {
   stunS?: number;
   push?: number;
   fireball?: number;
+  meteorChance?: number;
+  asteroidChance?: number;
   icicle?: number;
   /** extra enemies this shot can skewer after the first hit */
   pierce?: number;
@@ -895,7 +899,6 @@ export default function Battle({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const gRef = useRef<G | null>(null);
   const saveRef = useRef(save);
-  saveRef.current = save;
   const mutateRef = useRef(mutate);
   mutateRef.current = mutate;
 
@@ -907,6 +910,14 @@ export default function Battle({
   const [zoom, setZoom] = useState(() => clampZoom(save.zoom));
   /** battle pause + speed controls (the engine reads these through refs) */
   const [paused, setPaused] = useState(false);
+  const [sandboxCfg, setSandboxCfg] = useState({ interval: 0.72, hp: 1, speed: 1, shield: 0, maxLevel: false, awakened: false });
+  const sandboxCfgRef = useRef(sandboxCfg);
+  sandboxCfgRef.current = sandboxCfg;
+  saveRef.current = mode === "sandbox" ? {
+    ...save,
+    levels: sandboxCfg.maxLevel ? Object.fromEntries(Object.keys(save.levels).map((id) => [id, 25])) : save.levels,
+    awn: sandboxCfg.awakened ? Object.fromEntries(Object.keys(save.levels).map((id) => [id, [5, 5] as [number, number]])) : save.awn,
+  } : save;
   const [runSpeed, setRunSpeed] = useState<1 | 1.5 | 2>(1);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
@@ -1567,7 +1578,7 @@ export default function Battle({
     const startWave = () => {
       g.phase = "wave";
       g.phaseT = 999;
-      const spawnInterval = mode === "gemrush" ? 0.22 : enemySpawnInterval(g.round);
+      const spawnInterval = mode === "gemrush" ? 0.22 : mode === "sandbox" ? sandboxCfgRef.current.interval : enemySpawnInterval(g.round);
       let composition = mode === "gemrush"
         ? Array.from({ length: 18 + Math.min(10, Math.floor(g.round / 5)) }, () => {
             const mobTypes = ENEMY_TYPES.map((_, i) => i).filter((type) => !isBossType(type));
@@ -1716,8 +1727,8 @@ export default function Battle({
 
       g.final = {
         won,
-        gold: mode === "gemrush" ? 0 : Math.round(baseGold * EV_BONUS.goldMul * MONTH_BONUS.goldMul),
-        gems: mode === "gemrush" ? baseGems : Math.round(baseGems * EV_BONUS.gemMul * MONTH_BONUS.gemMul * rewardMul),
+        gold: mode === "gemrush" || mode === "sandbox" ? 0 : Math.round(baseGold * EV_BONUS.goldMul * MONTH_BONUS.goldMul),
+        gems: mode === "sandbox" ? 0 : mode === "gemrush" ? baseGems : Math.round(baseGems * EV_BONUS.gemMul * MONTH_BONUS.gemMul * rewardMul),
         tokens: mode === "endless" ? endlessTokens : mode === "hardcore" || mode === "superhardcore" ? Math.max(1, endlessTokens) * rewardMul : 0,
         frags,
         rounds,
@@ -2635,6 +2646,12 @@ export default function Battle({
           // support: the whirlpool is driven by the pulse tick
           break;
         }
+        case "mystical-meteor": {
+          const blast = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
+          const tier = saveRef.current.awn["mystical-meteor"]?.[0] || 0;
+          push({ speed: 460, kind: "hellstorm", blast, blastDmg: 0.8, meteorChance: Math.min(0.85, 0.45 + upg * 0.025 + asc * 0.035), asteroidChance: tier ? t.def.awk1!.chance[tier - 1] : 0 });
+          break;
+        }
         case "starfall": {
           // mark a handful of enemies and drop rocks on them a beat later
           const rocks = Math.round((t.def.meteors || 3) + (t.def.upMeteors || 0) * upg);
@@ -2919,6 +2936,13 @@ export default function Battle({
         ring(pos.x, pos.y, "#8a4dff", 46);
       }
       dealDamage(target, pr.dmg, { alwaysCrit: pr.alwaysCrit, tw: pr.tw });
+      if (pr.meteorChance && Math.random() < pr.meteorChance) {
+        const tier = saveRef.current.awn["mystical-meteor"]?.[0] || 0;
+        const asteroid = tier > 0 && Math.random() < (pr.asteroidChance || 0);
+        const radius = asteroid ? 9000 * (1 + (pr.tw.def.awk1!.mult[tier - 1] - 1) * 0.2) : 150;
+        g.meteors.push({ x: pos.x, y: pos.y, t: 0.65, total: 0.65, uid: pr.tw.uid, color: asteroid ? "#ff7a24" : "#ffb324", dmg: pr.dmg * (asteroid ? 8 : 1.8), blast: radius, tw: pr.tw, ...(asteroid ? { asteroid: true, directId: target.id } : {}) });
+        if (asteroid) addText(pos.x, pos.y - 58, "ASTEROID DROP", "#ff7a24", 18, true);
+      }
       if (pr.tw && isLightningTower(pr.tw.def) && g.lightningBonus > 0) {
         const chained = g.enemies.filter((e) => !e.dead && e.id !== target.id && e.d > target.d).sort((a, b) => a.d - b.d).slice(0, 3);
         for (const enemy of chained) {
@@ -3303,6 +3327,22 @@ export default function Battle({
         return;
       }
 
+      const meteorTower = a.def.id === "mystical-meteor" ? a : b.def.id === "mystical-meteor" ? b : undefined;
+      if (meteorTower) {
+        const tier = saveRef.current.awn["mystical-meteor"]?.[1] || 0;
+        if (tier > 0) {
+          const count = Math.min(100, Math.round(meteorTower.def.awk2!.mult[tier - 1]));
+          const active = g.enemies.filter((e) => !e.dead);
+          for (let i = 0; i < count; i++) {
+            const e = active[i % Math.max(1, active.length)]; const at = e ? enemyPos(e) : p;
+            g.meteors.push({ x: at.x, y: at.y, t: 0.45 + (i % 7) * 0.07, total: 0.45 + (i % 7) * 0.07, uid: meteorTower.uid, color: "#ff9a3d", dmg: towerDamage(meteorTower.def, meteorTower.menuLv, meteorTower.bLv, meteorTower.points) * 1.4, blast: 48, tw: meteorTower });
+          }
+          const board = g.towers.filter((t) => t.uid !== meteorTower.uid).sort(() => Math.random() - 0.5).slice(0, 4);
+          const buff = 5 + tier * 0.5, duration = 15 + tier * 1.5;
+          board.forEach((t) => { t.surgeMul = Math.max(t.surgeMul, buff); t.surgeT = Math.max(t.surgeT, duration); });
+          sfx.meteor(); addText(p.x, p.y - 82, `METEOR SHOWER ×${count}`, "#ff9a3d", 17, true);
+        }
+      }
       const heavenlySource = a.def.id === "heavenly" ? a : b.def.id === "heavenly" ? b : undefined;
       const wasHeavenly = !!heavenlySource;
       const demonSource = a.def.id === "demon" ? a : b.def.id === "demon" ? b : undefined;
@@ -4170,13 +4210,13 @@ export default function Battle({
           const elite = !boss && Math.random() < Math.min(0.35, 0.06 + g.round * 0.015);
           // Bosses use +78%; regulars use +90%, and elites gain the 2.8x variant multiplier.
           const hp = hardcoreEnemyHp(
-            roundHp(g.round) * et.hpMul * (mode === "gemrush" ? GEM_RUSH_HP_MUL : EV_BONUS.hpMul * MONTH_BONUS.hpMul) * (elite ? ELITE_HP_MUL : 1) * (boss ? BOSS_HP_MUL : ENEMY_HP_SCALE),
+            roundHp(g.round) * et.hpMul * (mode === "gemrush" ? GEM_RUSH_HP_MUL : EV_BONUS.hpMul * MONTH_BONUS.hpMul) * (elite ? ELITE_HP_MUL : 1) * (boss ? BOSS_HP_MUL : ENEMY_HP_SCALE) * (mode === "sandbox" ? sandboxCfgRef.current.hp : 1),
             mode
           );
           g.enemies.push({
-            id: eidC++, d: 0, hp, max: hp, speed: et.speed * ENEMY_SPEED_MUL * (1 + g.round * 0.012) * (elite ? 1.08 : 1) * (mode === "gemrush" ? GEM_RUSH_SPEED_MUL : modeSpeedMul(mode)), type: s.type,
+            id: eidC++, d: 0, hp, max: hp, speed: et.speed * ENEMY_SPEED_MUL * (1 + g.round * 0.012) * (elite ? 1.08 : 1) * (mode === "gemrush" ? GEM_RUSH_SPEED_MUL : modeSpeedMul(mode)) * (mode === "sandbox" ? sandboxCfgRef.current.speed : 1), type: s.type,
             elite,
-            frozen: 0, stun: 0, armor: et.armor, lives: et.lives, gold: (et.gold + Math.floor(g.round / 2)) * (elite ? 2 : 1),
+            frozen: 0, stun: 0, armor: mode === "sandbox" ? sandboxCfgRef.current.shield : et.armor, lives: et.lives, gold: (et.gold + Math.floor(g.round / 2)) * (elite ? 2 : 1),
             spv: Math.round(killSp(elite, boss) * MONTH_BONUS.spMul), dead: false, wob: Math.random() * 7,
             slow: 0, slowT: 0, burnT: 0, burnDps: 0,
             summonCd: BOSS_SUMMON_CD, blinkCd: BOSS_BLINK_CD, wardCd: BOSS_WARD_CD, ward: 0,
@@ -5080,7 +5120,14 @@ export default function Battle({
             if (m.dmg !== undefined) {
               // Starfall: a friendly rock, so it craters the horde instead
               const blast = m.blast || 110;
-              shock(m.x, m.y, "#ffd23f", blast, 0.55);
+              if (m.asteroid) {
+                g.shake = fxShake(28); flash("#ff7a24", 0.32);
+                const direct = g.enemies.find((e) => e.id === m.directId && !e.dead);
+                if (direct) dealDamage(direct, direct.max * 100, { tw: m.tw, color: "#ff7a24", noCrit: true });
+                const from = { x: m.x + 200, y: -120 };
+                if (g.bolts.length < 32) g.bolts.push(randBolt(from.x, from.y, m.x, m.y, "#ff7a24", 8, 0.5, performance.now()));
+              }
+              shock(m.x, m.y, m.asteroid ? "#ff7a24" : "#ffd23f", blast, 0.55);
               burst(m.x, m.y, "#ffb324", 20, 260);
               shards(m.x, m.y, "#ffd23f", 10, 240);
               embers(m.x, m.y, "#ffd23f", 10);
@@ -9293,9 +9340,13 @@ export default function Battle({
       if (cell.c === src.cell?.c && cell.r === src.cell?.r) return;
       const occ = g.towers.find((x) => x.cell && x.cell.c === cell.c && x.cell.r === cell.r && x.uid !== src.uid);
       if (occ) {
-        if (occ.def.id === "clone") {
-          // dropping onto a Clone always attempts a copy — never a merge
+        if (src.def.id === "clone" && occ.def.id === "clone") {
+          if (src.points === occ.points) mergeTowers(src, occ);
+          else { sfx.error(); toastRef.current(`Points must match to merge (${src.points} vs ${occ.points})`, "#ff4d5e"); }
+        } else if (occ.def.id === "clone") {
           cloneTower(src, occ);
+        } else if (src.def.id === "clone") {
+          cloneTower(occ, src);
         } else if (occ.points >= MAX_POINTS) {
           sfx.error();
           toastRef.current(`${occ.def.name} is already at ${MAX_POINTS} points`, "#ff4d5e");
@@ -9419,6 +9470,7 @@ export default function Battle({
   const collect = () => {
     if (!g?.final) return;
     const f = g.final;
+    if (mode === "sandbox") { onExit(); return; }
     mutate((s) => {
       s.gold += f.gold;
       s.gems += f.gems;
@@ -9707,6 +9759,15 @@ export default function Battle({
       )}
 
 {/* CANVAS */}
+      {mode === "sandbox" && <div className="flex flex-wrap items-center gap-3 border-b border-[#9b7cff55] bg-[#17102e] px-3 py-2 text-[11px] font-bold text-[#d7ccff]">
+        <span>SANDBOX CONTROLS</span>
+        <label><input type="checkbox" aria-label="Max level towers" checked={sandboxCfg.maxLevel} onChange={(e) => setSandboxCfg((c) => ({ ...c, maxLevel: e.target.checked }))} /> Max-level owned towers</label>
+        <label><input type="checkbox" aria-label="Max awakening towers" checked={sandboxCfg.awakened} onChange={(e) => setSandboxCfg((c) => ({ ...c, awakened: e.target.checked }))} /> Max awakenings</label>
+        <label>Spawn interval <input type="range" min="0.15" max="2" step="0.05" value={sandboxCfg.interval} onChange={(e) => setSandboxCfg((c) => ({ ...c, interval: Number(e.target.value) }))} /> {sandboxCfg.interval.toFixed(2)}s</label>
+        <label>Enemy HP ×{sandboxCfg.hp.toFixed(1)} <input type="range" min="0.1" max="10" step="0.1" value={sandboxCfg.hp} onChange={(e) => setSandboxCfg((c) => ({ ...c, hp: Number(e.target.value) }))} /></label>
+        <label>Speed ×{sandboxCfg.speed.toFixed(1)} <input type="range" min="0.2" max="4" step="0.1" value={sandboxCfg.speed} onChange={(e) => setSandboxCfg((c) => ({ ...c, speed: Number(e.target.value) }))} /></label>
+        <label>Shield {Math.round(sandboxCfg.shield * 100)}% <input type="range" min="0" max="0.9" step="0.05" value={sandboxCfg.shield} onChange={(e) => setSandboxCfg((c) => ({ ...c, shield: Number(e.target.value) }))} /></label>
+      </div>}
       <div className="relative min-h-0 flex-1">
         <div className="scroll-thin h-full w-full overflow-auto">
           <canvas
@@ -10316,10 +10377,10 @@ export default function Battle({
             <div className="gameover-rays" />
             <div className="gameover-head">
               <div className="gameover-eyebrow">
-                {mode === "gemrush" ? "SUNDAY GEM RUSH" : mode === "gauntlet" ? "GAUNTLET RUN" : mode === "endless" ? "ENDLESS RUN" : mode === "hardcore" ? "HARDCORE RUN" : mode === "superhardcore" ? "SUPER HARDCORE RUN" : g.final.won ? "THE RIFT CLOSED" : "THE LINE BROKE"}
+                {mode === "sandbox" ? "SANDBOX" : mode === "gemrush" ? "SUNDAY GEM RUSH" : mode === "gauntlet" ? "GAUNTLET RUN" : mode === "endless" ? "ENDLESS RUN" : mode === "hardcore" ? "HARDCORE RUN" : mode === "superhardcore" ? "SUPER HARDCORE RUN" : g.final.won ? "THE RIFT CLOSED" : "THE LINE BROKE"}
               </div>
               <div className="gameover-title">
-                {mode === "gemrush" ? "GEM RUSH OVER" : mode === "gauntlet" ? "RUN OVER" : mode === "endless" ? "RUN OVER" : mode === "hardcore" || mode === "superhardcore" ? (g.final.won ? "VICTORY" : "DEFEAT") : g.final.won ? "VICTORY" : "DEFEAT"}
+                {mode === "sandbox" ? "TEST RUN OVER" : mode === "gemrush" ? "GEM RUSH OVER" : mode === "gauntlet" ? "RUN OVER" : mode === "endless" ? "RUN OVER" : mode === "hardcore" || mode === "superhardcore" ? (g.final.won ? "VICTORY" : "DEFEAT") : g.final.won ? "VICTORY" : "DEFEAT"}
               </div>
               <div className="gameover-sub">
                 {mode === "gemrush" ? `SURVIVED ${String(Math.floor((GEM_RUSH_SECONDS - g.gemRushRemaining) / 60)).padStart(2, "0")}:${String(Math.floor((GEM_RUSH_SECONDS - g.gemRushRemaining) % 60)).padStart(2, "0")}` : !isRunMode(mode) ? "REACHED WAVE " + g.final.rounds : g.final.won ? "THE LINE HELD" : "FELL ON ROUND " + g.round} ·{" "}

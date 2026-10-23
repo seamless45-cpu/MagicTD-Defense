@@ -457,6 +457,7 @@ export function Home({
   onGemRush,
   onHardcore,
   onSuperHardcore,
+  onSandbox,
   push,
 }: {
   save: SaveData;
@@ -467,6 +468,7 @@ export function Home({
   onGemRush: () => void;
   onHardcore: () => void;
   onSuperHardcore: () => void;
+  onSandbox: () => void;
   push: (m: string, c?: string) => void;
 }) {
   const hero = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
@@ -798,6 +800,15 @@ export function Home({
           onClick={onGauntlet}
           delay="120ms"
           badge={`BEST ${save.gauntletBest}`}
+        />
+        <ModeCard
+          accent="#9b7cff"
+          title="Sandbox"
+          sub="Custom testing arena"
+          body="Test towers against adjustable enemies with no competitive rewards or pressure."
+          onClick={onSandbox}
+          delay="300ms"
+          badge="CUSTOM"
         />
         <ModeCard
           accent="#ff315c"
@@ -2452,7 +2463,7 @@ export function SettingsModal({
       <div className="font-disp text-2xl text-[#ffcf4d]">Settings</div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--line)] bg-black/25 p-3">
         <div><div className="font-bold">Language</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose the interface language</div></div>
-        <select aria-label="Language" data-testid="language-select" className="rounded-lg border border-[var(--line)] bg-[#101329] px-3 py-2 text-sm font-bold" value={save.language} onChange={(e) => mutate((s) => { s.language = e.target.value === "th" ? "th" : "en"; })}><option value="en">English</option><option value="th">ไทย</option></select>
+        <select aria-label="Language" data-testid="language-select" className="rounded-lg border border-[var(--line)] bg-[#101329] px-3 py-2 text-sm font-bold" value={save.language} onChange={(e) => mutate((s) => { s.language = e.target.value as SaveData["language"]; })}><option value="en">English</option><option value="th">ไทย</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh">简体中文</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh">简体中文</option></select>
       </div>
       <div className="mt-2 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="toggle-style-picker">
         <div className="mb-2"><div className="font-bold">Toggle mechanism</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose how the switch looks and warms up when turned on.</div></div>

@@ -1,6 +1,5 @@
 import * as React from "react";
-
-export type Language = "en" | "th";
+import { t as translateExtra, type Language } from "./i18nExtras";
 
 const TH: Record<string, string> = {
   Home: "หน้าหลัก", Shop: "ร้านค้า", Towers: "ป้อม", Specials: "กิจกรรม", Guild: "กิลด์", Mail: "จดหมาย", Season: "ซีซัน",
@@ -17,14 +16,14 @@ const TH: Record<string, string> = {
 };
 
 function localizeNode(node: React.ReactNode, language: Language): React.ReactNode {
-  if (language !== "th") return node;
-  if (typeof node === "string") return TH[node] ?? node;
+  if (language === "en") return node;
+  if (typeof node === "string") return language === "th" ? (TH[node] ?? translateExtra(node, language)) : translateExtra(node, language);
   if (Array.isArray(node)) return node.map((child, i) => <React.Fragment key={i}>{localizeNode(child, language)}</React.Fragment>);
   if (!React.isValidElement(node)) return node;
   const props: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(node.props as Record<string, unknown>)) {
     if (key === "children") props.children = localizeNode(value as React.ReactNode, language);
-    else if ((key === "aria-label" || key === "title" || key === "placeholder" || key === "sub" || key === "body" || key === "label" || key === "desc") && typeof value === "string") props[key] = TH[value] ?? value;
+    else if ((key === "aria-label" || key === "title" || key === "placeholder" || key === "sub" || key === "body" || key === "label" || key === "desc") && typeof value === "string") props[key] = language === "th" ? (TH[value] ?? translateExtra(value, language)) : translateExtra(value, language);
   }
   return React.cloneElement(node, props);
 }

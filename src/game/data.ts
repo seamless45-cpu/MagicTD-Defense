@@ -76,7 +76,7 @@ export type TowerKind =
   | "eclipse"
   | "seraph";
 
-export type GameMode = "battle" | "endless" | "gauntlet" | "gemrush" | "hardcore" | "superhardcore";
+export type GameMode = "battle" | "endless" | "gauntlet" | "gemrush" | "hardcore" | "superhardcore" | "sandbox";
 
 export interface ModeRules { hpMul: number; rewardMul: number; speedMul: number; lives: number | null; }
 export const MODE_RULES: Record<GameMode, ModeRules> = {
@@ -86,6 +86,7 @@ export const MODE_RULES: Record<GameMode, ModeRules> = {
   gemrush: { hpMul: 1, rewardMul: 1, speedMul: 1, lives: null },
   hardcore: { hpMul: 10, rewardMul: 120, speedMul: 1.25, lives: null },
   superhardcore: { hpMul: 710, rewardMul: 720, speedMul: 1.75, lives: 1 },
+  sandbox: { hpMul: 1, rewardMul: 0, speedMul: 1, lives: null },
 };
 
 /** HARDCORE is a campaign-shaped run (12 rounds) with brutal modifiers. */
@@ -868,6 +869,16 @@ export const TOWERS: TowerDef[] = [
     awk1: awking("Siege Core", "heavy", "Chance to load a siege shell that cracks the target wide open.", [0.2, 0.6], [0.8, 6]),
     awk2: awking("Colossus Rage", "critup", "Chance the shell lands as a guaranteed crit.", [0.14, 0.45], [0.4, 2]),
   },
+  // ---------- Mystical Meteor ----------
+  {
+    id: "mystical-meteor", name: "Mystical Meteor", rarity: "legendary", kind: "starfall", art: "star", accent: "#ff9a3d",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Hurls explosive fireballs with a 45% chance to call down a meteor. Awakenings unleash a giant asteroid and a meteor shower that empowers four towers.",
+    dmg: 420, upDmg: 14, ascDmg: 18, rate: 1.4, upRate: 0.025, ascRate: 0.035,
+    splash: 30, upSplash: 5, ascSplash: 7, aspd: 0.04, upAspd: 0.01, ascAspd: 0.012,
+    awk1: awking("Asteroid Drop", "heavy", "25% chance to summon a giant asteroid with a 600m blast, violent screen shake, orange lightning and direct-hit instant kill. Upgrades improve chance and radius.", [0.25, 0.65], [1, 2.6]),
+    awk2: awking("Meteor Shower", "volley", "On merge, drops 40 meteors and buffs four random towers by 500% ATK for 15 seconds. Upgrades improve count, buff and duration.", [0.25, 0.7], [40, 100]),
+  },
   // ---------- the Clone tower ----------
   {
     id: "clone", name: "Clone", rarity: "legendary", kind: "clone", art: "clone", accent: "#8effc4",
@@ -1124,8 +1135,8 @@ export const TOWER_BY_ID: Record<string, TowerDef> = Object.fromEntries(
 
 export const ROMAN = ["", "I", "II", "III", "IV", "V", "VI"];
 
-export const MAX_MENU_LEVEL = 15;
-export const MAX_BATTLE_LEVEL = 6;
+export const MAX_MENU_LEVEL = 25;
+export const MAX_BATTLE_LEVEL = 25;
 export const POINT_STEP = 0.25; // +25% attack speed per point
 export const POINT_DMG_STEP = 0.3; // +30% damage per point
 export const ASC_DMG_MUL = 1.55; // every battle level multiplies damage
@@ -2227,9 +2238,9 @@ export const HERO_BY_ID: Record<string, HeroDef> = Object.fromEntries(
 );
 
 // ---------- hero levelling ----------
-export const HERO_MAX_LEVEL = 20;
+export const HERO_MAX_LEVEL = 25;
 /** gold needed to take a hero from `lv` to `lv + 1` */
-export const heroUpgradeCost = (lv: number) => Math.round(120 * Math.pow(1.45, Math.max(0, lv - 1)));
+export const heroUpgradeCost = (lv: number) => Math.round(120 * Math.pow(1.2, Math.max(0, lv - 1)));
 /** every level adds 30% ability power (damage, burn, freeze/overdrive duration) */
 export const heroPower = (lv: number) => 1 + 0.3 * (Math.max(1, lv) - 1);
 /** and shaves 3% off the cooldown, down to a floor of 60% */
