@@ -155,7 +155,7 @@ export function CurrencyBar({
   potions?: number;
 }) {
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5">
       {typeof trophies === "number" && (
         <div
           className="pill-dark pill-compact text-[10.5px]"

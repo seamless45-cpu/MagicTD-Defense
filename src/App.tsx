@@ -271,7 +271,7 @@ export default function App() {
       <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-2 px-3 pt-2.5">
         {/* no title up here — the wordmark lives on the boot screens, which keeps
             this bar from wrapping on narrow phones */}
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
           <CurrencyBar gold={save.gold} gems={save.gems} tokens={save.tokens} trophies={save.trophies} potions={save.potions} />
           <FullscreenButton compact />
           <button

@@ -2646,9 +2646,9 @@ export default function Battle({
           // support: the whirlpool is driven by the pulse tick
           break;
         }
-        case "mystical-meteor": {
+        case "meteor": {
           const blast = (t.def.splash || 0) + (t.def.upSplash || 0) * upg + (t.def.ascSplash || 0) * asc;
-          const tier = saveRef.current.awn["mystical-meteor"]?.[0] || 0;
+          const tier = saveRef.current.awn["meteor"]?.[0] || 0;
           push({ speed: 460, kind: "hellstorm", blast, blastDmg: 0.8, meteorChance: Math.min(0.85, 0.45 + upg * 0.025 + asc * 0.035), asteroidChance: tier ? t.def.awk1!.chance[tier - 1] : 0 });
           break;
         }
@@ -2937,7 +2937,7 @@ export default function Battle({
       }
       dealDamage(target, pr.dmg, { alwaysCrit: pr.alwaysCrit, tw: pr.tw });
       if (pr.meteorChance && Math.random() < pr.meteorChance) {
-        const tier = saveRef.current.awn["mystical-meteor"]?.[0] || 0;
+        const tier = saveRef.current.awn["meteor"]?.[0] || 0;
         const asteroid = tier > 0 && Math.random() < (pr.asteroidChance || 0);
         const radius = asteroid ? 9000 * (1 + (pr.tw.def.awk1!.mult[tier - 1] - 1) * 0.2) : 150;
         g.meteors.push({ x: pos.x, y: pos.y, t: 0.65, total: 0.65, uid: pr.tw.uid, color: asteroid ? "#ff7a24" : "#ffb324", dmg: pr.dmg * (asteroid ? 8 : 1.8), blast: radius, tw: pr.tw, ...(asteroid ? { asteroid: true, directId: target.id } : {}) });
@@ -3327,9 +3327,9 @@ export default function Battle({
         return;
       }
 
-      const meteorTower = a.def.id === "mystical-meteor" ? a : b.def.id === "mystical-meteor" ? b : undefined;
+      const meteorTower = a.def.id === "meteor" ? a : b.def.id === "meteor" ? b : undefined;
       if (meteorTower) {
-        const tier = saveRef.current.awn["mystical-meteor"]?.[1] || 0;
+        const tier = saveRef.current.awn["meteor"]?.[1] || 0;
         if (tier > 0) {
           const count = Math.min(100, Math.round(meteorTower.def.awk2!.mult[tier - 1]));
           const active = g.enemies.filter((e) => !e.dead);

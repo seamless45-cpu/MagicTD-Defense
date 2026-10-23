@@ -869,9 +869,9 @@ export const TOWERS: TowerDef[] = [
     awk1: awking("Siege Core", "heavy", "Chance to load a siege shell that cracks the target wide open.", [0.2, 0.6], [0.8, 6]),
     awk2: awking("Colossus Rage", "critup", "Chance the shell lands as a guaranteed crit.", [0.14, 0.45], [0.4, 2]),
   },
-  // ---------- Mystical Meteor ----------
+  // ---------- Meteor ----------
   {
-    id: "mystical-meteor", name: "Mystical Meteor", rarity: "legendary", kind: "starfall", art: "star", accent: "#ff9a3d",
+    id: "meteor", name: "Meteor", rarity: "mystical", kind: "starfall", art: "star", accent: "#ff9a3d",
     target: "front", exotic: true, unlockFrags: 1,
     desc: "Hurls explosive fireballs with a 45% chance to call down a meteor. Awakenings unleash a giant asteroid and a meteor shower that empowers four towers.",
     dmg: 420, upDmg: 14, ascDmg: 18, rate: 1.4, upRate: 0.025, ascRate: 0.035,
