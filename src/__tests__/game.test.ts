@@ -355,8 +355,10 @@ describe("tower data", () => {
     expect(TOWERS).toHaveLength(65);
     expect(TOWER_BY_ID.supervisor.rarity).toBe("mystical");
     expect(TOWER_BY_ID.supervisor.unlockFrags).toBe(1);
-    expect(TOWER_BY_ID["mystical-meteor"].awk1?.name).toBe("Asteroid Drop");
-    expect(TOWER_BY_ID["mystical-meteor"].awk2?.name).toBe("Meteor Shower");
+    expect(TOWER_BY_ID.meteor.awk1?.name).toBe("Asteroid Drop");
+    expect(TOWER_BY_ID.meteor.awk2?.name).toBe("Meteor Shower");
+    expect(TOWER_BY_ID.meteor.name).toBe("Meteor");
+    expect(TOWER_BY_ID.meteor.rarity).toBe("mystical");
     // mechanics actually differ between them
     expect(TOWER_BY_ID.toxin.splash).toBeGreaterThan(0);
     expect(TOWER_BY_ID.toxin.burnPct).toBeGreaterThan(0);
@@ -678,6 +680,21 @@ describe("save file", () => {
     const back = loadSave();
     expect(back.gold).toBe(1234);
     expect(back.frags.cannon).toBe(9);
+  });
+
+  it("migrates the renamed Meteor tower ID without losing its progress", () => {
+    const legacy = defaultSave();
+    legacy.levels["mystical-meteor"] = 9;
+    legacy.frags["mystical-meteor"] = 4;
+    legacy.awn["mystical-meteor"] = [2, 3];
+    legacy.lineup.push("mystical-meteor");
+    localStorage.setItem("magictd_save_v1", JSON.stringify(legacy));
+    const migrated = loadSave();
+    expect(migrated.levels.meteor).toBe(9);
+    expect(migrated.frags.meteor).toBe(4);
+    expect(migrated.awn.meteor).toEqual([2, 3]);
+    expect(migrated.lineup).toContain("meteor");
+    expect(migrated.levels["mystical-meteor"]).toBeUndefined();
   });
 
   it("falls back to defaults on corrupt data", () => {

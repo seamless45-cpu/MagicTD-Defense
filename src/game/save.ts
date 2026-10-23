@@ -375,6 +375,23 @@ export function defaultSave(): SaveData {
 /** repair a partially-shaped save blob (old versions, hand-edited imports) */
 function normalise(s: SaveData): SaveData {
   if (!s.levels || Object.keys(s.levels).length === 0) s.levels = { arrow: 1 };
+  // The tower was originally saved as "mystical-meteor". Preserve unlocked
+  // levels, fragments, awakenings and summon rotation after its corrected ID.
+  if (s.levels["mystical-meteor"] !== undefined) {
+    s.levels.meteor = Math.max(s.levels.meteor || 0, s.levels["mystical-meteor"]);
+    delete s.levels["mystical-meteor"];
+    s.frags ||= {};
+    s.frags.meteor = (s.frags.meteor || 0) + (s.frags["mystical-meteor"] || 0);
+    delete s.frags["mystical-meteor"];
+    s.awn ||= {};
+    const oldAwn = s.awn["mystical-meteor"];
+    if (oldAwn) {
+      const current = s.awn.meteor || [0, 0];
+      s.awn.meteor = [Math.max(current[0], oldAwn[0]), Math.max(current[1], oldAwn[1])];
+      delete s.awn["mystical-meteor"];
+    }
+    if (Array.isArray(s.lineup)) s.lineup = [...new Set(s.lineup.map((id) => id === "mystical-meteor" ? "meteor" : id))];
+  }
   if (!Array.isArray(s.lineup)) s.lineup = [];
   s.lineup = s.lineup.filter((id) => s.levels[id]);
   s.scenes = Array.isArray(s.scenes) ? [...new Set(s.scenes.filter((id) => typeof id === "string"))] : [];
@@ -1012,6 +1029,7 @@ export function claimDailyReward(s: SaveData): DailyClaim | null {
 
 /** chests bias toward a rarity; the daily reward uses the same dial */
 function rarityBias(rarity?: Rarity): number {
+  if (rarity === "mystical") return 1.25;
   if (rarity === "legendary") return 1;
   if (rarity === "epic") return 0.5;
   if (rarity === "decent") return 0.2;
