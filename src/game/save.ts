@@ -204,7 +204,7 @@ export interface SaveData {
   liquidGlass: boolean;
   /** color palette selected in the theme picker */
   uiTheme: UiTheme;
-  language: "en" | "th";
+  language: "en" | "th" | "es" | "fr" | "de" | "ja" | "ko" | "zh";
   toggleStyle: "fluorescent" | "incandescent" | "led" | "halogen";
   /** selected UI font id from the 80-font catalog in game/fonts.ts */
   font: string;

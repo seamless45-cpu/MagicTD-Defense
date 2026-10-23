@@ -28,7 +28,8 @@ type Screen =
   | "gauntlet"
   | "gemrush"
   | "hardcore"
-  | "superhardcore";
+  | "superhardcore"
+  | "sandbox";
 
 const MODES = {
   battle: { mode: "battle" as const, title: "BATTLE", rounds: "12 rounds" },
@@ -37,6 +38,7 @@ const MODES = {
   gemrush: { mode: "gemrush" as const, title: "GEM RUSH", rounds: "5 minutes" },
   hardcore: { mode: "hardcore" as const, title: "HARDCORE", rounds: "12 rounds · 10× HP" },
   superhardcore: { mode: "superhardcore" as const, title: "SUPER HARDCORE", rounds: "12 rounds · one life" },
+  sandbox: { mode: "sandbox" as const, title: "SANDBOX", rounds: "custom" },
 };
 
 const NAV: { id: Screen; label: string; icon: React.ReactNode }[] = [
@@ -170,7 +172,7 @@ export default function App() {
     root.dataset.powerSaver = save.powerSaver ? "on" : "off";
     root.dataset.shadows = save.shadowFx ? "on" : "off";
     root.dataset.toggleStyle = save.toggleStyle || "led";
-    root.lang = save.language === "th" ? "th" : "en";
+    root.lang = save.language;
   }, [save.liquidGlass, save.uiTheme, save.reducedMotion, save.powerSaver, save.shadowFx, save.toggleStyle, save.language]);
 
   // the static splash in index.html is only there until the app has painted
@@ -231,7 +233,7 @@ export default function App() {
     );
   }
 
-  if (screen === "battle" || screen === "endless" || screen === "gauntlet" || screen === "gemrush" || screen === "hardcore" || screen === "superhardcore") {
+  if (screen === "battle" || screen === "endless" || screen === "gauntlet" || screen === "gemrush" || screen === "hardcore" || screen === "superhardcore" || screen === "sandbox") {
     return (
       <LocalizedTree language={save.language}>
       <div className={`h-full ${save.reducedMotion ? "calm" : ""} ${save.powerSaver ? "power-saver" : ""}`}>
@@ -299,6 +301,7 @@ export default function App() {
             onBattle={() => setScreen("battle")}
             onEndless={() => setScreen("endless")}
             onGauntlet={() => setScreen("gauntlet")}
+            onSandbox={() => setScreen("sandbox")}
             onGemRush={() => setScreen("gemrush")}
             onHardcore={() => {
               const left = hardcorePlaysLeft(save);
