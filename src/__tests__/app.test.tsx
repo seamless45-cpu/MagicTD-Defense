@@ -1179,7 +1179,7 @@ describe("Battle", () => {
     await mountApp();
     startMode("Super Hardcore");
     const rules = await waitFor(() => document.querySelector('[data-testid="superhardcore-rules"]') as HTMLElement, "Super Hardcore HUD");
-    expect(rules.textContent).toContain("710× HP · +75% SPEED · 720× REWARDS · 1 LIFE");
+    expect(rules.textContent).toContain("710× HP · +75% SPEED · 2 GATES · 10× REWARDS · 1 LIFE");
     const lives = document.querySelector('[data-testid="hud-lives"]') as HTMLElement;
     expect(lives.textContent).toContain("1");
     noErrors();
@@ -1996,14 +1996,14 @@ describe("Hardcore", () => {
     );
     expect(plays.textContent || "").toContain("2");
     expect(plays.textContent || "").toContain("/ 3 left");
-    expect((document.querySelector('[data-testid="hardcore-rules"]') as HTMLElement).textContent).toContain("120× REWARDS");
+    expect((document.querySelector('[data-testid="hardcore-rules"]') as HTMLElement).textContent).toContain("5× REWARDS");
 
-    // the first wave fields two bodies per slot: twenty enemies, not ten
+    // the first wave fields two bodies per slot: thirty enemies (15 slots x 2)
     const fielded = await waitFor(() => {
       const n = Number((document.querySelector('[data-testid="enemies-left"]')?.textContent || "").replace(/[^\d]/g, ""));
-      return n >= 20 ? n : 0;
+      return n >= 30 ? n : 0;
     }, "double-spawn wave", 20000);
-    expect(fielded).toBe(20);
+    expect(fielded).toBe(30);
 
     // abandoning does not refund the attempt
     click(byText("button", "Abandon") as HTMLElement);

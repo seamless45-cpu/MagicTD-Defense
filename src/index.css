@@ -5443,3 +5443,97 @@ html[data-toggle-style="halogen"] .knob.on .knob-head { transform:translateX(36p
 html[data-toggle-style="halogen"] .knob.on .knob-rail { animation:halogenIgnite .22s ease-out both; }
 @keyframes halogenIgnite { 0% {filter:brightness(3.5)} 38% {filter:brightness(.72)} 100% {filter:brightness(1.25)} }
 html[data-toggle-style="halogen"] .knob.on .knob-glow { background:linear-gradient(90deg,#ffdf6b08,#ffdf6bbb); }
+
+/* ==========================================================================
+   Transition pass — smoother UI motion with fewer compositor costs.
+   Blur filters are animated nowhere any more: they force a full-layer
+   re-raster every frame, which is what made tab changes stutter.
+   ========================================================================== */
+
+/* screens: transform + opacity only (the old version animated filter: blur) */
+.screen-enter {
+  animation: screenRise .42s cubic-bezier(.2, .8, .2, 1) both;
+  transform-origin: 50% 12%;
+}
+@keyframes screenRise {
+  0% { opacity: 0; transform: translate3d(0, 12px, 0) scale(.992); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+/* cards inside a screen land in sequence without 3D tilt (cheaper per frame) */
+@keyframes cardIn {
+  0% { opacity: 0; transform: translate3d(0, 12px, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+/* modals: a rising, springy entrance and a quick fade out, no blur */
+.modal-slide-in { animation: modalSlideIn .36s cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes modalSlideIn {
+  0% { opacity: 0; transform: translate3d(0, 28px, 0) scale(.96); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+@keyframes modalSlideOut {
+  0% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+  100% { opacity: 0; transform: translate3d(0, 14px, 0) scale(.98); }
+}
+
+/* liquid theme: keep the frosted blur on large surfaces only. Every small pill,
+   chip and button was getting its own blur layer, which is the main cost of
+   switching tabs in that theme. */
+html[data-ui-theme="liquid"] [class*="rounded"]:not([class*="rounded-2xl"]):not([class*="rounded-3xl"]) {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* explicit transitions instead of `all`, so the browser only tracks what changes */
+.nav-btn {
+  transition: color .18s ease, background-color .18s ease, transform .2s cubic-bezier(.2, .8, .2, 1), opacity .18s ease;
+}
+.tab-btn {
+  transition: color .18s ease, background-color .18s ease, border-color .18s ease, transform .18s ease;
+}
+.btn {
+  transition: transform .14s cubic-bezier(.2, .8, .2, 1), filter .18s ease, box-shadow .2s ease, background-color .2s ease, border-color .2s ease, color .2s ease, opacity .2s ease;
+}
+.btn:active:not(:disabled) {
+  transform: scale(.975);
+}
+
+/* toasts and HUD chips settle with a single transform */
+.toast { animation: toastRise .36s cubic-bezier(.2, .9, .3, 1.15) both; }
+
+/* battle HUD: small toggle that mutes the wave-cleared callouts */
+.wave-strip-toggle {
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(8, 5, 26, .55);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.4;
+  letter-spacing: .08em;
+  cursor: pointer;
+  transition: color .18s ease, border-color .18s ease, background-color .18s ease;
+}
+.wave-strip-toggle.on {
+  color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 60%, transparent);
+}
+.wave-strip-toggle:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* reduced motion and power saving: no screen or card motion at all */
+.calm .screen-enter,
+.calm .screen-enter > *,
+.calm .screen-enter .tile,
+.calm .screen-enter .panel,
+.calm .screen-enter .row-card,
+.power-saver .screen-enter,
+.power-saver .screen-enter > * {
+  animation: none !important;
+}
