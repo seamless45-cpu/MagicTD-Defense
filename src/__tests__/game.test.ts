@@ -177,7 +177,7 @@ describe("tower data", () => {
   it("defines Demon Execution as a mystical, unbuffable executor with its two new awakenings", () => {
     const demon = TOWER_BY_ID.demon;
     expect(demon.rarity).toBe("mystical");
-    expect(demon.execCd).toBe(5);
+    expect(demon.execCd).toBe(3);
     expect(demon.aspd).toBeUndefined();
     expect(demon.awk1?.name).toBe("Soul Wipeout");
     expect(demon.awk1?.mult).toEqual([2, 4, 6, 8, 10, 12]);
@@ -505,7 +505,7 @@ describe("tower data", () => {
       }
     }
     expect(TOWER_BY_ID.demon.rarity).toBe("mystical");
-    expect(TOWER_BY_ID.demon.execCd).toBe(5);
+    expect(TOWER_BY_ID.demon.execCd).toBe(3);
     expect(TOWER_BY_ID.demon.awk1?.name).toBe("Soul Wipeout");
     expect(TOWER_BY_ID.demon.awk2?.name).toBe("Hell Dimensions");
   });
@@ -533,8 +533,8 @@ describe("tower data", () => {
     const modes: GameMode[] = ["battle", "endless"];
     expect(modes).not.toContain("party" as GameMode);
     expect(BATTLE_ROUNDS).toBe(12);
-    expect(MODE_RULES.hardcore).toEqual({ hpMul: 10, rewardMul: 120, speedMul: 1.25, lives: null });
-    expect(MODE_RULES.superhardcore).toEqual({ hpMul: 710, rewardMul: 720, speedMul: 1.75, lives: 1 });
+    expect(MODE_RULES.hardcore).toEqual({ hpMul: 10, rewardMul: 5, speedMul: 1.25, lives: null });
+    expect(MODE_RULES.superhardcore).toEqual({ hpMul: 710, rewardMul: 10, speedMul: 1.75, lives: 1 });
     expect(MODE_RULES.sandbox).toEqual({ hpMul: 1, rewardMul: 0, speedMul: 1, lives: null });
   });
 
@@ -629,10 +629,10 @@ describe("tower data", () => {
     expect(maxed).toBeGreaterThan(def.dmg * 20);
   });
 
-  it("builds fixed ten-enemy waves with known types and scheduled bosses", () => {
+  it("builds fixed fifteen-enemy waves with known types and scheduled bosses", () => {
     for (let round = 1; round <= BATTLE_ROUNDS + 40; round++) {
       const w = waveComp(round);
-      expect(w).toHaveLength(10);
+      expect(w).toHaveLength(WAVE_ENEMY_COUNT);
       for (const t of w) {
         expect(t).toBeGreaterThanOrEqual(0);
         expect(t).toBeLessThan(ENEMY_TYPES.length);
@@ -842,13 +842,13 @@ describe("balance patch", () => {
     expect(BASE_MONTHLY_BONUS).toEqual({ goldMul: 1, gemMul: 1, spMul: 1, hpMul: 1, upgradeCostMul: 1, fragBias: 0, chestFragBonus: 0 });
   });
 
-  it("spawns exactly ten enemies on every wave, with bosses using wave slots", () => {
-    expect(WAVE_ENEMY_COUNT).toBe(10);
+  it("spawns exactly fifteen enemies on every wave, with bosses using wave slots", () => {
+    expect(WAVE_ENEMY_COUNT).toBe(15);
     for (let wave = 1; wave <= 64; wave++) expect(waveComp(wave)).toHaveLength(WAVE_ENEMY_COUNT);
     expect(waveComp(32).filter(isBossType).length).toBeGreaterThan(0);
-    expect(enemySpawnInterval(1)).toBe(0.72);
-    expect(enemySpawnInterval(2)).toBeCloseTo(0.72 - SPAWN_INTERVAL_STEP, 10);
-    expect(enemySpawnInterval(25)).toBeCloseTo(0.72 - 24 * 0.00002, 10);
+    expect(enemySpawnInterval(1)).toBe(0.57);
+    expect(enemySpawnInterval(2)).toBeCloseTo(0.57 - SPAWN_INTERVAL_STEP, 10);
+    expect(enemySpawnInterval(25)).toBeCloseTo(0.57 - 24 * 0.00002, 10);
   });
 
   it("pays 40% more gold and gems for clearing rounds", () => {
@@ -2037,7 +2037,7 @@ describe("hardcore mode", () => {
   it("ships the exact modifier set the mode card advertises", () => {
     expect(HARDCORE_SPAWN_MUL).toBe(2);
     expect(HARDCORE_HP_MUL).toBe(10);
-    expect(HARDCORE_REWARD_MUL).toBe(120);
+    expect(HARDCORE_REWARD_MUL).toBe(5);
     expect(HARDCORE_DAILY_PLAYS).toBe(3);
     expect(HARDCORE_CRIT_IMMUNE).toBe(true);
     // it is a campaign-shaped run, like Battle
@@ -2050,8 +2050,8 @@ describe("hardcore mode", () => {
     expect(modeSpeedMul("superhardcore")).toBe(1.75);
   });
 
-  it("walks every enemy 20% faster than its data sheet", () => {
-    expect(ENEMY_SPEED_MUL).toBeCloseTo(1.2);
+  it("walks every enemy 20% faster again on top of the previous +20% (1.2 × 1.2)", () => {
+    expect(ENEMY_SPEED_MUL).toBeCloseTo(1.44);
   });
 
   it("applies the modifiers through the shared helpers", () => {
@@ -2063,8 +2063,8 @@ describe("hardcore mode", () => {
     expect(hardcoreSpawnPlan([0, 1, 4], "hardcore")).toEqual([0, 0, 1, 1, 4, 4]);
     expect(hardcoreSpawnPlan([0, 1], "battle")).toEqual([0, 1]);
     // reward modifiers are applied through the shared helper
-    expect(payoutMul("hardcore")).toBe(120);
-    expect(payoutMul("superhardcore")).toBe(720);
+    expect(payoutMul("hardcore")).toBe(5);
+    expect(payoutMul("superhardcore")).toBe(10);
     expect(payoutMul("battle")).toBe(1);
     expect(critAllowed("hardcore")).toBe(false);
     expect(critAllowed("battle")).toBe(true);

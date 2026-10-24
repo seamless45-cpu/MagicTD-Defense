@@ -22,6 +22,7 @@ import {
   heroAwakenCost,
   BATTLE_ROUNDS,
   HARDCORE_DAILY_PLAYS,
+  SUPER_HARDCORE_WEEKLY_PLAYS,
   heroAwkSpec,
   MAIL,
   MAIL_BY_ID,
@@ -172,6 +173,10 @@ export interface SaveData {
   hardcoreDay: string;
   /** Hardcore runs started today (max HARDCORE_DAILY_PLAYS) */
   hardcoreUses: number;
+  /** week stamp the Super Hardcore attempts belong to (weekStr) */
+  superHardcoreWeek: string;
+  /** Super Hardcore runs started this week (max SUPER_HARDCORE_WEEKLY_PLAYS) */
+  superHardcoreUses: number;
   wins: number;
   runs: number;
   /** consecutive Battle victories */
@@ -186,6 +191,8 @@ export interface SaveData {
   powerSaver: boolean;
   /** directional temporal smear during camera shake */
   motionBlur: boolean;
+  /** hide the "WAVE N CLEARED" banners, toasts and progress counter in battle */
+  hideWaveCleared: boolean;
   /** boost low frequencies on the sound-effects mix */
   bassBoost: boolean;
   /** boost high frequencies on the sound-effects mix */
@@ -317,6 +324,8 @@ export function defaultSave(): SaveData {
     hardcoreBest: 0,
     hardcoreDay: "",
     hardcoreUses: 0,
+    superHardcoreWeek: "",
+    superHardcoreUses: 0,
     wins: 0,
     runs: 0,
     streak: 0,
@@ -326,6 +335,7 @@ export function defaultSave(): SaveData {
     volBoost: false,
     powerSaver: false,
     motionBlur: false,
+    hideWaveCleared: false,
     bassBoost: false,
     trebleBoost: false,
     eqBass: 0,
@@ -436,7 +446,8 @@ function normalise(s: SaveData): SaveData {
   s.shadowFx = s.shadowFx !== false;
   s.antiAlias = s.antiAlias !== false;
   if (!UI_THEMES.some((theme) => theme.id === s.uiTheme)) s.uiTheme = "rift";
-  s.language = s.language === "th" ? "th" : "en";
+  // keep any supported language; anything unknown falls back to English
+  s.language = (["en", "th", "es", "fr", "de", "ja", "ko", "zh"] as const).includes(s.language) ? s.language : "en";
   if (!["fluorescent", "incandescent", "led", "halogen"].includes(s.toggleStyle)) s.toggleStyle = "led";
   s.autoSkipBossCut = s.autoSkipBossCut === true;
   s.heroAwn = s.heroAwn && typeof s.heroAwn === "object" ? s.heroAwn : {};
@@ -465,7 +476,15 @@ function normalise(s: SaveData): SaveData {
     s.hardcoreDay = todayStr();
     s.hardcoreUses = 0;
   }
+  s.superHardcoreWeek = typeof s.superHardcoreWeek === "string" ? s.superHardcoreWeek : "";
+  s.superHardcoreUses = Math.max(0, Math.min(SUPER_HARDCORE_WEEKLY_PLAYS, Math.floor(Number(s.superHardcoreUses) || 0)));
+  // a stale week stamp retires last week's Super Hardcore attempts
+  if (s.superHardcoreWeek !== weekStr()) {
+    s.superHardcoreWeek = weekStr();
+    s.superHardcoreUses = 0;
+  }
   s.hideNotifs = s.hideNotifs === true;
+  s.hideWaveCleared = s.hideWaveCleared === true;
   s.compClaimed = Array.isArray(s.compClaimed) ? s.compClaimed.map(String) : [];
   s.guild = { ...emptyGuild(), ...(s.guild && typeof s.guild === "object" ? s.guild : {}) };
   s.guild.quests = s.guild.quests && typeof s.guild.quests === "object" ? s.guild.quests : {};
@@ -727,6 +746,23 @@ export function rollSeason(s: SaveData): boolean {
 export function hardcorePlaysLeft(s: SaveData, day = todayStr()): number {
   const used = s.hardcoreDay === day ? Math.max(0, Math.min(HARDCORE_DAILY_PLAYS, s.hardcoreUses || 0)) : 0;
   return Math.max(0, HARDCORE_DAILY_PLAYS - used);
+}
+
+/** Super Hardcore attempts left this week (0..3), reset with the weekly stamp */
+export function superHardcorePlaysLeft(s: SaveData, week = weekStr()): number {
+  const used = s.superHardcoreWeek === week ? Math.max(0, Math.min(SUPER_HARDCORE_WEEKLY_PLAYS, s.superHardcoreUses || 0)) : 0;
+  return Math.max(0, SUPER_HARDCORE_WEEKLY_PLAYS - used);
+}
+
+/** Spend one Super Hardcore attempt. Returns false when the weekly budget is gone. */
+export function spendSuperHardcorePlay(s: SaveData, week = weekStr()): boolean {
+  if (s.superHardcoreWeek !== week) {
+    s.superHardcoreWeek = week;
+    s.superHardcoreUses = 0;
+  }
+  if ((s.superHardcoreUses || 0) >= SUPER_HARDCORE_WEEKLY_PLAYS) return false;
+  s.superHardcoreUses = (s.superHardcoreUses || 0) + 1;
+  return true;
 }
 
 /** Spend one Hardcore attempt. Returns false when the daily budget is gone. */

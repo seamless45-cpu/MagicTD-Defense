@@ -18,6 +18,7 @@ import {
 import {
   todayStr,
   hardcorePlaysLeft,
+  superHardcorePlaysLeft,
   defaultSave,
   importSave,
   persistSave,
@@ -81,6 +82,7 @@ import {
   TOWERS,
   BATTLE_ROUNDS,
   HARDCORE_DAILY_PLAYS,
+  SUPER_HARDCORE_WEEKLY_PLAYS,
   CHIPS,
   COMPETITION_TIERS,
   DAILY_REWARDS,
@@ -814,7 +816,7 @@ export function Home({
           accent="#ff315c"
           title="Hardcore"
           sub={`${BATTLE_ROUNDS} rounds · 3 runs a day${save.hardcoreBest ? ` · best R${save.hardcoreBest}` : ""}`}
-          body="Double spawns, 10× enemy HP, enemies immune to crits, 25% faster enemies — and 120× the rewards."
+          body="Double spawns, a second gate, 10× enemy HP, enemies immune to crits, 25% faster enemies — and 5× the rewards."
           onClick={onHardcore}
           delay="180ms"
           badge={hardcorePlaysLeft(save) > 0 ? `${hardcorePlaysLeft(save)}/${HARDCORE_DAILY_PLAYS} LEFT` : "NO RUNS LEFT"}
@@ -822,11 +824,11 @@ export function Home({
         <ModeCard
           accent="#ff315c"
           title="Super Hardcore"
-          sub="12 rounds · one life"
-          body="710× enemy HP, 75% faster enemies and 720× rewards. One leak ends the run."
+          sub="12 rounds · one life · 3 runs a week"
+          body="710× enemy HP, 75% faster enemies and 10× rewards. One leak ends the run."
           onClick={onSuperHardcore}
           delay="240ms"
-          badge="EXTREME"
+          badge={superHardcorePlaysLeft(save) > 0 ? `${superHardcorePlaysLeft(save)}/${SUPER_HARDCORE_WEEKLY_PLAYS} THIS WEEK` : "NO RUNS LEFT"}
         />
       </div>
 
@@ -2454,6 +2456,7 @@ export function SettingsModal({
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
     ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
     ["Hide Notifications", "hideNotifs", "Mutes toast popups and battle callouts — rewards still land", "bell", "#ff9be9"],
+    ["Hide Wave Cleared", "hideWaveCleared", "Hides the WAVE CLEARED banners, toasts and counter in battle", "guides", "#7ce7ff"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
     ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffcf4d"],
     ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
@@ -2463,7 +2466,7 @@ export function SettingsModal({
       <div className="font-disp text-2xl text-[#ffcf4d]">Settings</div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--line)] bg-black/25 p-3">
         <div><div className="font-bold">Language</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose the interface language</div></div>
-        <select aria-label="Language" data-testid="language-select" className="rounded-lg border border-[var(--line)] bg-[#101329] px-3 py-2 text-sm font-bold" value={save.language} onChange={(e) => mutate((s) => { s.language = e.target.value as SaveData["language"]; })}><option value="en">English</option><option value="th">ไทย</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh">简体中文</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh">简体中文</option></select>
+        <select aria-label="Language" title="Language" data-testid="language-select" className="rounded-lg border border-[var(--line)] bg-[#101329] px-3 py-2 text-sm font-bold" value={save.language} onChange={(e) => mutate((s) => { s.language = e.target.value as SaveData["language"]; })}><option value="en">English</option><option value="th">ไทย</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh">简体中文</option></select>
       </div>
       <div className="mt-2 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="toggle-style-picker">
         <div className="mb-2"><div className="font-bold">Toggle mechanism</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose how the switch looks and warms up when turned on.</div></div>

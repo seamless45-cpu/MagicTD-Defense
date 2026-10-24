@@ -748,6 +748,34 @@ const synthSfx = {
     tone(82, 0.62, "sawtooth", 0.26, -38, 0, { sub: true, cutoff: 280 });
     boom(95, 0.5, 0.28, 0, 4);
   },
+  // deep-red demon strike: a heavier version of the execution cue with a wet crack
+  demonStrike: () => {
+    noise(0.3, 0.26, 1400, { type: "bandpass", q: 1.6, sweep: 0.3, verb: 0.8 });
+    tone(64, 0.5, "sawtooth", 0.28, -30, 0, { sub: true, cutoff: 220 });
+    stab([220, 330, 440], 0.26, 0.09, 0.01, "square");
+    boom(70, 0.46, 0.3, 0, 4);
+  },
+  // a wave is cleared: a short rising arpeggio that reads as a reward
+  waveCleared: () => {
+    stab([523, 659, 784], 0.22, 0.12, 0.01, "triangle");
+    tone(1046, 0.16, "sine", 0.08, 120, 0.16, { verb: 0.5 });
+  },
+  // Super Hardcore run starts: an ominous low sweep with a metallic hit
+  superHardcoreStart: () => {
+    noise(0.9, 0.22, 900, { type: "lowpass", sweep: 0.2, q: 1.2, verb: 0.7, noiseType: "brown" });
+    tone(56, 0.95, "sawtooth", 0.24, -26, 0, { sub: true, cutoff: 200 });
+    stab([110, 165, 233], 0.5, 0.14, 0.12, "square");
+    boom(60, 0.7, 0.34, 0.1, 6);
+  },
+  // the HUD toggle for the wave-cleared callouts: a soft two-note blip
+  calloutToggle: () => {
+    stab([660, 880], 0.12, 0.08, 0, "sine");
+  },
+  // thunder ward and forked bolts: a sharp crackle
+  thunderCrack: () => {
+    noise(0.18, 0.22, 4200, { type: "highpass", q: 2.2, sweep: 0.6, verb: 0.4 });
+    stab([1320, 990, 1760], 0.14, 0.1, 0, "square");
+  },
   supervisorMerge: () => {
     noise(0.5, 0.28, 2400, { type: "highpass", sweep: 0.28, verb: 0.65 });
     tone(96, 0.66, "sawtooth", 0.24, -42, 0, { sub: true, cutoff: 260 });

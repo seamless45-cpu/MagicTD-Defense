@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { tr } from "../game/i18n";
+import type { EnemyType } from "../game/data";
 import type { SaveData } from "../game/save";
-import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, hardcorePlaysLeft, heroLevel, weekStr } from "../game/save";
+import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, hardcorePlaysLeft, heroLevel, superHardcorePlaysLeft, weekStr } from "../game/save";
 import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import {
@@ -87,6 +89,7 @@ import {
   BOSS_MAELSTROM_DIST,
   ENEMY_SPEED_MUL,
   HARDCORE_DAILY_PLAYS,
+  SUPER_HARDCORE_WEEKLY_PLAYS,
   HARDCORE_LIVES,
   HARDCORE_SPAWN_MUL,
   MODE_RULES,
@@ -204,6 +207,14 @@ const SEGS: Seg[] = [];
   }
 }
 const PATH_LEN = SEGS.reduce((a, s) => a + s.len, 0);
+/**
+ * Hardcore modes open a SECOND spawn gate on the bottom lane (cell 3,3). Its
+ * path distance is resolved once: everything up to that cell, measured along
+ * the real lane, so a body spawned there walks the rest of the route.
+ */
+const GATE_B = cellCenter(3, 3);
+const GATE_B_D = SEGS[0].len + SEGS[1].len + (GATE_B.x - cellCenter(0, 3).x);
+const hasSecondGate = (mode: GameMode) => mode === "hardcore" || mode === "superhardcore";
 
 function pathPos(d: number) {
   const dd = Math.max(0, Math.min(d, PATH_LEN - 0.01));
@@ -359,6 +370,12 @@ interface Strike {
   top?: number;
   /** forks drawn off the main channel */
   forks?: number;
+  /** main channel colour for the core stroke (defaults to white) */
+  core?: string;
+  /** extra zig-zag segments on the channel (jaggedness) */
+  jag?: number;
+  /** lateral jitter multiplier (1 = standard) */
+  jit?: number;
   /** preallocated lateral offsets, refreshed at 100 Hz (10 ms) */
   jitter?: Float32Array;
   lastJit?: number;
@@ -449,6 +466,8 @@ interface Bolt {
   max: number;
   w: number;
   color: string;
+  /** jitter multiplier (1 = standard) */
+  jit?: number;
 }
 interface Part {
   x: number;
@@ -774,15 +793,17 @@ function ptColor(p: number) {
 }
 
 // optimized tall jagged bolts: offsets live in a Float32Array, re-jittered only on the 5ms tick
-function randBolt(x0: number, y0: number, x1: number, y1: number, color: string, w: number, max: number, now: number): Bolt {
+function randBolt(x0: number, y0: number, x1: number, y1: number, color: string, w: number, max: number, now: number, opts?: { jit?: number; jag?: number }): Bolt {
+  const n = 12 + (opts?.jag ?? 0);
   const b: Bolt = {
-    x0, y0, x1, y1, n: 12,
-    off: new Float32Array(12),
+    x0, y0, x1, y1, n,
+    off: new Float32Array(n),
     lastJit: 0,
     life: max,
     max,
     w,
     color,
+    jit: opts?.jit ?? 1,
   };
   jitBolt(b, now + 5);
   return b;
@@ -794,9 +815,10 @@ function jitBolt(b: Bolt, now: number) {
   const dy = b.y1 - b.y0;
   const L = Math.max(1, Math.hypot(dx, dy));
   const amp = Math.min(28.8, L * 0.12); // 20% above the original jaggedness envelope
+  const spread = amp * 1.3 * (b.jit ?? 1); // 30% more jitter, scaled per bolt
   for (let i = 0; i < b.n; i++) {
     if (i === 0 || i === b.n - 1) b.off[i] = 0;
-    else b.off[i] = (Math.random() - 0.5) * 2 * amp * 1.3 * Math.sin((Math.PI * i) / (b.n - 1)); // 30% more jitter
+    else b.off[i] = (Math.random() - 0.5) * 2 * spread * Math.sin((Math.PI * i) / (b.n - 1));
   }
 }
 function boltPts(b: Bolt, out: { x: number; y: number }[]) {
@@ -873,6 +895,962 @@ function glowSprite(color: string): HTMLCanvasElement | null {
     return c;
   } catch {
     return null;
+  }
+}
+
+
+// ---------- pre-rendered enemy walk-cycle sprites ----------
+// The static shape art of every enemy is baked once per walk-cycle phase; the per-enemy
+// overlays (status effects, boss auras) are still painted live each frame.
+
+const enemyBodyGrad = new Map<string, CanvasGradient>();
+const enemySpriteCache = new Map<string, HTMLCanvasElement>();
+const ENEMY_SPRITE_PHASES = 16;
+
+/**
+ * Pre-renders the static shape art of an enemy into an offscreen sprite, one per
+ * (type, walk-cycle phase, shadow setting). The frame then blits the sprite with
+ * a single drawImage instead of re-running the gradient and path work per enemy.
+ */
+function drawEnemyBodySprite(ctx: CanvasRenderingContext2D, type: number, et: EnemyType, R: number, cycle: number, flip: number, shadowOn: boolean) {
+  const TAU = Math.PI * 2;
+  const phase = Math.round((((cycle % TAU) + TAU) % TAU) / TAU * ENEMY_SPRITE_PHASES) % ENEMY_SPRITE_PHASES;
+  const quantCycle = (phase / ENEMY_SPRITE_PHASES) * TAU;
+  const half = Math.ceil(R * 2.6) + 6;
+  // bosses are large, so they bake at 1x to keep the cache small
+  const scale = R >= 20 ? 1 : 2;
+  const key = `${type}|${phase}|${half}|${scale}|${shadowOn ? 1 : 0}`;
+  let spr = enemySpriteCache.get(key);
+  if (!spr) {
+    if (enemySpriteCache.size > 360) enemySpriteCache.clear();
+    spr = document.createElement("canvas");
+    spr.width = Math.ceil(half * 2 * scale);
+    spr.height = spr.width;
+    const sctx = spr.getContext("2d");
+    if (!sctx) {
+      paintEnemyShape(ctx, type, et, R, cycle, flip, shadowOn);
+      return;
+    }
+    sctx.setTransform(scale, 0, 0, scale, half * scale, half * scale);
+    paintEnemyShape(sctx, type, et, R, quantCycle, 1, shadowOn);
+    enemySpriteCache.set(key, spr);
+  }
+  ctx.save();
+  ctx.scale(flip, 1);
+  ctx.drawImage(spr, -half, -half, half * 2, half * 2);
+  ctx.restore();
+}
+
+/** Static shape art for one enemy type at one walk-cycle phase (no per-enemy state). */
+function paintEnemyShape(ctx: CanvasRenderingContext2D, type: number, et: EnemyType, R: number, cycle: number, flip: number, shadowOn: boolean) {
+  const bodyGradCache = enemyBodyGrad;
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = et.shade;
+  ctx.lineWidth = 2;
+  /** vertical body gradient: lit top, shaded belly */
+  const bodyGrad = (h: number) => {
+    const key = type + ":" + Math.round(h);
+    const hit = bodyGradCache.get(key);
+    if (hit) return hit;
+    const gr = ctx.createLinearGradient(0, -h, 0, h);
+    gr.addColorStop(0, et.accent);
+    gr.addColorStop(0.45, et.color);
+    gr.addColorStop(1, et.shade);
+    bodyGradCache.set(key, gr);
+    return gr;
+  };
+
+  const eye = (x: number, y: number, r: number, pupil = et.shade) => {
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.ellipse(x, y, r, r * 1.1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = pupil;
+    ctx.beginPath();
+    ctx.arc(x + flip * r * 0.28, y + r * 0.12, r * 0.52, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  /** two stubby legs swinging out of phase */
+  const legs = (y: number, spread: number, len: number, w: number) => {
+    ctx.strokeStyle = et.shade;
+    ctx.lineWidth = w;
+    ctx.lineCap = "round";
+    for (let i = 0; i < 2; i++) {
+      const sw = Math.sin(cycle + i * Math.PI) * len * 0.55;
+      const lx = (i === 0 ? -spread : spread);
+      ctx.beginPath();
+      ctx.moveTo(lx, y);
+      ctx.lineTo(lx + sw, y + len);
+      ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+  };
+  if (et.shape === "slime") {
+    // gelatinous blob: squash/stretch, inner nucleus, glossy highlight
+    const sq = 1 + Math.sin(cycle) * 0.14;
+    const rx = R * (1.08 / sq);
+    const ry = R * (0.88 * sq);
+    ctx.fillStyle = bodyGrad(ry);
+    ctx.beginPath();
+    ctx.moveTo(-rx, ry * 0.9);
+    ctx.bezierCurveTo(-rx * 1.1, -ry * 1.1, rx * 1.1, -ry * 1.1, rx, ry * 0.9);
+    ctx.quadraticCurveTo(0, ry * 1.35, -rx, ry * 0.9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // drips
+    ctx.fillStyle = et.color;
+    ctx.globalAlpha = 0.75;
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.arc(i * rx * 0.55, ry * 0.95 + Math.sin(cycle + i) * 1.5, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // nucleus
+    ctx.fillStyle = et.shade;
+    ctx.globalAlpha = 0.55;
+    ctx.beginPath();
+    ctx.ellipse(0, ry * 0.25, rx * 0.34, ry * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    eye(-rx * 0.3, -ry * 0.2, R * 0.21);
+    eye(rx * 0.32, -ry * 0.2, R * 0.21);
+    // gloss
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.beginPath();
+    ctx.ellipse(-rx * 0.38, -ry * 0.55, rx * 0.22, ry * 0.14, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (et.shape === "runner") {
+    // lean sprinter wrapped in a speed cowl, trailing wisps
+    ctx.save();
+    ctx.scale(flip, 1);
+    // motion trail
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = et.color;
+    for (let i = 1; i <= 3; i++) {
+      ctx.beginPath();
+      ctx.ellipse(-R * (0.9 + i * 0.5), 0, R * 0.42, R * 0.3, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    legs(R * 0.55, R * 0.3, R * 0.6, 3);
+    // body: forward-leaning teardrop
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.moveTo(R * 1.05, -R * 0.1);
+    ctx.quadraticCurveTo(R * 0.2, -R * 0.95, -R * 0.55, -R * 0.35);
+    ctx.quadraticCurveTo(-R * 0.95, 0, -R * 0.5, R * 0.55);
+    ctx.quadraticCurveTo(R * 0.3, R * 0.8, R * 1.05, -R * 0.1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // cowl stripe
+    ctx.strokeStyle = et.accent;
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.35, -R * 0.1);
+    ctx.quadraticCurveTo(R * 0.2, -R * 0.35, R * 0.8, -R * 0.12);
+    ctx.stroke();
+    // trailing scarf
+    ctx.strokeStyle = et.accent;
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.4, -R * 0.3);
+    ctx.quadraticCurveTo(-R * 1.1, -R * 0.5 + Math.sin(cycle * 1.6) * 3, -R * 1.7, -R * 0.1 + Math.sin(cycle * 1.6 + 1) * 4);
+    ctx.stroke();
+    ctx.lineCap = "butt";
+    eye(R * 0.45, -R * 0.28, R * 0.19);
+    ctx.restore();
+  } else if (et.shape === "knight") {
+    // armoured block with a shield arm and a crested helm
+    legs(R * 0.8, R * 0.42, R * 0.5, 4);
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.roundRect(-R * 0.82, -R * 0.75, R * 1.64, R * 1.6, 5);
+    ctx.fill();
+    ctx.stroke();
+    // chest plating
+    ctx.strokeStyle = et.accent;
+    ctx.lineWidth = 1.6;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.72, -R * 0.4 + i * R * 0.42);
+      ctx.lineTo(R * 0.72, -R * 0.4 + i * R * 0.42);
+      ctx.stroke();
+    }
+    // pauldrons
+    ctx.fillStyle = et.accent;
+    ctx.beginPath();
+    ctx.ellipse(-R * 0.86, -R * 0.55, R * 0.34, R * 0.26, 0, 0, Math.PI * 2);
+    ctx.ellipse(R * 0.86, -R * 0.55, R * 0.34, R * 0.26, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // helm
+    ctx.fillStyle = et.accent;
+    ctx.strokeStyle = et.shade;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(-R * 0.5, -R * 1.25, R, R * 0.6, 3);
+    ctx.fill();
+    ctx.stroke();
+    // visor slit
+    ctx.fillStyle = "#121a33";
+    ctx.fillRect(-R * 0.36, -R * 1.05, R * 0.72, R * 0.16);
+    ctx.fillStyle = "#ff8f5a";
+    ctx.fillRect(-R * 0.3 + flip * 2, -R * 1.02, R * 0.18, R * 0.1);
+    ctx.fillRect(R * 0.12 + flip * 2, -R * 1.02, R * 0.18, R * 0.1);
+    // crest
+    ctx.fillStyle = "#dbe7ff";
+    ctx.beginPath();
+    ctx.moveTo(0, -R * 1.25);
+    ctx.quadraticCurveTo(flip * R * 0.25, -R * 1.75, flip * R * 0.55, -R * 1.35);
+    ctx.quadraticCurveTo(flip * R * 0.2, -R * 1.35, 0, -R * 1.18);
+    ctx.fill();
+    // shield (front arm), rocking with the step
+    ctx.save();
+    ctx.translate(flip * R * 0.95, R * 0.05);
+    ctx.rotate(Math.sin(cycle) * 0.12);
+    ctx.fillStyle = "#dbe7ff";
+    ctx.strokeStyle = et.shade;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -R * 0.6);
+    ctx.lineTo(R * 0.42 * flip, -R * 0.4);
+    ctx.lineTo(R * 0.42 * flip, R * 0.3);
+    ctx.lineTo(0, R * 0.68);
+    ctx.lineTo(-R * 0.42 * flip, R * 0.3);
+    ctx.lineTo(-R * 0.42 * flip, -R * 0.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  } else if (et.shape === "mage") {
+    // hovering robed caster with an orbiting focus orb
+    const float = Math.sin(cycle * 0.6) * 2.5;
+    ctx.translate(0, float);
+    // robe
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.moveTo(0, -R * 0.55);
+    ctx.quadraticCurveTo(R * 0.75, -R * 0.2, R * 0.9, R * 0.95);
+    ctx.quadraticCurveTo(0, R * 1.25, -R * 0.9, R * 0.95);
+    ctx.quadraticCurveTo(-R * 0.75, -R * 0.2, 0, -R * 0.55);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // robe trim
+    ctx.strokeStyle = et.accent;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.75, R * 0.82);
+    ctx.quadraticCurveTo(0, R * 1.08, R * 0.75, R * 0.82);
+    ctx.stroke();
+    // hood
+    ctx.fillStyle = et.shade;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.52, -R * 0.4);
+    ctx.quadraticCurveTo(0, -R * 1.45, R * 0.52, -R * 0.4);
+    ctx.quadraticCurveTo(0, -R * 0.15, -R * 0.52, -R * 0.4);
+    ctx.closePath();
+    ctx.fill();
+    // glowing eyes in the hood
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = et.accent;
+    ctx.shadowBlur = shadowOn ? 8 : 0;
+    ctx.beginPath();
+    ctx.arc(-R * 0.17, -R * 0.52, 2.1, 0, Math.PI * 2);
+    ctx.arc(R * 0.17, -R * 0.52, 2.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+    // staff + orbiting orb
+    ctx.strokeStyle = "#6b4a2a";
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(flip * R * 0.75, -R * 0.75);
+    ctx.lineTo(flip * R * 0.62, R * 0.95);
+    ctx.stroke();
+    const oa = cycle * 0.5;
+    const ox = flip * R * 0.75 + Math.cos(oa) * R * 0.3;
+    const oy = -R * 0.9 + Math.sin(oa) * R * 0.18;
+    ctx.fillStyle = et.accent;
+    ctx.shadowColor = et.color;
+    ctx.shadowBlur = shadowOn ? 12 : 0;
+    ctx.beginPath();
+    ctx.arc(ox, oy, R * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+  } else if (et.shape === "warlord") {
+    // hulking brute: heavy shoulders, horned helm, swinging axe
+    legs(R * 0.72, R * 0.4, R * 0.52, 6);
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.95, -R * 0.45);
+    ctx.quadraticCurveTo(0, -R * 0.95, R * 0.95, -R * 0.45);
+    ctx.lineTo(R * 0.7, R * 0.8);
+    ctx.quadraticCurveTo(0, R * 1.05, -R * 0.7, R * 0.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // ribbed armour
+    ctx.strokeStyle = et.shade;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.6, -R * 0.15 + i * R * 0.3);
+      ctx.quadraticCurveTo(0, R * 0.05 + i * R * 0.3, R * 0.6, -R * 0.15 + i * R * 0.3);
+      ctx.stroke();
+    }
+    // spiked pauldrons
+    ctx.fillStyle = et.shade;
+    [-1, 1].forEach((sgn) => {
+      ctx.beginPath();
+      ctx.moveTo(sgn * R * 0.6, -R * 0.58);
+      ctx.lineTo(sgn * R * 1.22, -R * 0.3);
+      ctx.lineTo(sgn * R * 0.62, R * 0.02);
+      ctx.closePath();
+      ctx.fill();
+    });
+    // head + horns
+    ctx.fillStyle = et.accent;
+    ctx.beginPath();
+    ctx.arc(0, -R * 0.75, R * 0.33, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#f3e2c8";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    [-1, 1].forEach((sgn) => {
+      ctx.beginPath();
+      ctx.moveTo(sgn * R * 0.26, -R * 0.92);
+      ctx.quadraticCurveTo(sgn * R * 0.62, -R * 1.3, sgn * R * 0.4, -R * 1.55);
+      ctx.stroke();
+    });
+    ctx.lineCap = "butt";
+    ctx.fillStyle = "#2a0a10";
+    ctx.beginPath();
+    ctx.arc(-R * 0.12, -R * 0.78, 2.6, 0, Math.PI * 2);
+    ctx.arc(R * 0.12, -R * 0.78, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+    // axe, swinging with the gait
+    ctx.save();
+    ctx.translate(flip * R * 1.05, R * 0.1);
+    ctx.rotate(Math.sin(cycle) * 0.22 - flip * 0.3);
+    ctx.strokeStyle = "#6b4a2a";
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -R * 0.75);
+    ctx.lineTo(0, R * 0.7);
+    ctx.stroke();
+    ctx.fillStyle = "#d8dee8";
+    ctx.beginPath();
+    ctx.moveTo(0, -R * 0.75);
+    ctx.quadraticCurveTo(flip * R * 0.75, -R * 0.6, flip * R * 0.55, -R * 0.08);
+    ctx.quadraticCurveTo(flip * R * 0.25, -R * 0.26, 0, -R * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  } else if (et.shape === "titan") {
+    // titan: a colossal siege walker — slab torso, void core, shard halo
+    legs(R * 0.62, R * 0.46, R * 0.86, 6);
+    // shard halo
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 7; i++) {
+      const a = cycle * 0.35 + (i / 7) * Math.PI * 2;
+      const rr = R * (1.5 + Math.sin(cycle * 0.8 + i) * 0.08);
+      const sx = Math.cos(a) * rr;
+      const sy = Math.sin(a) * rr * 0.55;
+      ctx.fillStyle = et.accent + (i % 2 ? "88" : "55");
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - R * 0.2);
+      ctx.lineTo(sx + R * 0.11, sy);
+      ctx.lineTo(sx, sy + R * 0.2);
+      ctx.lineTo(sx - R * 0.11, sy);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    // torso: a wide trapezoid plated in slabs
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.82, -R * 0.7);
+    ctx.lineTo(R * 0.82, -R * 0.7);
+    ctx.lineTo(R * 1.05, R * 0.5);
+    ctx.quadraticCurveTo(0, R * 0.95, -R * 1.05, R * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = et.shade;
+    ctx.lineWidth = 2.4;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-R * (0.72 - i * 0.05), -R * 0.45 + i * R * 0.3);
+      ctx.lineTo(R * (0.72 - i * 0.05), -R * 0.45 + i * R * 0.3);
+      ctx.stroke();
+    }
+    // void core in the chest
+    const coreGlow = ctx.createRadialGradient(0, 0, 2, 0, 0, R * 0.42);
+    coreGlow.addColorStop(0, "#ffffff");
+    coreGlow.addColorStop(0.45, et.accent);
+    coreGlow.addColorStop(1, "transparent");
+    ctx.fillStyle = coreGlow;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 0.42 * (1 + Math.sin(cycle * 2) * 0.08), 0, Math.PI * 2);
+    ctx.fill();
+    // shoulder cannons
+    ctx.fillStyle = et.shade;
+    [-1, 1].forEach((sgn) => {
+      ctx.beginPath();
+      ctx.roundRect(sgn < 0 ? -R * 1.12 : R * 0.62, -R * 0.86, R * 0.5, R * 0.3, 4);
+      ctx.fill();
+    });
+    // head: a slab with a visor slit
+    ctx.fillStyle = et.color;
+    ctx.beginPath();
+    ctx.roundRect(-R * 0.3, -R * 1.16, R * 0.6, R * 0.42, 5);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = et.accent;
+    ctx.shadowBlur = shadowOn ? 12 : 0;
+    ctx.fillRect(-R * 0.22, -R * 1.05, R * 0.44, R * 0.1);
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+  } else if (et.shape === "hound") {
+    // Rift Hound: a lean quadruped with a spiked spine and a burning maw
+    ctx.save();
+    ctx.scale(flip, 1);
+    // four legs, front and back pairs out of phase
+    ctx.strokeStyle = et.shade;
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = "round";
+    for (let i = 0; i < 4; i++) {
+      const front = i < 2;
+      const lx = (front ? R * 0.55 : -R * 0.6) + (i % 2 ? R * 0.22 : -R * 0.22);
+      const sw = Math.sin(cycle + i * 1.7) * R * 0.32;
+      ctx.beginPath();
+      ctx.moveTo(lx, R * 0.35);
+      ctx.lineTo(lx + sw, R * 0.92);
+      ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+    // barrel body
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.ellipse(0, 0, R * 0.95, R * 0.52, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // spiked spine
+    ctx.fillStyle = et.accent;
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * R * 0.4 - R * 0.1, -R * 0.42);
+      ctx.lineTo(i * R * 0.4, -R * 0.92);
+      ctx.lineTo(i * R * 0.4 + R * 0.12, -R * 0.42);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // head + jaw
+    ctx.fillStyle = et.color;
+    ctx.beginPath();
+    ctx.ellipse(R * 0.92, -R * 0.18, R * 0.36, R * 0.28, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#2a0d00";
+    ctx.beginPath();
+    ctx.moveTo(R * 1.16, -R * 0.05);
+    ctx.lineTo(R * 1.42, R * 0.08);
+    ctx.lineTo(R * 1.12, R * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    // ember eye
+    ctx.fillStyle = "#fff6c4";
+    ctx.shadowColor = "#ff8a3d";
+    ctx.shadowBlur = shadowOn ? 8 : 0;
+    ctx.beginPath();
+    ctx.arc(R * 0.98, -R * 0.26, R * 0.1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+    ctx.restore();
+  } else if (et.shape === "wraith") {
+    // Cinder Wraith: a hooded ember ghost trailing a tattered hem
+    const float = Math.sin(cycle * 0.8) * 3;
+    ctx.translate(0, float);
+    // ghostly aura
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = et.color;
+    ctx.beginPath();
+    ctx.ellipse(0, R * 0.1, R * 1.15, R * 1.25, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    // robe
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.moveTo(0, -R * 0.9);
+    ctx.quadraticCurveTo(R * 0.75, -R * 0.35, R * 0.62, R * 0.55);
+    // ragged hem
+    for (let i = 0; i < 5; i++) {
+      const t2 = 1 - i / 4;
+      const hx = -R * 0.62 + t2 * R * 1.24;
+      const hem = R * (0.75 + Math.sin(cycle * 1.4 + i) * 0.16);
+      ctx.quadraticCurveTo(hx - R * 0.12, hem, hx - R * 0.2, R * 0.42);
+    }
+    ctx.quadraticCurveTo(-R * 0.75, -R * 0.35, 0, -R * 0.9);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // cowl
+    ctx.fillStyle = "#1a0730";
+    ctx.beginPath();
+    ctx.ellipse(0, -R * 0.52, R * 0.36, R * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // ember eyes
+    ctx.fillStyle = et.accent;
+    ctx.shadowColor = et.color;
+    ctx.shadowBlur = shadowOn ? 10 : 0;
+    ctx.beginPath();
+    ctx.arc(-R * 0.13, -R * 0.52, R * 0.07, 0, Math.PI * 2);
+    ctx.arc(R * 0.13, -R * 0.52, R * 0.07, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+    // rising cinders
+    for (let i = 0; i < 3; i++) {
+      const t3 = ((cycle * 0.25 + i / 3) % 1);
+      ctx.globalAlpha = 0.6 * (1 - t3);
+      ctx.fillStyle = et.color;
+      ctx.beginPath();
+      ctx.arc((i - 1) * R * 0.35 + Math.sin(cycle + i) * 3, R * 0.4 - t3 * R * 1.1, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  } else if (et.shape === "golem") {
+    // Shard Golem: a blocky riftglass brute with a glowing core
+    legs(R * 0.66, R * 0.4, R * 0.5, 7);
+    // chunky torso of stacked slabs
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.roundRect(-R * 0.78, -R * 0.7, R * 1.56, R * 1.4, 7);
+    ctx.fill();
+    ctx.stroke();
+    ctx.strokeStyle = et.shade;
+    ctx.lineWidth = 2.2;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.7, -R * 0.4 + i * R * 0.38);
+      ctx.lineTo(R * 0.7, -R * 0.4 + i * R * 0.38);
+      ctx.stroke();
+    }
+    // crystal core
+    const cg = ctx.createRadialGradient(0, 0, 1, 0, 0, R * 0.5);
+    cg.addColorStop(0, "#ffffff");
+    cg.addColorStop(0.45, et.accent);
+    cg.addColorStop(1, "transparent");
+    ctx.fillStyle = cg;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 0.5 * (1 + Math.sin(cycle * 2) * 0.07), 0, Math.PI * 2);
+    ctx.fill();
+    // fists
+    ctx.fillStyle = et.shade;
+    [-1, 1].forEach((sgn) => {
+      ctx.beginPath();
+      ctx.roundRect(sgn < 0 ? -R * 1.08 : R * 0.74, R * 0.1, R * 0.34, R * 0.4, 6);
+      ctx.fill();
+    });
+    // crystal shards jutting out of the shoulders
+    ctx.fillStyle = et.accent;
+    [-1, 1].forEach((sgn) => {
+      ctx.beginPath();
+      ctx.moveTo(sgn * R * 0.66, -R * 0.72);
+      ctx.lineTo(sgn * R * 0.86, -R * 1.18);
+      ctx.lineTo(sgn * R * 0.46, -R * 0.78);
+      ctx.closePath();
+      ctx.fill();
+    });
+    // visor
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = et.accent;
+    ctx.shadowBlur = shadowOn ? 10 : 0;
+    ctx.fillRect(-R * 0.32, -R * 0.6, R * 0.64, R * 0.12);
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+  } else if (et.shape === "leviathan") {
+    // Abyss Leviathan: a coiled serpent rising out of its own rift
+    const coil = cycle * 0.6;
+    // rift pool under it
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 3; i++) {
+      const rr = R * (1.25 + i * 0.28);
+      ctx.globalAlpha = 0.16 - i * 0.04;
+      ctx.strokeStyle = et.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(0, R * 0.85, rr, rr * 0.36, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    // three coils with a serpentine sway
+    ctx.strokeStyle = et.shade;
+    ctx.lineCap = "round";
+    for (let c = 2; c >= 0; c--) {
+      const cr = R * (0.62 - c * 0.16);
+      const cy = R * (0.5 - c * 0.34);
+      ctx.lineWidth = cr * 1.5;
+      ctx.beginPath();
+      ctx.ellipse(0, cy, cr * 1.35, cr * 0.5, Math.sin(coil + c) * 0.16, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.lineCap = "butt";
+    // neck + head
+    const sway = Math.sin(coil) * R * 0.12;
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.34, R * 0.2);
+    ctx.quadraticCurveTo(-R * 0.2 + sway, -R * 0.7, sway - R * 0.18, -R * 0.95);
+    ctx.lineTo(sway + R * 0.18, -R * 0.95);
+    ctx.quadraticCurveTo(R * 0.2 + sway, -R * 0.7, R * 0.34, R * 0.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // maw
+    ctx.fillStyle = et.color;
+    ctx.beginPath();
+    ctx.ellipse(sway, -R * 1.02, R * 0.34, R * 0.24, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = "#03211f";
+    ctx.beginPath();
+    ctx.moveTo(sway - R * 0.26, -R * 1.02);
+    ctx.lineTo(sway + R * 0.26, -R * 1.02);
+    ctx.lineTo(sway, -R * 0.78);
+    ctx.closePath();
+    ctx.fill();
+    // teeth
+    ctx.fillStyle = "#eafffb";
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(sway + i * R * 0.09, -R * 1.0);
+      ctx.lineTo(sway + i * R * 0.09 + R * 0.035, -R * 0.86);
+      ctx.lineTo(sway + i * R * 0.09 + R * 0.07, -R * 1.0);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // glowing eyes
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = et.color;
+    ctx.shadowBlur = shadowOn ? 14 : 0;
+    ctx.beginPath();
+    ctx.ellipse(sway - R * 0.14, -R * 1.1, R * 0.05, R * 0.03, 0, 0, Math.PI * 2);
+    ctx.ellipse(sway + R * 0.14, -R * 1.1, R * 0.05, R * 0.03, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+    // dorsal fins
+    ctx.fillStyle = et.accent;
+    for (let i = 0; i < 4; i++) {
+      const fy = -R * 0.2 - i * R * 0.18;
+      ctx.beginPath();
+      ctx.moveTo(-R * 0.2, fy);
+      ctx.lineTo(-R * 0.5 - i * 2, fy - R * 0.1);
+      ctx.lineTo(-R * 0.2, fy + R * 0.1);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if (et.shape === "herald") {
+    // Storm Herald: a robed sky-executioner riding its own thunderhead.
+    const float = Math.sin(cycle * 0.55) * 3;
+    ctx.translate(0, float);
+    // thunderhead under the robe
+    ctx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < 3; i++) {
+      const cy2 = R * (0.62 + i * 0.14);
+      ctx.globalAlpha = 0.22 - i * 0.06;
+      ctx.fillStyle = et.color;
+      ctx.beginPath();
+      ctx.ellipse(0, cy2, R * (1.25 - i * 0.2), R * 0.24, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    // robe
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.62, R * 0.72);
+    ctx.quadraticCurveTo(-R * 0.5, -R * 0.35, 0, -R * 0.62);
+    ctx.quadraticCurveTo(R * 0.5, -R * 0.35, R * 0.62, R * 0.72);
+    ctx.quadraticCurveTo(0, R * 0.95, -R * 0.62, R * 0.72);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // lightning sigil down the robe
+    ctx.strokeStyle = et.accent;
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.moveTo(-R * 0.1, -R * 0.3);
+    ctx.lineTo(R * 0.12, R * 0.02);
+    ctx.lineTo(-R * 0.06, R * 0.2);
+    ctx.lineTo(R * 0.14, R * 0.52);
+    ctx.stroke();
+    // hood + void face
+    ctx.fillStyle = et.shade;
+    ctx.beginPath();
+    ctx.ellipse(0, -R * 0.7, R * 0.36, R * 0.42, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#04121a";
+    ctx.beginPath();
+    ctx.ellipse(0, -R * 0.66, R * 0.24, R * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // eyes
+    ctx.fillStyle = "#ffffff";
+    ctx.shadowColor = et.color;
+    ctx.shadowBlur = shadowOn ? 14 : 0;
+    ctx.beginPath();
+    ctx.arc(-R * 0.11, -R * 0.7, R * 0.055, 0, Math.PI * 2);
+    ctx.arc(R * 0.11, -R * 0.7, R * 0.055, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+    // halo of storm rings
+    ctx.strokeStyle = et.color;
+    for (let i = 0; i < 2; i++) {
+      ctx.globalAlpha = 0.5 - i * 0.18;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.ellipse(0, -R * 0.72, R * (0.62 + i * 0.22), R * (0.16 + i * 0.06), cycle * 0.5 + i, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+    // crackling arcs
+    for (let i = 0; i < 3; i++) {
+      const a2 = cycle * 1.6 + i * 2.1;
+      const r1 = R * 0.8;
+      ctx.globalAlpha = 0.6;
+      ctx.strokeStyle = et.accent;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a2) * r1, Math.sin(a2) * r1 * 0.5 + R * 0.5);
+      ctx.lineTo(Math.cos(a2 + 0.4) * r1 * 1.1, Math.sin(a2 + 0.4) * r1 * 0.5 + R * 0.45);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  } else {
+    // overlord: a levitating rift sovereign — cloak, crown, orbiting shards
+    const float = Math.sin(cycle * 0.5) * 3.5;
+    ctx.translate(0, float);
+    // rift aura
+    const aura = ctx.createRadialGradient(0, 0, R * 0.3, 0, 0, R * 1.7);
+    aura.addColorStop(0, et.color + "88");
+    aura.addColorStop(1, "transparent");
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(0, 0, R * 1.7, 0, Math.PI * 2);
+    ctx.fill();
+    // cloak
+    ctx.fillStyle = bodyGrad(R);
+    ctx.beginPath();
+    ctx.moveTo(0, -R * 0.85);
+    ctx.quadraticCurveTo(R * 1.0, -R * 0.35, R * 0.85, R * 0.85);
+    ctx.quadraticCurveTo(R * 0.4, R * 0.6 + Math.sin(cycle) * 3, 0, R * 1.05);
+    ctx.quadraticCurveTo(-R * 0.4, R * 0.6 - Math.sin(cycle) * 3, -R * 0.85, R * 0.85);
+    ctx.quadraticCurveTo(-R * 1.0, -R * 0.35, 0, -R * 0.85);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // sigil on the chest
+    ctx.strokeStyle = et.accent;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, R * 0.1, R * 0.28, 0, Math.PI * 2);
+    ctx.moveTo(0, R * 0.1 - R * 0.34);
+    ctx.lineTo(0, R * 0.1 + R * 0.34);
+    ctx.stroke();
+    // void face
+    ctx.fillStyle = "#0a0320";
+    ctx.beginPath();
+    ctx.ellipse(0, -R * 0.62, R * 0.4, R * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.shadowColor = et.accent;
+    ctx.shadowBlur = shadowOn ? 10 : 0;
+    ctx.beginPath();
+    ctx.ellipse(-R * 0.15, -R * 0.63, 2.6, 1.6, 0, 0, Math.PI * 2);
+    ctx.ellipse(R * 0.15, -R * 0.63, 2.6, 1.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+    // jagged crown
+    ctx.fillStyle = et.accent;
+    ctx.beginPath();
+    for (let i = -2; i <= 2; i++) {
+      const bx = i * R * 0.2;
+      ctx.moveTo(bx - R * 0.09, -R * 0.9);
+      ctx.lineTo(bx, -R * 1.25 - Math.abs(2 - Math.abs(i)) * R * 0.08);
+      ctx.lineTo(bx + R * 0.09, -R * 0.9);
+      ctx.closePath();
+    }
+    ctx.fill();
+    // orbiting rift shards
+    for (let i = 0; i < 3; i++) {
+      const a = cycle * 0.35 + (i / 3) * Math.PI * 2;
+      const sx = Math.cos(a) * R * 1.25;
+      const sy = Math.sin(a) * R * 0.5 - R * 0.2;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(a * 2);
+      ctx.fillStyle = et.accent;
+      ctx.shadowColor = et.color;
+      ctx.shadowBlur = shadowOn ? 10 : 0;
+      ctx.beginPath();
+      ctx.moveTo(0, -4.5);
+      ctx.lineTo(3, 0);
+      ctx.lineTo(0, 4.5);
+      ctx.lineTo(-3, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.shadowBlur = shadowOn ? 0 : 0;
+  }
+}
+
+/** Per-enemy overlays (statuses, marks, boss auras). Painted live every frame. */
+function paintEnemyStatus(ctx: CanvasRenderingContext2D, e: Enemy, et: EnemyType, now: number) {
+  const type = e.type;
+  if (isBossType(type)) {
+    // ward bubble
+    if (e.ward > 0) {
+      ctx.globalAlpha = 0.35 + 0.25 * Math.sin(now / 90);
+      ctx.strokeStyle = "#8fb0ff";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(0, 0, et.r + 11, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // enraged: embers rising off the boss
+    if (e.enraged) {
+      ctx.globalAlpha = 0.7;
+      ctx.fillStyle = "#ff4d5e";
+      for (let i = 0; i < 3; i++) {
+        const t2 = (now / 400 + i / 3) % 1;
+        ctx.beginPath();
+        ctx.arc(Math.sin((now / 300 + i) * 2) * (et.r * 0.7), -et.r - t2 * 26, 3 * (1 - t2), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (e.cast > 0) {
+      ctx.globalAlpha = Math.min(0.6, e.cast);
+      ctx.strokeStyle = "#ffcf4d";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, et.r + 18 * (1 - e.cast / 1.2), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+  // Absolute Zero: a faceted ice block with a bright rim and inner glint
+  if (e.encased > 0) {
+    const R2 = et.r + 7;
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    const ice = ctx.createLinearGradient(0, -R2, 0, R2);
+    ice.addColorStop(0, "#eafdff");
+    ice.addColorStop(0.5, "#8fe4ff");
+    ice.addColorStop(1, "#3fa9d8");
+    ctx.fillStyle = ice;
+    ctx.beginPath();
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 - Math.PI / 2;
+      const rr = R2 * (i % 2 === 0 ? 1.05 : 0.86);
+      const px = Math.cos(a) * rr;
+      const py = Math.sin(a) * rr;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 0.95;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    // internal fractures
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      const a = (i / 3) * Math.PI * 2 + e.wob;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * R2 * 0.2, Math.sin(a) * R2 * 0.2);
+      ctx.lineTo(Math.cos(a + 0.6) * R2 * 0.85, Math.sin(a + 0.6) * R2 * 0.85);
+      ctx.stroke();
+    }
+    // glint sweeping across the block
+    ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 220 + e.wob);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.ellipse(-R2 * 0.3, -R2 * 0.45, R2 * 0.26, R2 * 0.1, -0.6, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // Storm Sovereign: orbiting static arcs on marked enemies
+  if (e.mark > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "#ffe14d";
+    ctx.lineWidth = 1.6;
+    ctx.globalAlpha = 0.55 + 0.35 * Math.sin(now / 70 + e.wob);
+    for (let i = 0; i < 3; i++) {
+      const a0 = now / 240 + (i / 3) * Math.PI * 2;
+      ctx.beginPath();
+      for (let k = 0; k <= 5; k++) {
+        const a = a0 + (k / 5) * 1.3;
+        const rr = (et.r + 9) * (1 + (k % 2 ? 0.1 : -0.08));
+        const px = Math.cos(a) * rr;
+        const py = Math.sin(a) * rr * 0.75;
+        k === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+  if (e.frozen > 0) {
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = "#9fe8ff";
+    ctx.beginPath();
+    ctx.arc(0, 0, et.r + 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const ang = (i / 3) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang) * 4, Math.sin(ang) * 4 - 6);
+      ctx.lineTo(Math.cos(ang) * 10, Math.sin(ang) * 10 - 6);
+      ctx.stroke();
+    }
+  }
+  if (e.burnT > 0) {
+    ctx.globalAlpha = 0.35 + Math.sin(now / 90 + e.wob) * 0.12;
+    ctx.fillStyle = "#ff7a3d";
+    ctx.beginPath();
+    ctx.arc(0, -2, et.r + 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  if (e.slowT > 0 && e.frozen <= 0) {
+    ctx.strokeStyle = "#7fe9ff";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, et.r + 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  if (e.stun > 0 && e.frozen <= 0) {
+    ctx.strokeStyle = "#ffd23f";
+    ctx.lineWidth = 2;
+    const sa = now / 120;
+    ctx.beginPath();
+    ctx.arc(0, -et.r - 12, 6, sa, sa + 1.2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, -et.r - 12, 6, sa + Math.PI, sa + Math.PI + 1.2);
+    ctx.stroke();
   }
 }
 
@@ -1270,7 +2248,7 @@ export default function Battle({
     const addText = (x: number, y: number, txt: string, color: string, size: number, crit: boolean) => {
       // tight cap: a wall of damage numbers is the fastest way to melt a frame
       if (g.texts.length > 28) g.texts.splice(0, g.texts.length - 28);
-      g.texts.push({ x, y, txt, color, size, life: 0.9, crit });
+      g.texts.push({ x, y, txt: tr(txt), color, size, life: 0.9, crit });
     };
     const burst = (x: number, y: number, color: string, n: number, spd = 160) => {
       if (!fxOn()) n = Math.min(n, 4);
@@ -2096,70 +3074,74 @@ export default function Battle({
       sfx.zap();
     };
 
-    /** Demon Execution's fixed-cadence, unbuffable execution storm. */
+    /**
+     * Demon Execution's fixed-cadence, unbuffable execution bolt. One strike
+     * now picks ONE enemy (the furthest along the lane) instead of the whole
+     * field. Regular enemies and elites are executed outright; bosses cannot be
+     * executed, so they lose 25% of their max HP instead. The sky channel is
+     * deep red with 50% more jitter and one extra jag segment.
+     */
     const demonStrike = (t: BT) => {
       const now = performance.now();
       const tier2 = saveRef.current.awn.demon?.[1] || 0;
       const list = g.enemies.filter((e) => !e.dead);
-      const shown = list.slice(0, 24);
+      if (!list.length) return;
+      const target = list.reduce((best, e) => (e.d > best.d ? e : best), list[0]);
+      const ep = enemyPos(target);
+      const boss = isBossType(target.type);
+      const elite = !!target.elite;
+      const blood = "#6e0014";
+      const deep = "#8c0018";
+      const hotBlood = "#c4002c";
+      const core = "#ff2b4f";
+      const jit = { jit: 1.5, jag: 1 };
       const hellTargets: { enemy: Enemy; x: number; y: number; knockMeters: number }[] = [];
-      const blood = "#650015";
-      const hotBlood = "#d40032";
 
-      // Hell Dimensions opens a descending portal at every elite or boss struck.
-      // Its target is banished to spawn; the universal execution resolves the
-      // target immediately afterward, while nearby enemies are hurled backward.
-      if (tier2 > 0) {
+      // Hell Dimensions opens a descending portal under an elite or boss that
+      // the strike hits. Its target is banished to spawn, and nearby enemies
+      // are hurled backward. The execution/damage step below still resolves.
+      if (tier2 > 0 && (elite || boss)) {
         const baseRadius = 72;
         const portalRadius = baseRadius * (1 + t.def.awk2!.mult[tier2 - 1]);
         const knockMeters = 10 + t.def.awk2!.mult2![tier2 - 1];
         const knockPixels = knockMeters * 10; // arena path scale: 10 px per metre
-        for (const e of list) {
-          if (!e.elite && !isBossType(e.type)) continue;
-          const portalAt = enemyPos(e);
-          g.strikes.push({ x: portalAt.x, y: portalAt.y, life: 0.26, max: 0.26, width: 26 + tier2 * 2, color: blood, seed: Math.random() * 100, forks: 5, top: -H });
-          addZone({ kind: "hell", x: portalAt.x, y: portalAt.y, r: portalRadius, life: 1.25, max: 1.25, dps: 0, slow: 0, color: hotBlood });
-          ring(portalAt.x, portalAt.y, hotBlood, portalRadius);
-          shock(portalAt.x, portalAt.y, hotBlood, portalRadius * 2.3, 0.72);
-          glow(portalAt.x, portalAt.y, "#ff263f", portalRadius * 2, 0.65);
-          burst(portalAt.x, portalAt.y, blood, 32, 430);
-          sparkAt(portalAt.x, portalAt.y, 30, 420);
-          addText(portalAt.x, portalAt.y - 82, `HELL DIMENSIONS · ${knockMeters}m`, "#ff5266", 15, true);
-
-          for (const nearby of list) {
-            if (nearby === e || nearby.dead) continue;
-            const np = enemyPos(nearby);
-            if (Math.hypot(np.x - portalAt.x, np.y - portalAt.y) > portalRadius * 1.35) continue;
-            nearby.d = Math.max(0, nearby.d - knockPixels);
-            nearby.ox = 0;
-            nearby.oy = 0;
-            const knocked = enemyPos(nearby);
-            if (g.bolts.length < 44) g.bolts.push(randBolt(portalAt.x, portalAt.y, knocked.x, knocked.y, hotBlood, 2.2, 0.24, now));
-            shock(knocked.x, knocked.y, hotBlood, 48, 0.3);
-          }
-          hellTargets.push({ enemy: e, x: portalAt.x, y: portalAt.y, knockMeters });
-          punch(0.8, 0.65);
-          hitStop(0.08);
-          g.shake = saveRef.current.shakeFx ? Math.min(26, g.shake + 22) : 0;
+        const portalAt = ep;
+        g.strikes.push({ x: portalAt.x, y: portalAt.y, life: 0.26, max: 0.26, width: 26 + tier2 * 2, color: blood, core, seed: Math.random() * 100, forks: 5, top: -H, ...jit });
+        addZone({ kind: "hell", x: portalAt.x, y: portalAt.y, r: portalRadius, life: 1.25, max: 1.25, dps: 0, slow: 0, color: hotBlood });
+        ring(portalAt.x, portalAt.y, hotBlood, portalRadius);
+        shock(portalAt.x, portalAt.y, hotBlood, portalRadius * 2.3, 0.72);
+        glow(portalAt.x, portalAt.y, "#ff263f", portalRadius * 2, 0.65);
+        burst(portalAt.x, portalAt.y, blood, 32, 430);
+        sparkAt(portalAt.x, portalAt.y, 30, 420);
+        addText(portalAt.x, portalAt.y - 82, `HELL DIMENSIONS · ${knockMeters}m`, "#ff5266", 15, true);
+        for (const nearby of list) {
+          if (nearby === target || nearby.dead) continue;
+          const np = enemyPos(nearby);
+          if (Math.hypot(np.x - portalAt.x, np.y - portalAt.y) > portalRadius * 1.35) continue;
+          nearby.d = Math.max(0, nearby.d - knockPixels);
+          nearby.ox = 0;
+          nearby.oy = 0;
+          const knocked = enemyPos(nearby);
+          if (g.bolts.length < 44) g.bolts.push(randBolt(portalAt.x, portalAt.y, knocked.x, knocked.y, hotBlood, 2.2, 0.24, now, jit));
+          shock(knocked.x, knocked.y, hotBlood, 48, 0.3);
         }
+        hellTargets.push({ enemy: target, x: portalAt.x, y: portalAt.y, knockMeters });
+        punch(0.8, 0.65);
+        hitStop(0.08);
+        g.shake = saveRef.current.shakeFx ? Math.min(26, g.shake + 22) : 0;
       }
 
-      // Deep-red sky pillars and explosions are visual; the executions below
-      // directly award kills instead of passing through damage, armour or wards.
-      shown.forEach((e) => {
-        const ep = enemyPos(e);
-        const boss = isBossType(e.type);
-        const elite = !!e.elite;
-        g.strikes.push({ x: ep.x, y: ep.y, life: 0.58, max: 0.58, width: boss ? 26 : elite ? 20 : 16, color: blood, seed: Math.random() * 100, forks: boss ? 6 : 4, top: -H });
-        g.strikes.push({ x: ep.x, y: ep.y, life: 0.34, max: 0.34, width: boss ? 11 : 7, color: "#ff5266", seed: Math.random() * 100, forks: 3, top: -H * 0.45 });
-        g.strikes.push({ x: ep.x, y: ep.y, life: 0.2, max: 0.2, width: boss ? 8 : 4, color: "#fff0f2", seed: Math.random() * 100, forks: 2, top: -H * 0.9 });
-        addZone({ kind: "execution", x: ep.x, y: ep.y, r: boss ? 150 : 96, life: 0.92, max: 0.92, dps: 0, slow: 0, color: hotBlood });
-        ring(ep.x, ep.y, "#ff173f", boss ? 116 : 78);
-        shock(ep.x, ep.y, hotBlood, boss ? 240 : 165, 0.68);
-        glow(ep.x, ep.y, "#ff1838", boss ? 260 : 190, 0.58);
-        burst(ep.x, ep.y, blood, boss ? 42 : 28, boss ? 520 : 400);
-        sparkAt(ep.x, ep.y, boss ? 42 : 28, boss ? 540 : 430);
-      });
+      // Deep-red sky channel. Visual only: the damage step below decides the outcome.
+      const width = boss ? 26 : elite ? 20 : 16;
+      g.strikes.push({ x: ep.x, y: ep.y, life: 0.58, max: 0.58, width, color: deep, core, seed: Math.random() * 100, forks: boss ? 7 : 5, top: -H, ...jit });
+      g.strikes.push({ x: ep.x, y: ep.y, life: 0.34, max: 0.34, width: boss ? 11 : 7, color: hotBlood, core, seed: Math.random() * 100, forks: 4, top: -H * 0.45, ...jit });
+      g.strikes.push({ x: ep.x, y: ep.y, life: 0.2, max: 0.2, width: boss ? 8 : 4, color: core, core: "#ffd0d8", seed: Math.random() * 100, forks: 3, top: -H * 0.9, ...jit });
+      addZone({ kind: "execution", x: ep.x, y: ep.y, r: boss ? 150 : 96, life: 0.92, max: 0.92, dps: 0, slow: 0, color: hotBlood });
+      ring(ep.x, ep.y, "#c4002c", boss ? 116 : 78);
+      shock(ep.x, ep.y, hotBlood, boss ? 240 : 165, 0.68);
+      glow(ep.x, ep.y, "#b0001f", boss ? 260 : 190, 0.58);
+      burst(ep.x, ep.y, blood, boss ? 42 : 28, boss ? 520 : 400);
+      sparkAt(ep.x, ep.y, boss ? 42 : 28, boss ? 540 : 430);
       for (const portal of hellTargets) {
         portal.enemy.d = 0;
         portal.enemy.ox = 0;
@@ -2170,19 +3152,27 @@ export default function Battle({
       punch(1, 0.85);
       hitStop(0.12);
       g.shake = saveRef.current.shakeFx ? Math.min(26, g.shake + 24) : 0;
-      sfx.demonExecution();
+      sfx.demonStrike();
 
-      for (const e of list) {
-        if (e.dead) continue;
-        const ep = enemyPos(e);
-        addText(ep.x, ep.y - 58, isBossType(e.type) ? "BOSS EXECUTED" : "EXECUTED", "#ff4059", isBossType(e.type) ? 17 : 13, true);
-        e.hp = 0;
-        killReward(e); // unconditional: no immunity, armour, ward or damage modifiers
+      if (boss) {
+        // bosses cannot be executed: a quarter of their max health is torn away
+        const cut = target.max * 0.25;
+        target.hp = Math.max(0, target.hp - cut);
+        target.flash = 0.3;
+        addText(ep.x, ep.y - 58, `-25% MAX HP`, "#ff4059", 17, true);
+        addText(ep.x, ep.y - 36, `−${shortHp(cut)}`, "#ffd7dc", 13, true);
+        if (target.hp <= 0) {
+          killReward(target);
+          addText(ep.x, ep.y - 78, "BOSS EXECUTED", "#ff4059", 17, true);
+        }
+        toastRef.current(`DEMON EXECUTION — boss loses 25% max HP`, "#a80020");
+      } else {
+        addText(ep.x, ep.y - 58, "EXECUTED", "#ff4059", 13, true);
+        target.hp = 0;
+        killReward(target); // unconditional: no immunity, armour, ward or damage modifiers
+        toastRef.current(`DEMON EXECUTION — enemy executed`, "#a80020");
       }
-      if (list.length > 0) {
-        addText(W / 2, H * 0.3, `SOULS ERASED · ${list.length}`, "#ff4059", 22, true);
-        toastRef.current(`DEMON EXECUTION — ${list.length} enemies executed`, "#a80020");
-      }
+      addText(W / 2, H * 0.3, `SOULS ERASED · ${target.dead ? 1 : 0}`, "#ff4059", 22, true);
     };
 
     /** small helper: a tight fan of sparks at a point (used by the sky bolts) */
@@ -3534,7 +4524,7 @@ export default function Battle({
         punch(1, 0.8);
         hitStop(0.14);
         g.shake = saveRef.current.shakeFx ? Math.min(26, g.shake + 23) : 0;
-        sfx.demonExecution();
+        sfx.demonStrike();
         addText(p.x, p.y - 78, `SOUL WIPEOUT · ${beamCount} BEAMS`, "#ff4059", 18, true);
         toastRef.current(`SOUL WIPEOUT — ${targets.length}/${beamCount} execution beams`, "#a80020");
       }
@@ -3656,6 +4646,7 @@ export default function Battle({
       g.skillCasts++;
       if (hero.id === "thunder") {
         const targets = g.towers.filter((tower) => tower.cell && tower.points < MAX_POINTS);
+        const wardNow = performance.now();
         for (let i = 0; i < Math.min(2, targets.length); i++) {
           const pick = Math.floor(Math.random() * targets.length);
           const [tower] = targets.splice(pick, 1);
@@ -3664,11 +4655,19 @@ export default function Battle({
           tower.points = Math.min(MAX_POINTS, tower.points + gain);
           const at = cellCenter(tower.cell!.c, tower.cell!.r);
           tower.flash = 0.35;
+          // the lightning lands on the tower that actually gains the points:
+          // a sky channel and a forked bolt strike down onto its cell
+          const skyX = at.x + (Math.random() - 0.5) * 30;
+          if (g.strikes.length < 24) g.strikes.push({ x: at.x, y: at.y, life: 0.46, max: 0.46, width: 10, color: hero.color, core: "#fff6c4", seed: Math.random() * 100, forks: 3, top: -H });
+          if (g.bolts.length < 44) g.bolts.push(randBolt(skyX, -40, at.x, at.y, hero.color2, 3, 0.36, wardNow));
+          if (g.bolts.length < 44) g.bolts.push(randBolt(at.x, at.y, at.x + 26, at.y - 40, hero.color2, 1.6, 0.22, wardNow));
+          shock(at.x, at.y, hero.color, 46, 0.5);
           ring(at.x, at.y, "#ffe14d", 42);
           glow(at.x, at.y, "#ffe14d", 58, 0.45);
           addText(at.x, at.y - 20, `+${tower.points - before}P`, "#ffe14d", 12, true);
         }
         g.bossImmunityT = Math.max(g.bossImmunityT, 10);
+        sfx.thunderCrack();
         toastRef.current("THUNDER WARD · TWO TOWERS EMPOWERED · BOSS IMMUNITY 10s", "#ffe14d");
       }
       // Bolt from the Blue (Thunder God awakening 2): every cast has a chance
@@ -3944,22 +4943,38 @@ export default function Battle({
         glow(p.x, p.y, hero.color2, 70, 0.35);
         stars(p.x, p.y, "#ffffff", 4, 40);
       }
-      // sovereign strike: the densest cluster takes a colossal bolt instantly
-      const sp = hotspot();
+      // sovereign strike: three colossal bolts land on randomly chosen enemies
+      // (not a fixed hotspot), and each one arcs through everything nearby
+      const pool = alive();
+      const picks: Enemy[] = [];
+      for (let i = 0; i < Math.min(3, pool.length); i++) {
+        const idx = Math.floor(Math.random() * pool.length);
+        picks.push(pool.splice(idx, 1)[0]);
+      }
+      const sp = picks.length ? (() => {
+        const ep = enemyPos(picks[0]);
+        return { x: ep.x, y: ep.y };
+      })() : hotspot();
       flash(hero.color2, 0.26);
       g.shake = fxShake(14);
       punch(0.9, 0.7);
       hitStop(0.08);
-      for (let i = 0; i < 3; i++) shock(sp.x, sp.y, i % 2 ? hero.color : "#ffffff", 34 + i * 22, 0.7);
-      glow(sp.x, sp.y, hero.color2, 170, 0.7);
-      g.strikes.push({ x: sp.x, y: sp.y, life: 0.66, max: 0.66, width: 26, color: "#fff6c4", seed: 3, forks: 4, top: -140 });
-      g.strikes.push({ x: sp.x, y: sp.y, life: 0.5, max: 0.5, width: 14, color: "#ffffff", seed: 11, forks: 2, top: -140 });
-      alive().forEach((e) => {
-        const ep = enemyPos(e);
-        if (Math.hypot(ep.x - sp.x, ep.y - sp.y) > 200) return;
-        e.mark = Math.max(e.mark, 6);
-        inductionStrike(e);
-        dealDamage(e, dmg * 2.4, { alwaysCrit: true, color: hero.color2, lightning: true });
+      const hit = new Set<Enemy>();
+      picks.forEach((target, bi) => {
+        const tp = enemyPos(target);
+        for (let i = 0; i < 3; i++) shock(tp.x, tp.y, i % 2 ? hero.color : "#ffffff", 34 + i * 22, 0.7);
+        glow(tp.x, tp.y, hero.color2, 170, 0.7);
+        g.strikes.push({ x: tp.x, y: tp.y, life: 0.66, max: 0.66, width: 26, color: "#fff6c4", seed: 3 + bi * 7, forks: 4, top: -140 });
+        g.strikes.push({ x: tp.x, y: tp.y, life: 0.5, max: 0.5, width: 14, color: "#ffffff", seed: 11 + bi * 5, forks: 2, top: -140 });
+        alive().forEach((e) => {
+          if (hit.has(e)) return;
+          const ep = enemyPos(e);
+          if (Math.hypot(ep.x - tp.x, ep.y - tp.y) > 200) return;
+          hit.add(e);
+          e.mark = Math.max(e.mark, 6);
+          inductionStrike(e);
+          dealDamage(e, dmg * 2.4, { alwaysCrit: true, color: hero.color2, lightning: true });
+        });
       });
       addText(sp.x, sp.y - 70, "SOVEREIGN STRIKE", hero.color2, 22, true);
       addText(W / 2, H / 2 - 110, "STORM SOVEREIGN", hero.color, 30, true);
@@ -4203,6 +5218,8 @@ export default function Battle({
       } else if (g.phase === "wave") {
         while (g.spawnQ.length && g.spawnQ[0].at <= g.t) {
           const s = g.spawnQ.shift()!;
+          // two-gate modes alternate: every other body steps out of the second gate
+          const fromGateB = hasSecondGate(mode) && g.waveSpawned % 2 === 1;
           g.waveSpawned++;
           const et = ENEMY_TYPES[s.type];
           const boss = isBossType(s.type);
@@ -4214,7 +5231,7 @@ export default function Battle({
             mode
           );
           g.enemies.push({
-            id: eidC++, d: 0, hp, max: hp, speed: et.speed * ENEMY_SPEED_MUL * (1 + g.round * 0.012) * (elite ? 1.08 : 1) * (mode === "gemrush" ? GEM_RUSH_SPEED_MUL : modeSpeedMul(mode)) * (mode === "sandbox" ? sandboxCfgRef.current.speed : 1), type: s.type,
+            id: eidC++, d: fromGateB ? GATE_B_D : 0, hp, max: hp, speed: et.speed * ENEMY_SPEED_MUL * (1 + g.round * 0.012) * (elite ? 1.08 : 1) * (mode === "gemrush" ? GEM_RUSH_SPEED_MUL : modeSpeedMul(mode)) * (mode === "sandbox" ? sandboxCfgRef.current.speed : 1), type: s.type,
             elite,
             frozen: 0, stun: 0, armor: mode === "sandbox" ? sandboxCfgRef.current.shield : et.armor, lives: et.lives, gold: (et.gold + Math.floor(g.round / 2)) * (elite ? 2 : 1),
             spv: Math.round(killSp(elite, boss) * MONTH_BONUS.spMul), dead: false, wob: Math.random() * 7,
@@ -4229,7 +5246,7 @@ export default function Battle({
           // spawn-in: a rift opens at the gate and the body condenses out of it
           // (elites and bosses get a bigger, brighter ring)
           if (fxOn() && !saveRef.current.powerSaver) {
-            const sp0 = pathPos(0);
+            const sp0 = pathPos(fromGateB ? GATE_B_D : 0);
             ring(sp0.x, sp0.y, et.color, boss ? 46 : elite ? 30 : 18);
             if (boss) {
               glow(sp0.x, sp0.y, et.accent, 140, 0.5);
@@ -4291,7 +5308,7 @@ export default function Battle({
               applyBoon(GAUNTLET_BOONS[Math.floor(Math.random() * GAUNTLET_BOONS.length)]);
             }
             sfx.coin();
-            toastRef.current(`Wave ${g.round} cleared · choose a boon`, "#3dff8e");
+            if (!saveRef.current.hideWaveCleared) { sfx.waveCleared(); toastRef.current(`Wave ${g.round} cleared · choose a boon`, "#3dff8e"); }
             if (g.round % 5 === 0) {
               mutateRef.current((s) => {
                 s.tokens += 1;
@@ -4303,7 +5320,7 @@ export default function Battle({
             g.phase = "inter";
             g.phaseT = saveRef.current.fastWaves ? 1.2 : mode === "endless" ? 3 : 3.5;
             sfx.coin();
-            toastRef.current(
+            if (!saveRef.current.hideWaveCleared) toastRef.current(
               `${mode === "endless" ? "Wave" : "Round"} ${g.round} cleared · +${spGain(bonus)} SP`,
               "#3dff8e"
             );
@@ -5126,6 +6143,13 @@ export default function Battle({
                 if (direct) dealDamage(direct, direct.max * 100, { tw: m.tw, color: "#ff7a24", noCrit: true });
                 const from = { x: m.x + 200, y: -120 };
                 if (g.bolts.length < 32) g.bolts.push(randBolt(from.x, from.y, m.x, m.y, "#ff7a24", 8, 0.5, performance.now()));
+                // segmented lightning: a charged sky channel forks down onto the crater,
+                // with a second jagged arc splitting off it
+                const sky = performance.now();
+                if (g.strikes.length < 24) g.strikes.push({ x: m.x, y: m.y, life: 0.6, max: 0.6, width: 22, color: "#ff7a24", core: "#fff1d0", seed: Math.random() * 100, forks: 6, top: -H, jag: 1, jit: 1.4 });
+                if (g.strikes.length < 24) g.strikes.push({ x: m.x, y: m.y, life: 0.4, max: 0.4, width: 8, color: "#ffd08a", core: "#ffffff", seed: Math.random() * 100, forks: 4, top: -H * 0.5, jag: 1, jit: 1.4 });
+                if (g.bolts.length < 40) g.bolts.push(randBolt(m.x - 70, -60, m.x, m.y, "#ff7a24", 4, 0.42, sky, { jag: 1, jit: 1.4 }));
+                if (g.bolts.length < 40) g.bolts.push(randBolt(m.x, m.y, m.x + 90, m.y - 60, "#ffb36b", 2.2, 0.3, sky, { jag: 1, jit: 1.4 }));
               }
               shock(m.x, m.y, m.asteroid ? "#ff7a24" : "#ffd23f", blast, 0.55);
               burst(m.x, m.y, "#ffb324", 20, 260);
@@ -6651,7 +7675,7 @@ export default function Battle({
         ctx.font = `700 11px ${canvasUiFont}`;
         ctx.textAlign = "center";
         ctx.fillStyle = "rgba(234,230,255,0.85)";
-        ctx.fillText(`${t.def.name} · Lv${t.bLv}`, x, y - 46);
+        ctx.fillText(`${tr(t.def.name)} · Lv${t.bLv}`, x, y - 46);
       }
       ctx.globalAlpha = 1;
     };
@@ -6667,7 +7691,6 @@ export default function Battle({
      * coordinates are resolved against the CTM when they are painted, so the
      * cached object stays valid across the per-enemy translate.
      */
-    const bodyGradCache = new Map<string, CanvasGradient>();
     const drawEnemy = (e: Enemy, now: number) => {
       // glide between sim steps when frame interpolation is on — path distance
       // and the lateral singularity offset are interpolated independently
@@ -6856,912 +7879,9 @@ export default function Battle({
 
       ctx.save();
       ctx.translate(p.x, p.y + bob);
-      ctx.lineJoin = "round";
-      ctx.strokeStyle = et.shade;
-      ctx.lineWidth = 2;
-
-      /** vertical body gradient: lit top, shaded belly */
-      const bodyGrad = (h: number) => {
-        const key = e.type + ":" + Math.round(h);
-        const hit = bodyGradCache.get(key);
-        if (hit) return hit;
-        const gr = ctx.createLinearGradient(0, -h, 0, h);
-        gr.addColorStop(0, et.accent);
-        gr.addColorStop(0.45, et.color);
-        gr.addColorStop(1, et.shade);
-        bodyGradCache.set(key, gr);
-        return gr;
-      };
-
-      const eye = (x: number, y: number, r: number, pupil = et.shade) => {
-        ctx.fillStyle = "#ffffff";
-        ctx.beginPath();
-        ctx.ellipse(x, y, r, r * 1.1, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = pupil;
-        ctx.beginPath();
-        ctx.arc(x + flip * r * 0.28, y + r * 0.12, r * 0.52, 0, Math.PI * 2);
-        ctx.fill();
-      };
-
-      /** two stubby legs swinging out of phase */
-      const legs = (y: number, spread: number, len: number, w: number) => {
-        ctx.strokeStyle = et.shade;
-        ctx.lineWidth = w;
-        ctx.lineCap = "round";
-        for (let i = 0; i < 2; i++) {
-          const sw = Math.sin(cycle + i * Math.PI) * len * 0.55;
-          const lx = (i === 0 ? -spread : spread);
-          ctx.beginPath();
-          ctx.moveTo(lx, y);
-          ctx.lineTo(lx + sw, y + len);
-          ctx.stroke();
-        }
-        ctx.lineCap = "butt";
-      };
-
-      if (et.shape === "slime") {
-        // gelatinous blob: squash/stretch, inner nucleus, glossy highlight
-        const sq = 1 + Math.sin(cycle) * 0.14;
-        const rx = R * (1.08 / sq);
-        const ry = R * (0.88 * sq);
-        ctx.fillStyle = bodyGrad(ry);
-        ctx.beginPath();
-        ctx.moveTo(-rx, ry * 0.9);
-        ctx.bezierCurveTo(-rx * 1.1, -ry * 1.1, rx * 1.1, -ry * 1.1, rx, ry * 0.9);
-        ctx.quadraticCurveTo(0, ry * 1.35, -rx, ry * 0.9);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // drips
-        ctx.fillStyle = et.color;
-        ctx.globalAlpha = 0.75;
-        for (let i = -1; i <= 1; i++) {
-          ctx.beginPath();
-          ctx.arc(i * rx * 0.55, ry * 0.95 + Math.sin(cycle + i) * 1.5, 2.2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-        // nucleus
-        ctx.fillStyle = et.shade;
-        ctx.globalAlpha = 0.55;
-        ctx.beginPath();
-        ctx.ellipse(0, ry * 0.25, rx * 0.34, ry * 0.3, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        eye(-rx * 0.3, -ry * 0.2, R * 0.21);
-        eye(rx * 0.32, -ry * 0.2, R * 0.21);
-        // gloss
-        ctx.fillStyle = "rgba(255,255,255,0.45)";
-        ctx.beginPath();
-        ctx.ellipse(-rx * 0.38, -ry * 0.55, rx * 0.22, ry * 0.14, -0.5, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (et.shape === "runner") {
-        // lean sprinter wrapped in a speed cowl, trailing wisps
-        ctx.save();
-        ctx.scale(flip, 1);
-        // motion trail
-        ctx.globalAlpha = 0.28;
-        ctx.fillStyle = et.color;
-        for (let i = 1; i <= 3; i++) {
-          ctx.beginPath();
-          ctx.ellipse(-R * (0.9 + i * 0.5), 0, R * 0.42, R * 0.3, 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-        legs(R * 0.55, R * 0.3, R * 0.6, 3);
-        // body: forward-leaning teardrop
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.moveTo(R * 1.05, -R * 0.1);
-        ctx.quadraticCurveTo(R * 0.2, -R * 0.95, -R * 0.55, -R * 0.35);
-        ctx.quadraticCurveTo(-R * 0.95, 0, -R * 0.5, R * 0.55);
-        ctx.quadraticCurveTo(R * 0.3, R * 0.8, R * 1.05, -R * 0.1);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // cowl stripe
-        ctx.strokeStyle = et.accent;
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        ctx.moveTo(-R * 0.35, -R * 0.1);
-        ctx.quadraticCurveTo(R * 0.2, -R * 0.35, R * 0.8, -R * 0.12);
-        ctx.stroke();
-        // trailing scarf
-        ctx.strokeStyle = et.accent;
-        ctx.lineWidth = 3;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(-R * 0.4, -R * 0.3);
-        ctx.quadraticCurveTo(-R * 1.1, -R * 0.5 + Math.sin(cycle * 1.6) * 3, -R * 1.7, -R * 0.1 + Math.sin(cycle * 1.6 + 1) * 4);
-        ctx.stroke();
-        ctx.lineCap = "butt";
-        eye(R * 0.45, -R * 0.28, R * 0.19);
-        ctx.restore();
-      } else if (et.shape === "knight") {
-        // armoured block with a shield arm and a crested helm
-        legs(R * 0.8, R * 0.42, R * 0.5, 4);
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.roundRect(-R * 0.82, -R * 0.75, R * 1.64, R * 1.6, 5);
-        ctx.fill();
-        ctx.stroke();
-        // chest plating
-        ctx.strokeStyle = et.accent;
-        ctx.lineWidth = 1.6;
-        for (let i = 0; i < 3; i++) {
-          ctx.beginPath();
-          ctx.moveTo(-R * 0.72, -R * 0.4 + i * R * 0.42);
-          ctx.lineTo(R * 0.72, -R * 0.4 + i * R * 0.42);
-          ctx.stroke();
-        }
-        // pauldrons
-        ctx.fillStyle = et.accent;
-        ctx.beginPath();
-        ctx.ellipse(-R * 0.86, -R * 0.55, R * 0.34, R * 0.26, 0, 0, Math.PI * 2);
-        ctx.ellipse(R * 0.86, -R * 0.55, R * 0.34, R * 0.26, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // helm
-        ctx.fillStyle = et.accent;
-        ctx.strokeStyle = et.shade;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.roundRect(-R * 0.5, -R * 1.25, R, R * 0.6, 3);
-        ctx.fill();
-        ctx.stroke();
-        // visor slit
-        ctx.fillStyle = "#121a33";
-        ctx.fillRect(-R * 0.36, -R * 1.05, R * 0.72, R * 0.16);
-        ctx.fillStyle = "#ff8f5a";
-        ctx.fillRect(-R * 0.3 + flip * 2, -R * 1.02, R * 0.18, R * 0.1);
-        ctx.fillRect(R * 0.12 + flip * 2, -R * 1.02, R * 0.18, R * 0.1);
-        // crest
-        ctx.fillStyle = "#dbe7ff";
-        ctx.beginPath();
-        ctx.moveTo(0, -R * 1.25);
-        ctx.quadraticCurveTo(flip * R * 0.25, -R * 1.75, flip * R * 0.55, -R * 1.35);
-        ctx.quadraticCurveTo(flip * R * 0.2, -R * 1.35, 0, -R * 1.18);
-        ctx.fill();
-        // shield (front arm), rocking with the step
-        ctx.save();
-        ctx.translate(flip * R * 0.95, R * 0.05);
-        ctx.rotate(Math.sin(cycle) * 0.12);
-        ctx.fillStyle = "#dbe7ff";
-        ctx.strokeStyle = et.shade;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, -R * 0.6);
-        ctx.lineTo(R * 0.42 * flip, -R * 0.4);
-        ctx.lineTo(R * 0.42 * flip, R * 0.3);
-        ctx.lineTo(0, R * 0.68);
-        ctx.lineTo(-R * 0.42 * flip, R * 0.3);
-        ctx.lineTo(-R * 0.42 * flip, -R * 0.4);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-      } else if (et.shape === "mage") {
-        // hovering robed caster with an orbiting focus orb
-        const float = Math.sin(cycle * 0.6) * 2.5;
-        ctx.translate(0, float);
-        // robe
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.moveTo(0, -R * 0.55);
-        ctx.quadraticCurveTo(R * 0.75, -R * 0.2, R * 0.9, R * 0.95);
-        ctx.quadraticCurveTo(0, R * 1.25, -R * 0.9, R * 0.95);
-        ctx.quadraticCurveTo(-R * 0.75, -R * 0.2, 0, -R * 0.55);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // robe trim
-        ctx.strokeStyle = et.accent;
-        ctx.lineWidth = 1.6;
-        ctx.beginPath();
-        ctx.moveTo(-R * 0.75, R * 0.82);
-        ctx.quadraticCurveTo(0, R * 1.08, R * 0.75, R * 0.82);
-        ctx.stroke();
-        // hood
-        ctx.fillStyle = et.shade;
-        ctx.beginPath();
-        ctx.moveTo(-R * 0.52, -R * 0.4);
-        ctx.quadraticCurveTo(0, -R * 1.45, R * 0.52, -R * 0.4);
-        ctx.quadraticCurveTo(0, -R * 0.15, -R * 0.52, -R * 0.4);
-        ctx.closePath();
-        ctx.fill();
-        // glowing eyes in the hood
-        ctx.fillStyle = "#fff";
-        ctx.shadowColor = et.accent;
-        ctx.shadowBlur = saveRef.current.shadowFx ? 8 : 0;
-        ctx.beginPath();
-        ctx.arc(-R * 0.17, -R * 0.52, 2.1, 0, Math.PI * 2);
-        ctx.arc(R * 0.17, -R * 0.52, 2.1, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-        // staff + orbiting orb
-        ctx.strokeStyle = "#6b4a2a";
-        ctx.lineWidth = 2.4;
-        ctx.beginPath();
-        ctx.moveTo(flip * R * 0.75, -R * 0.75);
-        ctx.lineTo(flip * R * 0.62, R * 0.95);
-        ctx.stroke();
-        const oa = cycle * 0.5;
-        const ox = flip * R * 0.75 + Math.cos(oa) * R * 0.3;
-        const oy = -R * 0.9 + Math.sin(oa) * R * 0.18;
-        ctx.fillStyle = et.accent;
-        ctx.shadowColor = et.color;
-        ctx.shadowBlur = saveRef.current.shadowFx ? 12 : 0;
-        ctx.beginPath();
-        ctx.arc(ox, oy, R * 0.22, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-      } else if (et.shape === "warlord") {
-        // hulking brute: heavy shoulders, horned helm, swinging axe
-        legs(R * 0.72, R * 0.4, R * 0.52, 6);
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.moveTo(-R * 0.95, -R * 0.45);
-        ctx.quadraticCurveTo(0, -R * 0.95, R * 0.95, -R * 0.45);
-        ctx.lineTo(R * 0.7, R * 0.8);
-        ctx.quadraticCurveTo(0, R * 1.05, -R * 0.7, R * 0.8);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // ribbed armour
-        ctx.strokeStyle = et.shade;
-        ctx.lineWidth = 2;
-        for (let i = 0; i < 3; i++) {
-          ctx.beginPath();
-          ctx.moveTo(-R * 0.6, -R * 0.15 + i * R * 0.3);
-          ctx.quadraticCurveTo(0, R * 0.05 + i * R * 0.3, R * 0.6, -R * 0.15 + i * R * 0.3);
-          ctx.stroke();
-        }
-        // spiked pauldrons
-        ctx.fillStyle = et.shade;
-        [-1, 1].forEach((sgn) => {
-          ctx.beginPath();
-          ctx.moveTo(sgn * R * 0.6, -R * 0.58);
-          ctx.lineTo(sgn * R * 1.22, -R * 0.3);
-          ctx.lineTo(sgn * R * 0.62, R * 0.02);
-          ctx.closePath();
-          ctx.fill();
-        });
-        // head + horns
-        ctx.fillStyle = et.accent;
-        ctx.beginPath();
-        ctx.arc(0, -R * 0.75, R * 0.33, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = "#f3e2c8";
-        ctx.lineWidth = 3;
-        ctx.lineCap = "round";
-        [-1, 1].forEach((sgn) => {
-          ctx.beginPath();
-          ctx.moveTo(sgn * R * 0.26, -R * 0.92);
-          ctx.quadraticCurveTo(sgn * R * 0.62, -R * 1.3, sgn * R * 0.4, -R * 1.55);
-          ctx.stroke();
-        });
-        ctx.lineCap = "butt";
-        ctx.fillStyle = "#2a0a10";
-        ctx.beginPath();
-        ctx.arc(-R * 0.12, -R * 0.78, 2.6, 0, Math.PI * 2);
-        ctx.arc(R * 0.12, -R * 0.78, 2.6, 0, Math.PI * 2);
-        ctx.fill();
-        // axe, swinging with the gait
-        ctx.save();
-        ctx.translate(flip * R * 1.05, R * 0.1);
-        ctx.rotate(Math.sin(cycle) * 0.22 - flip * 0.3);
-        ctx.strokeStyle = "#6b4a2a";
-        ctx.lineWidth = 3.2;
-        ctx.beginPath();
-        ctx.moveTo(0, -R * 0.75);
-        ctx.lineTo(0, R * 0.7);
-        ctx.stroke();
-        ctx.fillStyle = "#d8dee8";
-        ctx.beginPath();
-        ctx.moveTo(0, -R * 0.75);
-        ctx.quadraticCurveTo(flip * R * 0.75, -R * 0.6, flip * R * 0.55, -R * 0.08);
-        ctx.quadraticCurveTo(flip * R * 0.25, -R * 0.26, 0, -R * 0.2);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      } else if (et.shape === "titan") {
-        // titan: a colossal siege walker — slab torso, void core, shard halo
-        legs(R * 0.62, R * 0.46, R * 0.86, 6);
-        // shard halo
-        ctx.globalCompositeOperation = "lighter";
-        for (let i = 0; i < 7; i++) {
-          const a = cycle * 0.35 + (i / 7) * Math.PI * 2;
-          const rr = R * (1.5 + Math.sin(cycle * 0.8 + i) * 0.08);
-          const sx = Math.cos(a) * rr;
-          const sy = Math.sin(a) * rr * 0.55;
-          ctx.fillStyle = et.accent + (i % 2 ? "88" : "55");
-          ctx.beginPath();
-          ctx.moveTo(sx, sy - R * 0.2);
-          ctx.lineTo(sx + R * 0.11, sy);
-          ctx.lineTo(sx, sy + R * 0.2);
-          ctx.lineTo(sx - R * 0.11, sy);
-          ctx.closePath();
-          ctx.fill();
-        }
-        ctx.globalCompositeOperation = "source-over";
-        // torso: a wide trapezoid plated in slabs
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.moveTo(-R * 0.82, -R * 0.7);
-        ctx.lineTo(R * 0.82, -R * 0.7);
-        ctx.lineTo(R * 1.05, R * 0.5);
-        ctx.quadraticCurveTo(0, R * 0.95, -R * 1.05, R * 0.5);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.strokeStyle = et.shade;
-        ctx.lineWidth = 2.4;
-        for (let i = 0; i < 4; i++) {
-          ctx.beginPath();
-          ctx.moveTo(-R * (0.72 - i * 0.05), -R * 0.45 + i * R * 0.3);
-          ctx.lineTo(R * (0.72 - i * 0.05), -R * 0.45 + i * R * 0.3);
-          ctx.stroke();
-        }
-        // void core in the chest
-        const coreGlow = ctx.createRadialGradient(0, 0, 2, 0, 0, R * 0.42);
-        coreGlow.addColorStop(0, "#ffffff");
-        coreGlow.addColorStop(0.45, et.accent);
-        coreGlow.addColorStop(1, "transparent");
-        ctx.fillStyle = coreGlow;
-        ctx.beginPath();
-        ctx.arc(0, 0, R * 0.42 * (1 + Math.sin(cycle * 2) * 0.08), 0, Math.PI * 2);
-        ctx.fill();
-        // shoulder cannons
-        ctx.fillStyle = et.shade;
-        [-1, 1].forEach((sgn) => {
-          ctx.beginPath();
-          ctx.roundRect(sgn < 0 ? -R * 1.12 : R * 0.62, -R * 0.86, R * 0.5, R * 0.3, 4);
-          ctx.fill();
-        });
-        // head: a slab with a visor slit
-        ctx.fillStyle = et.color;
-        ctx.beginPath();
-        ctx.roundRect(-R * 0.3, -R * 1.16, R * 0.6, R * 0.42, 5);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#fff";
-        ctx.shadowColor = et.accent;
-        ctx.shadowBlur = saveRef.current.shadowFx ? 12 : 0;
-        ctx.fillRect(-R * 0.22, -R * 1.05, R * 0.44, R * 0.1);
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-      } else if (et.shape === "hound") {
-        // Rift Hound: a lean quadruped with a spiked spine and a burning maw
-        ctx.save();
-        ctx.scale(flip, 1);
-        // four legs, front and back pairs out of phase
-        ctx.strokeStyle = et.shade;
-        ctx.lineWidth = 3.2;
-        ctx.lineCap = "round";
-        for (let i = 0; i < 4; i++) {
-          const front = i < 2;
-          const lx = (front ? R * 0.55 : -R * 0.6) + (i % 2 ? R * 0.22 : -R * 0.22);
-          const sw = Math.sin(cycle + i * 1.7) * R * 0.32;
-          ctx.beginPath();
-          ctx.moveTo(lx, R * 0.35);
-          ctx.lineTo(lx + sw, R * 0.92);
-          ctx.stroke();
-        }
-        ctx.lineCap = "butt";
-        // barrel body
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.ellipse(0, 0, R * 0.95, R * 0.52, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        // spiked spine
-        ctx.fillStyle = et.accent;
-        for (let i = -1; i <= 1; i++) {
-          ctx.beginPath();
-          ctx.moveTo(i * R * 0.4 - R * 0.1, -R * 0.42);
-          ctx.lineTo(i * R * 0.4, -R * 0.92);
-          ctx.lineTo(i * R * 0.4 + R * 0.12, -R * 0.42);
-          ctx.closePath();
-          ctx.fill();
-        }
-        // head + jaw
-        ctx.fillStyle = et.color;
-        ctx.beginPath();
-        ctx.ellipse(R * 0.92, -R * 0.18, R * 0.36, R * 0.28, -0.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#2a0d00";
-        ctx.beginPath();
-        ctx.moveTo(R * 1.16, -R * 0.05);
-        ctx.lineTo(R * 1.42, R * 0.08);
-        ctx.lineTo(R * 1.12, R * 0.2);
-        ctx.closePath();
-        ctx.fill();
-        // ember eye
-        ctx.fillStyle = "#fff6c4";
-        ctx.shadowColor = "#ff8a3d";
-        ctx.shadowBlur = saveRef.current.shadowFx ? 8 : 0;
-        ctx.beginPath();
-        ctx.arc(R * 0.98, -R * 0.26, R * 0.1, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-        ctx.restore();
-      } else if (et.shape === "wraith") {
-        // Cinder Wraith: a hooded ember ghost trailing a tattered hem
-        const float = Math.sin(cycle * 0.8) * 3;
-        ctx.translate(0, float);
-        // ghostly aura
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = et.color;
-        ctx.beginPath();
-        ctx.ellipse(0, R * 0.1, R * 1.15, R * 1.25, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        // robe
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.moveTo(0, -R * 0.9);
-        ctx.quadraticCurveTo(R * 0.75, -R * 0.35, R * 0.62, R * 0.55);
-        // ragged hem
-        for (let i = 0; i < 5; i++) {
-          const t2 = 1 - i / 4;
-          const hx = -R * 0.62 + t2 * R * 1.24;
-          const hem = R * (0.75 + Math.sin(cycle * 1.4 + i) * 0.16);
-          ctx.quadraticCurveTo(hx - R * 0.12, hem, hx - R * 0.2, R * 0.42);
-        }
-        ctx.quadraticCurveTo(-R * 0.75, -R * 0.35, 0, -R * 0.9);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // cowl
-        ctx.fillStyle = "#1a0730";
-        ctx.beginPath();
-        ctx.ellipse(0, -R * 0.52, R * 0.36, R * 0.4, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // ember eyes
-        ctx.fillStyle = et.accent;
-        ctx.shadowColor = et.color;
-        ctx.shadowBlur = saveRef.current.shadowFx ? 10 : 0;
-        ctx.beginPath();
-        ctx.arc(-R * 0.13, -R * 0.52, R * 0.07, 0, Math.PI * 2);
-        ctx.arc(R * 0.13, -R * 0.52, R * 0.07, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-        // rising cinders
-        for (let i = 0; i < 3; i++) {
-          const t3 = ((cycle * 0.25 + i / 3) % 1);
-          ctx.globalAlpha = 0.6 * (1 - t3);
-          ctx.fillStyle = et.color;
-          ctx.beginPath();
-          ctx.arc((i - 1) * R * 0.35 + Math.sin(cycle + i) * 3, R * 0.4 - t3 * R * 1.1, 2.2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-      } else if (et.shape === "golem") {
-        // Shard Golem: a blocky riftglass brute with a glowing core
-        legs(R * 0.66, R * 0.4, R * 0.5, 7);
-        // chunky torso of stacked slabs
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.roundRect(-R * 0.78, -R * 0.7, R * 1.56, R * 1.4, 7);
-        ctx.fill();
-        ctx.stroke();
-        ctx.strokeStyle = et.shade;
-        ctx.lineWidth = 2.2;
-        for (let i = 0; i < 3; i++) {
-          ctx.beginPath();
-          ctx.moveTo(-R * 0.7, -R * 0.4 + i * R * 0.38);
-          ctx.lineTo(R * 0.7, -R * 0.4 + i * R * 0.38);
-          ctx.stroke();
-        }
-        // crystal core
-        const cg = ctx.createRadialGradient(0, 0, 1, 0, 0, R * 0.5);
-        cg.addColorStop(0, "#ffffff");
-        cg.addColorStop(0.45, et.accent);
-        cg.addColorStop(1, "transparent");
-        ctx.fillStyle = cg;
-        ctx.beginPath();
-        ctx.arc(0, 0, R * 0.5 * (1 + Math.sin(cycle * 2) * 0.07), 0, Math.PI * 2);
-        ctx.fill();
-        // fists
-        ctx.fillStyle = et.shade;
-        [-1, 1].forEach((sgn) => {
-          ctx.beginPath();
-          ctx.roundRect(sgn < 0 ? -R * 1.08 : R * 0.74, R * 0.1, R * 0.34, R * 0.4, 6);
-          ctx.fill();
-        });
-        // crystal shards jutting out of the shoulders
-        ctx.fillStyle = et.accent;
-        [-1, 1].forEach((sgn) => {
-          ctx.beginPath();
-          ctx.moveTo(sgn * R * 0.66, -R * 0.72);
-          ctx.lineTo(sgn * R * 0.86, -R * 1.18);
-          ctx.lineTo(sgn * R * 0.46, -R * 0.78);
-          ctx.closePath();
-          ctx.fill();
-        });
-        // visor
-        ctx.fillStyle = "#ffffff";
-        ctx.shadowColor = et.accent;
-        ctx.shadowBlur = saveRef.current.shadowFx ? 10 : 0;
-        ctx.fillRect(-R * 0.32, -R * 0.6, R * 0.64, R * 0.12);
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-      } else if (et.shape === "leviathan") {
-        // Abyss Leviathan: a coiled serpent rising out of its own rift
-        const coil = cycle * 0.6;
-        // rift pool under it
-        ctx.globalCompositeOperation = "lighter";
-        for (let i = 0; i < 3; i++) {
-          const rr = R * (1.25 + i * 0.28);
-          ctx.globalAlpha = 0.16 - i * 0.04;
-          ctx.strokeStyle = et.color;
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.ellipse(0, R * 0.85, rr, rr * 0.36, 0, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-        ctx.globalCompositeOperation = "source-over";
-        ctx.globalAlpha = 1;
-        // three coils with a serpentine sway
-        ctx.strokeStyle = et.shade;
-        ctx.lineCap = "round";
-        for (let c = 2; c >= 0; c--) {
-          const cr = R * (0.62 - c * 0.16);
-          const cy = R * (0.5 - c * 0.34);
-          ctx.lineWidth = cr * 1.5;
-          ctx.beginPath();
-          ctx.ellipse(0, cy, cr * 1.35, cr * 0.5, Math.sin(coil + c) * 0.16, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-        ctx.lineCap = "butt";
-        // neck + head
-        const sway = Math.sin(coil) * R * 0.12;
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.moveTo(-R * 0.34, R * 0.2);
-        ctx.quadraticCurveTo(-R * 0.2 + sway, -R * 0.7, sway - R * 0.18, -R * 0.95);
-        ctx.lineTo(sway + R * 0.18, -R * 0.95);
-        ctx.quadraticCurveTo(R * 0.2 + sway, -R * 0.7, R * 0.34, R * 0.2);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // maw
-        ctx.fillStyle = et.color;
-        ctx.beginPath();
-        ctx.ellipse(sway, -R * 1.02, R * 0.34, R * 0.24, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = "#03211f";
-        ctx.beginPath();
-        ctx.moveTo(sway - R * 0.26, -R * 1.02);
-        ctx.lineTo(sway + R * 0.26, -R * 1.02);
-        ctx.lineTo(sway, -R * 0.78);
-        ctx.closePath();
-        ctx.fill();
-        // teeth
-        ctx.fillStyle = "#eafffb";
-        for (let i = -2; i <= 2; i++) {
-          ctx.beginPath();
-          ctx.moveTo(sway + i * R * 0.09, -R * 1.0);
-          ctx.lineTo(sway + i * R * 0.09 + R * 0.035, -R * 0.86);
-          ctx.lineTo(sway + i * R * 0.09 + R * 0.07, -R * 1.0);
-          ctx.closePath();
-          ctx.fill();
-        }
-        // glowing eyes
-        ctx.fillStyle = "#ffffff";
-        ctx.shadowColor = et.color;
-        ctx.shadowBlur = saveRef.current.shadowFx ? 14 : 0;
-        ctx.beginPath();
-        ctx.ellipse(sway - R * 0.14, -R * 1.1, R * 0.05, R * 0.03, 0, 0, Math.PI * 2);
-        ctx.ellipse(sway + R * 0.14, -R * 1.1, R * 0.05, R * 0.03, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-        // dorsal fins
-        ctx.fillStyle = et.accent;
-        for (let i = 0; i < 4; i++) {
-          const fy = -R * 0.2 - i * R * 0.18;
-          ctx.beginPath();
-          ctx.moveTo(-R * 0.2, fy);
-          ctx.lineTo(-R * 0.5 - i * 2, fy - R * 0.1);
-          ctx.lineTo(-R * 0.2, fy + R * 0.1);
-          ctx.closePath();
-          ctx.fill();
-        }
-      } else if (et.shape === "herald") {
-        // Storm Herald: a robed sky-executioner riding its own thunderhead.
-        const float = Math.sin(cycle * 0.55) * 3;
-        ctx.translate(0, float);
-        // thunderhead under the robe
-        ctx.globalCompositeOperation = "lighter";
-        for (let i = 0; i < 3; i++) {
-          const cy2 = R * (0.62 + i * 0.14);
-          ctx.globalAlpha = 0.22 - i * 0.06;
-          ctx.fillStyle = et.color;
-          ctx.beginPath();
-          ctx.ellipse(0, cy2, R * (1.25 - i * 0.2), R * 0.24, 0, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.globalCompositeOperation = "source-over";
-        ctx.globalAlpha = 1;
-        // robe
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.moveTo(-R * 0.62, R * 0.72);
-        ctx.quadraticCurveTo(-R * 0.5, -R * 0.35, 0, -R * 0.62);
-        ctx.quadraticCurveTo(R * 0.5, -R * 0.35, R * 0.62, R * 0.72);
-        ctx.quadraticCurveTo(0, R * 0.95, -R * 0.62, R * 0.72);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // lightning sigil down the robe
-        ctx.strokeStyle = et.accent;
-        ctx.lineWidth = 2.6;
-        ctx.beginPath();
-        ctx.moveTo(-R * 0.1, -R * 0.3);
-        ctx.lineTo(R * 0.12, R * 0.02);
-        ctx.lineTo(-R * 0.06, R * 0.2);
-        ctx.lineTo(R * 0.14, R * 0.52);
-        ctx.stroke();
-        // hood + void face
-        ctx.fillStyle = et.shade;
-        ctx.beginPath();
-        ctx.ellipse(0, -R * 0.7, R * 0.36, R * 0.42, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#04121a";
-        ctx.beginPath();
-        ctx.ellipse(0, -R * 0.66, R * 0.24, R * 0.3, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // eyes
-        ctx.fillStyle = "#ffffff";
-        ctx.shadowColor = et.color;
-        ctx.shadowBlur = saveRef.current.shadowFx ? 14 : 0;
-        ctx.beginPath();
-        ctx.arc(-R * 0.11, -R * 0.7, R * 0.055, 0, Math.PI * 2);
-        ctx.arc(R * 0.11, -R * 0.7, R * 0.055, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-        // halo of storm rings
-        ctx.strokeStyle = et.color;
-        for (let i = 0; i < 2; i++) {
-          ctx.globalAlpha = 0.5 - i * 0.18;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.ellipse(0, -R * 0.72, R * (0.62 + i * 0.22), R * (0.16 + i * 0.06), cycle * 0.5 + i, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-        // crackling arcs
-        for (let i = 0; i < 3; i++) {
-          const a2 = cycle * 1.6 + i * 2.1;
-          const r1 = R * 0.8;
-          ctx.globalAlpha = 0.6;
-          ctx.strokeStyle = et.accent;
-          ctx.lineWidth = 1.6;
-          ctx.beginPath();
-          ctx.moveTo(Math.cos(a2) * r1, Math.sin(a2) * r1 * 0.5 + R * 0.5);
-          ctx.lineTo(Math.cos(a2 + 0.4) * r1 * 1.1, Math.sin(a2 + 0.4) * r1 * 0.5 + R * 0.45);
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-      } else {
-        // overlord: a levitating rift sovereign — cloak, crown, orbiting shards
-        const float = Math.sin(cycle * 0.5) * 3.5;
-        ctx.translate(0, float);
-        // rift aura
-        const aura = ctx.createRadialGradient(0, 0, R * 0.3, 0, 0, R * 1.7);
-        aura.addColorStop(0, et.color + "88");
-        aura.addColorStop(1, "transparent");
-        ctx.fillStyle = aura;
-        ctx.beginPath();
-        ctx.arc(0, 0, R * 1.7, 0, Math.PI * 2);
-        ctx.fill();
-        // cloak
-        ctx.fillStyle = bodyGrad(R);
-        ctx.beginPath();
-        ctx.moveTo(0, -R * 0.85);
-        ctx.quadraticCurveTo(R * 1.0, -R * 0.35, R * 0.85, R * 0.85);
-        ctx.quadraticCurveTo(R * 0.4, R * 0.6 + Math.sin(cycle) * 3, 0, R * 1.05);
-        ctx.quadraticCurveTo(-R * 0.4, R * 0.6 - Math.sin(cycle) * 3, -R * 0.85, R * 0.85);
-        ctx.quadraticCurveTo(-R * 1.0, -R * 0.35, 0, -R * 0.85);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        // sigil on the chest
-        ctx.strokeStyle = et.accent;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, R * 0.1, R * 0.28, 0, Math.PI * 2);
-        ctx.moveTo(0, R * 0.1 - R * 0.34);
-        ctx.lineTo(0, R * 0.1 + R * 0.34);
-        ctx.stroke();
-        // void face
-        ctx.fillStyle = "#0a0320";
-        ctx.beginPath();
-        ctx.ellipse(0, -R * 0.62, R * 0.4, R * 0.34, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = "#fff";
-        ctx.shadowColor = et.accent;
-        ctx.shadowBlur = saveRef.current.shadowFx ? 10 : 0;
-        ctx.beginPath();
-        ctx.ellipse(-R * 0.15, -R * 0.63, 2.6, 1.6, 0, 0, Math.PI * 2);
-        ctx.ellipse(R * 0.15, -R * 0.63, 2.6, 1.6, 0, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-        // jagged crown
-        ctx.fillStyle = et.accent;
-        ctx.beginPath();
-        for (let i = -2; i <= 2; i++) {
-          const bx = i * R * 0.2;
-          ctx.moveTo(bx - R * 0.09, -R * 0.9);
-          ctx.lineTo(bx, -R * 1.25 - Math.abs(2 - Math.abs(i)) * R * 0.08);
-          ctx.lineTo(bx + R * 0.09, -R * 0.9);
-          ctx.closePath();
-        }
-        ctx.fill();
-        // orbiting rift shards
-        for (let i = 0; i < 3; i++) {
-          const a = cycle * 0.35 + (i / 3) * Math.PI * 2;
-          const sx = Math.cos(a) * R * 1.25;
-          const sy = Math.sin(a) * R * 0.5 - R * 0.2;
-          ctx.save();
-          ctx.translate(sx, sy);
-          ctx.rotate(a * 2);
-          ctx.fillStyle = et.accent;
-          ctx.shadowColor = et.color;
-          ctx.shadowBlur = saveRef.current.shadowFx ? 10 : 0;
-          ctx.beginPath();
-          ctx.moveTo(0, -4.5);
-          ctx.lineTo(3, 0);
-          ctx.lineTo(0, 4.5);
-          ctx.lineTo(-3, 0);
-          ctx.closePath();
-          ctx.fill();
-          ctx.restore();
-        }
-        ctx.shadowBlur = saveRef.current.shadowFx ? 0 : 0;
-      }
-
-      if (isBossType(e.type)) {
-        // ward bubble
-        if (e.ward > 0) {
-          ctx.globalAlpha = 0.35 + 0.25 * Math.sin(now / 90);
-          ctx.strokeStyle = "#8fb0ff";
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.arc(0, 0, et.r + 11, 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.globalAlpha = 1;
-        }
-        // enraged: embers rising off the boss
-        if (e.enraged) {
-          ctx.globalAlpha = 0.7;
-          ctx.fillStyle = "#ff4d5e";
-          for (let i = 0; i < 3; i++) {
-            const t2 = (now / 400 + i / 3) % 1;
-            ctx.beginPath();
-            ctx.arc(Math.sin((now / 300 + i) * 2) * (et.r * 0.7), -et.r - t2 * 26, 3 * (1 - t2), 0, Math.PI * 2);
-            ctx.fill();
-          }
-          ctx.globalAlpha = 1;
-        }
-        if (e.cast > 0) {
-          ctx.globalAlpha = Math.min(0.6, e.cast);
-          ctx.strokeStyle = "#ffcf4d";
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(0, 0, et.r + 18 * (1 - e.cast / 1.2), 0, Math.PI * 2);
-          ctx.stroke();
-          ctx.globalAlpha = 1;
-        }
-      }
-      // Absolute Zero: a faceted ice block with a bright rim and inner glint
-      if (e.encased > 0) {
-        const R2 = et.r + 7;
-        ctx.save();
-        ctx.globalAlpha = 0.72;
-        const ice = ctx.createLinearGradient(0, -R2, 0, R2);
-        ice.addColorStop(0, "#eafdff");
-        ice.addColorStop(0.5, "#8fe4ff");
-        ice.addColorStop(1, "#3fa9d8");
-        ctx.fillStyle = ice;
-        ctx.beginPath();
-        for (let i = 0; i < 7; i++) {
-          const a = (i / 7) * Math.PI * 2 - Math.PI / 2;
-          const rr = R2 * (i % 2 === 0 ? 1.05 : 0.86);
-          const px = Math.cos(a) * rr;
-          const py = Math.sin(a) * rr;
-          i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-        }
-        ctx.closePath();
-        ctx.fill();
-        ctx.globalAlpha = 0.95;
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1.6;
-        ctx.stroke();
-        // internal fractures
-        ctx.globalAlpha = 0.55;
-        ctx.lineWidth = 1;
-        for (let i = 0; i < 3; i++) {
-          const a = (i / 3) * Math.PI * 2 + e.wob;
-          ctx.beginPath();
-          ctx.moveTo(Math.cos(a) * R2 * 0.2, Math.sin(a) * R2 * 0.2);
-          ctx.lineTo(Math.cos(a + 0.6) * R2 * 0.85, Math.sin(a + 0.6) * R2 * 0.85);
-          ctx.stroke();
-        }
-        // glint sweeping across the block
-        ctx.globalAlpha = 0.5 + 0.3 * Math.sin(now / 220 + e.wob);
-        ctx.fillStyle = "#ffffff";
-        ctx.beginPath();
-        ctx.ellipse(-R2 * 0.3, -R2 * 0.45, R2 * 0.26, R2 * 0.1, -0.6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      }
-      // Storm Sovereign: orbiting static arcs on marked enemies
-      if (e.mark > 0) {
-        ctx.save();
-        ctx.globalCompositeOperation = "lighter";
-        ctx.strokeStyle = "#ffe14d";
-        ctx.lineWidth = 1.6;
-        ctx.globalAlpha = 0.55 + 0.35 * Math.sin(now / 70 + e.wob);
-        for (let i = 0; i < 3; i++) {
-          const a0 = now / 240 + (i / 3) * Math.PI * 2;
-          ctx.beginPath();
-          for (let k = 0; k <= 5; k++) {
-            const a = a0 + (k / 5) * 1.3;
-            const rr = (et.r + 9) * (1 + (k % 2 ? 0.1 : -0.08));
-            const px = Math.cos(a) * rr;
-            const py = Math.sin(a) * rr * 0.75;
-            k === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-          }
-          ctx.stroke();
-        }
-        ctx.restore();
-      }
-      if (e.frozen > 0) {
-        ctx.globalAlpha = 0.5;
-        ctx.fillStyle = "#9fe8ff";
-        ctx.beginPath();
-        ctx.arc(0, 0, et.r + 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 2;
-        for (let i = 0; i < 3; i++) {
-          const ang = (i / 3) * Math.PI * 2;
-          ctx.beginPath();
-          ctx.moveTo(Math.cos(ang) * 4, Math.sin(ang) * 4 - 6);
-          ctx.lineTo(Math.cos(ang) * 10, Math.sin(ang) * 10 - 6);
-          ctx.stroke();
-        }
-      }
-      if (e.burnT > 0) {
-        ctx.globalAlpha = 0.35 + Math.sin(now / 90 + e.wob) * 0.12;
-        ctx.fillStyle = "#ff7a3d";
-        ctx.beginPath();
-        ctx.arc(0, -2, et.r + 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-      if (e.slowT > 0 && e.frozen <= 0) {
-        ctx.strokeStyle = "#7fe9ff";
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        ctx.arc(0, 0, et.r + 6, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.setLineDash([]);
-      }
-      if (e.stun > 0 && e.frozen <= 0) {
-        ctx.strokeStyle = "#ffd23f";
-        ctx.lineWidth = 2;
-        const sa = now / 120;
-        ctx.beginPath();
-        ctx.arc(0, -et.r - 12, 6, sa, sa + 1.2);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(0, -et.r - 12, 6, sa + Math.PI, sa + Math.PI + 1.2);
-        ctx.stroke();
-      }
+      const shadowOn = saveRef.current.shadowFx;
+      drawEnemyBodySprite(ctx, e.type, et, R, cycle, flip, shadowOn);
+      paintEnemyStatus(ctx, e, et, now);
       ctx.restore();
       // health bar: rounded, outlined, with a lighter cap so it reads at speed
       const boss = isBossType(e.type);
@@ -8229,6 +8349,7 @@ export default function Battle({
       }
 
       drawPortal(WPX[0].x, WPX[0].y, "#c44dff", "SPAWN");
+      if (mode !== "sandbox" && hasSecondGate(mode)) drawPortal(GATE_B.x, GATE_B.y, "#c44dff", "SPAWN");
       drawPortal(WPX[WPX.length - 1].x, WPX[WPX.length - 1].y, "#ff4d5e", "EXIT");
 
       // energy guides: one arena-wide field boundary plus a faint tether from
@@ -8563,7 +8684,9 @@ export default function Battle({
         const top = st.top ?? -70;
         const w = st.width * (0.34 + k * 0.18);
         const detailed = pillarIdx++ < 10 && fxQ() >= 0.7;
-        const segs = 16;
+        const segs = 16 + (st.jag ?? 0);
+        const jitMul = st.jit ?? 1;
+        const coreColor = st.core ?? "#ffffff";
         const span = Math.max(40, st.y - top);
         const sway = w * 1.9;
         // Reuse a compact typed offset buffer and the point list. The bolt changes
@@ -8580,7 +8703,7 @@ export default function Battle({
             const t = i / segs;
             // taper the wobble at both ends so the bolt is anchored
             const env = Math.sin(Math.PI * t) * 0.92;
-            const jx = (st.jitter![i] + (salt ? hash(st.seed * 3.7 + i * 1.93 + salt) - 0.5 : 0)) * spread * env;
+            const jx = (st.jitter![i] + (salt ? hash(st.seed * 3.7 + i * 1.93 + salt) - 0.5 : 0)) * spread * jitMul * env;
             out[i].x = st.x + jx;
             out[i].y = top + span * (from + (to - from) * t);
           }
@@ -8621,10 +8744,10 @@ export default function Battle({
               });
             }
             stroke(forkPts, Math.max(0.8, w * 0.6), st.color, 0.34 * k);
-            stroke(forkPts, Math.max(0.6, w * 0.26), "#ffffff", 0.55 * k);
+            stroke(forkPts, Math.max(0.6, w * 0.26), coreColor, 0.55 * k);
           }
         }
-        stroke(main, Math.max(1.2, w * (detailed ? 0.55 : 0.8)), "#ffffff", 0.9 * k);
+        stroke(main, Math.max(1.2, w * (detailed ? 0.55 : 0.8)), coreColor, 0.9 * k);
         // the impact pool where the channel meets the ground
         if (detailed) {
           const pool = ctx.createRadialGradient(st.x, st.y, 1, st.x, st.y, w * 4.5);
@@ -9116,24 +9239,33 @@ export default function Battle({
         ctx.restore();
       }
 
-      // Directional temporal smear only while the camera is actually shaking.
-      // It uses a downsampled prior frame, fades quickly, and is disabled by
-      // reduced effects, power saving, or the user's screen-shake preference.
+      // Directional temporal smear while the camera is shaking. The ghost is the
+      // previous frame, pushed along the shake vector. Strength follows the live
+      // shake amplitude as well as the per-frame jump, so every hard hit shows a
+      // visible streak. Only the user's Motion Blur switch and Power Saving can
+      // disable it: the frame governor no longer hides it mid-shake.
       const shakeVelocity = Math.hypot(shakeX - lastShakeX, shakeY - lastShakeY);
-      const blurStrength = Math.min(0.28, shakeVelocity * 0.024);
+      const shakeMag = Math.hypot(shakeX, shakeY);
+      const blurStrength = Math.min(0.42, Math.max(shakeVelocity, shakeMag) * 0.03);
       const useMotionBlur =
-        hasPreviousFrame && blurStrength > 0.025 && g.shake > 1.5 && fxOn() && fxQ() >= 0.7 &&
-        saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver;
+        hasPreviousFrame && blurStrength > 0.04 && saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver;
       const tw = trailCanvas.width;
       const th = trailCanvas.height;
+      // world units -> trail-buffer pixels (the buffer is half resolution)
+      const toTrail = tw / W;
       currentCtx.clearRect(0, 0, tw, th);
       currentCtx.drawImage(canvas, 0, 0, tw, th);
       if (useMotionBlur) {
+        const dx = (shakeX - lastShakeX) * toTrail * 3;
+        const dy = (shakeY - lastShakeY) * toTrail * 3;
         trailCtx.clearRect(0, 0, tw, th);
         trailCtx.globalAlpha = 1;
         trailCtx.drawImage(currentCanvas, 0, 0, tw, th);
+        // long ghost at full strength, a short ghost closer in for a soft streak
         trailCtx.globalAlpha = blurStrength;
-        trailCtx.drawImage(previousCanvas, -(shakeX - lastShakeX) * 1.5, -(shakeY - lastShakeY) * 1.5, tw, th);
+        trailCtx.drawImage(previousCanvas, -dx, -dy, tw, th);
+        trailCtx.globalAlpha = blurStrength * 0.5;
+        trailCtx.drawImage(previousCanvas, -dx * 0.5, -dy * 0.5, tw, th);
         trailCtx.globalAlpha = 1;
         ctx.save();
         ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
@@ -9590,9 +9722,9 @@ export default function Battle({
               </span>
               {mode === "gemrush" && <span className="hud-pill" style={{ color: "#35e0ff" }} data-testid="gem-rush-earned"><GemIcon size={14} /><b className="num">{g.gemRushGems.toLocaleString()}</b><em>earned</em></span>}
               {(mode === "hardcore" || mode === "superhardcore") && (
-                <span className="hud-pill hud-hardcore" data-testid="hardcore-plays" title={`Hardcore · ${HARDCORE_DAILY_PLAYS} attempts per day · best round ${save.hardcoreBest}`}>
-                  <b className="num">{hardcorePlaysLeft(save)}</b>
-                  <em>/ {HARDCORE_DAILY_PLAYS} left</em>
+                <span className="hud-pill hud-hardcore" data-testid="hardcore-plays" title={mode === "superhardcore" ? `Super Hardcore · ${SUPER_HARDCORE_WEEKLY_PLAYS} attempts per week` : `Hardcore · ${HARDCORE_DAILY_PLAYS} attempts per day · best round ${save.hardcoreBest}`}>
+                  <b className="num">{mode === "superhardcore" ? superHardcorePlaysLeft(save) : hardcorePlaysLeft(save)}</b>
+                  <em>/ {mode === "superhardcore" ? SUPER_HARDCORE_WEEKLY_PLAYS : HARDCORE_DAILY_PLAYS} left</em>
                 </span>
               )}
               <span className="hud-pill hud-dim" style={{ color: "#8effc4" }} data-testid="towers-on-board" title="Towers deployed">
@@ -9706,7 +9838,7 @@ export default function Battle({
             {g.phase === "boon" ? (
               <> · <span style={{ color: "#3dff8e" }}>BOON READY</span></>
             ) : g.phase === "wave" ? (
-              <> · <span className="num">{Math.max(0, g.waveTotal - g.spawnQ.length - g.enemies.filter((e) => !e.dead).length)}</span>/<span className="num">{g.waveTotal}</span> CLEARED</>
+              save.hideWaveCleared ? null : <> · <span className="num">{Math.max(0, g.waveTotal - g.spawnQ.length - g.enemies.filter((e) => !e.dead).length)}</span>/<span className="num">{g.waveTotal}</span> CLEARED</>
             ) : g.phase === "deploy" ? (
               <> · DEPLOY <span className="num">{Math.ceil(g.phaseT)}</span>s</>
             ) : (
@@ -9725,12 +9857,22 @@ export default function Battle({
             />
           </span>
           <span className="wave-strip-hp">HP ×{mode === "gemrush" ? GEM_RUSH_HP_MUL : mode === "hardcore" || mode === "superhardcore" ? (Math.pow(HP_GROWTH, Math.max(0, g.round - 1)) * hardcoreEnemyHp(1, mode)).toFixed(1) : Math.pow(HP_GROWTH, Math.max(0, g.round - 1)).toFixed(1)}</span>
-          {mode === "hardcore" && <span className="wave-strip-hp hud-hardcore" data-testid="hardcore-rules">10× HP · 2× SPAWNS · NO CRITS · 25% SPEED · 120× REWARDS</span>}
-          {mode === "superhardcore" && <span className="wave-strip-hp hud-hardcore" data-testid="superhardcore-rules">710× HP · +75% SPEED · 720× REWARDS · 1 LIFE</span>}
+          {mode === "hardcore" && <span className="wave-strip-hp hud-hardcore" data-testid="hardcore-rules">10× HP · 2× SPAWNS · 2 GATES · NO CRITS · 25% SPEED · 5× REWARDS</span>}
+          {mode === "superhardcore" && <span className="wave-strip-hp hud-hardcore" data-testid="superhardcore-rules">710× HP · +75% SPEED · 2 GATES · 10× REWARDS · 1 LIFE</span>}
           {g.bossImmunityT > 0 && <span className="wave-strip-hp" data-testid="thunder-ward">THUNDER WARD · {g.bossImmunityT.toFixed(1)}s</span>}
           {mode === "gemrush" && <span className="wave-strip-hp" data-testid="gem-rush-rules">50 GEMS/KILL · ELITE ×5 · BOSS ×10 · 1.5× SPEED</span>}
           {g.round % 4 === 0 && <span className="wave-strip-boss">BOSS</span>}
           {save.powerSaver && <span className="wave-strip-saver" title="Power Saving Mode is on">SAVER</span>}
+          <button
+            type="button"
+            className={`wave-strip-toggle ${save.hideWaveCleared ? "on" : ""}`}
+            aria-pressed={!!save.hideWaveCleared}
+            data-testid="hide-cleared-toggle"
+            title="Hide the WAVE CLEARED banners, toasts and counter"
+            onClick={() => { sfx.calloutToggle(); mutate((s2) => { s2.hideWaveCleared = !s2.hideWaveCleared; }); }}
+          >
+            {save.hideWaveCleared ? "CLEARED: HIDDEN" : "CLEARED: SHOWN"}
+          </button>
           {(mode === "endless" || mode === "gauntlet") && (() => {
             const uses = save.mail.autoWeek === weekStr() ? save.mail.autoUses : 0;
             const deployed = g.towers.filter((t) => !!t.cell && t.downT <= 0 && t.hexT <= 0);
@@ -9780,11 +9922,13 @@ export default function Battle({
         </div>
         {g && (g.phase === "deploy" || g.phase === "inter") && (
           <div className="pointer-events-none absolute left-1/2 top-[8%] -translate-x-1/2 text-center">
+            {(g.phase === "deploy" || !save.hideWaveCleared) && (
             <div className="font-disp text-4xl text-[#ffcf4d]" style={{ textShadow: "0 0 26px rgba(255,179,36,.7)" }}>
               {g.phase === "deploy"
                 ? "DEPLOY TOWERS"
                 : `${isRunMode(mode) ? "ROUND" : "WAVE"} ${g.round} CLEARED`}
             </div>
+            )}
             <div className="mt-1 text-base font-bold tracking-[0.25em] text-[var(--txt)]">
               {g.phase === "deploy" ? "PRESS SUMMON — TOWERS DROP STRAIGHT ONTO THE GRID" : `NEXT WAVE IN ${Math.ceil(g.phaseT)}`}
             </div>
@@ -10052,7 +10196,7 @@ export default function Battle({
           <div className="panel anim-pop w-[600px] max-w-full p-5" style={{ borderColor: "#3dff8e88" }}>
             <div className="text-center">
               <div className="text-[10px] font-bold tracking-[0.3em] text-[#3dff8e]">
-                WAVE <span className="num">{g.round}</span> CLEARED · GAUNTLET
+                {save.hideWaveCleared ? <>GAUNTLET · NEXT BOON</> : <>WAVE <span className="num">{g.round}</span> CLEARED · GAUNTLET</>}
               </div>
               <div className="font-disp text-3xl text-[#3dff8e]">CHOOSE A BOON</div>
               <div className="mt-1 text-[11.5px] font-semibold text-[var(--dim)]">

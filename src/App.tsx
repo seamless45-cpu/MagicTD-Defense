@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { deliverAutoBattleReport, hardcorePlaysLeft, loadSave, mailReady, persistSave, seasonReady, spendHardcorePlay, tasksReady, weekStr, type SaveData } from "./game/save";
+import { deliverAutoBattleReport, hardcorePlaysLeft, loadSave, mailReady, persistSave, seasonReady, spendHardcorePlay, spendSuperHardcorePlay, superHardcorePlaysLeft, tasksReady, weekStr, type SaveData } from "./game/save";
 import { estimateAutoBattle } from "./game/autobattle";
 import { applyFont } from "./game/fonts";
 import { sfx, setSfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost, initAudio } from "./game/audio";
 import { loadSavedMusic, setMusicSettings } from "./game/music";
-import { LocalizedTree } from "./game/i18n";
+import { useUiLanguage } from "./game/i18n";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
 import { LaunchIntro, LoadingScreen, Home, Specials, Guild, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
@@ -143,6 +143,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   // "Hide Notifications" mutes every toast in the app and in battle
   const { toasts, push } = useToasts(!save.hideNotifs);
+  // every interface string follows the selected language (DOM walk + canvas tr())
+  useUiLanguage(save.language);
 
   useEffect(() => {
     setSfx(save.sfx);
@@ -235,7 +237,7 @@ export default function App() {
 
   if (screen === "battle" || screen === "endless" || screen === "gauntlet" || screen === "gemrush" || screen === "hardcore" || screen === "superhardcore" || screen === "sandbox") {
     return (
-      <LocalizedTree language={save.language}>
+      <>
       <div className={`h-full ${save.reducedMotion ? "calm" : ""} ${save.powerSaver ? "power-saver" : ""}`}>
         <Battle
           key={screen + save.hero}
@@ -259,12 +261,12 @@ export default function App() {
           }}
         />
       </div>
-      </LocalizedTree>
+      </>
     );
   }
 
   return (
-    <LocalizedTree language={save.language}>
+    <>
     <div className={`app-bg flex h-full flex-col ${save.reducedMotion ? "calm" : ""} ${save.powerSaver ? "power-saver" : ""}`}>
       <Toasts toasts={toasts} />
       {/* top bar — wraps on narrow screens so the settings button is never clipped */}
@@ -318,7 +320,22 @@ export default function App() {
               push(`HARDCORE · run started · ${left - 1} left today`, "#ff315c");
               setScreen("hardcore");
             }}
-            onSuperHardcore={() => { sfx.boss(); setScreen("superhardcore"); }}
+            onSuperHardcore={() => {
+              const left = superHardcorePlaysLeft(save);
+              if (left <= 0) {
+                sfx.error();
+                push("SUPER HARDCORE LOCKED · 3 runs used this week — resets on Monday 07:00", "#ff315c");
+                return;
+              }
+              // the attempt is banked on entry, so leaving early still spends it
+              mutate((s) => {
+                spendSuperHardcorePlay(s);
+              });
+              sfx.boss();
+              push(`SUPER HARDCORE · run started · ${left - 1} left this week`, "#ff315c");
+              sfx.superHardcoreStart();
+              setScreen("superhardcore");
+            }}
           />
         )}
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}
@@ -360,6 +377,6 @@ export default function App() {
 
       {settingsOpen && <SettingsModal save={save} mutate={mutate} onClose={() => setSettingsOpen(false)} />}
     </div>
-    </LocalizedTree>
+    </>
   );
 }

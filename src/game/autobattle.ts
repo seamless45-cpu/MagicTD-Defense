@@ -114,7 +114,7 @@ function effectiveHp(type: number, wave: number): EnemyBudget {
   return {
     hp: hp / throughArmor,
     lives: et.lives,
-    // the shipped walk speed is 20% above the data sheet (ENEMY_SPEED_MUL)
+    // the shipped walk speed carries ENEMY_SPEED_MUL on top of the data sheet (+20% over the earlier build)
     speed: et.speed * ENEMY_SPEED_MUL * (1 + wave * 0.012) * (elite ? 1.08 : 1),
   };
 }

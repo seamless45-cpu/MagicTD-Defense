@@ -39,6 +39,20 @@ serves the app at `/` (it rewrites `/` to `app.html`).
 **After changing game code, run `npm run build` and commit `index.html`**, otherwise the
 published site keeps serving the previous version.
 
+## Latest balance and interface pass
+
+- **Demon Execution**: one target per strike, 3 s cooldown, boss damage is 25% of max HP. Its lightning uses a deep-red palette with +50% jitter and +1 jaggedness.
+- **Thunder God ward** strikes towers that gain points, chosen at random each cast; the storm sovereign's bolts now land on randomly chosen enemies rather than the densest cluster.
+- **Asteroid impact** draws segmented lightning from the sky.
+- **Hardcore and Super Hardcore** each have a second spawn gate (lane cell 3,3). Spawns alternate between the two gates.
+- **Super Hardcore is capped at 3 runs per week** (resets Monday 07:00), with its own counter on the mode card and in the battle HUD. Hardcore keeps its 3 runs per day.
+- **Reward multipliers**: Hardcore 5×, Super Hardcore 10× (these replace the old 120× and 720×, rather than stacking).
+- **Enemies** walk 20% faster again (`ENEMY_SPEED_MUL` 1.2 → 1.44, compounding on the previous +20%). Spawn interval is 0.15 s shorter (0.72 → 0.57 s). Every wave has **15** enemies (was 10). Boss skill cooldowns are 1.5 s shorter.
+- **Hide Wave Cleared** toggle (Settings and the battle HUD) hides the wave-cleared counter, banners and toasts.
+- **Language**: every interface string follows the selected language, including the Spanish, French, German, Japanese, Korean and Chinese options (they were being reset to English on load). Text is translated from a shared table (`src/game/i18nTable.ts`) by a DOM walker, and canvas labels use the same table. Hero and tower descriptions are still English.
+- **Performance**: enemy bodies are pre-rendered into per-type walk-cycle sprites, and status overlays are drawn live. Screens animate only transform and opacity, and the liquid-glass backdrop blur is limited to large surfaces. Motion blur now shows during camera shake.
+- **Sound**: new cues for demon strikes, wave clears, Super Hardcore entry, the HUD toggle and thunder crackle.
+
 ## Latest rework
 
 - **Lightning lands as one event.** Every sky effect resolves its whole target list on the same
@@ -339,7 +353,7 @@ counters, a roster pulled from the ladder, and a chat you can post in.
 | Grave Bloom | Legendary | Heavy percent-of-max-HP strikes on the wounded, and a purse for every kill (Grave Tithe, Bloom Offering) |
 | Rift Colossus | Legendary | Slow siege shells that **shatter armour** on impact and flatten a whole cell (Siege Core, Colossus Rage) |
 | Clone | Legendary | Drag any equal-point tower onto it to **copy** that tower — the original stays. Awakened: Super Clone (any points + +200% attack speed), Perfect Replica (bonus point) |
-| Demon Execution | Mystical | Every 5s, unbuffable deep-red lightning executes every enemy and boss through immunity; Soul Wipeout adds merge beams, Hell Dimensions opens banishing portals with fire-crack blasts |
+| Demon Execution | Mystical | Every 3s, unbuffable deep-red lightning strikes **one** enemy (the furthest along the lane) — regular enemies are executed, bosses lose 25% of max HP; Soul Wipeout adds merge beams, Hell Dimensions opens banishing portals with fire-crack blasts |
 | Heavenly God | Legendary | A lightning laser that punches down the lane, burning five enemies behind the target for 50% (Positive Lightning, Super Charged Ray) |
 | Honor Emperor | Legendary | Drop it on a tower sitting on matching points and that tower grows a point — the Emperor is consumed, never merged away (Honor Blessing, Super Bless) |
 
@@ -702,8 +716,8 @@ enemies, with Overpenetration and Rail Burn awakenings).
   had full five-tier specs. The gate is gone: all **62** towers show both tracks, their tier lines and
   their Magic Token prices, and the effects behind them were already wired into the engine (generic
   on-hit tags like burn/volley/freeze/chain plus the bespoke kits).
-- **Demon Execution is Mystical.** Its fixed 5-second strike ignores ATK, attack speed, buffs,
-  armor and immunity, and executes bosses as well as ordinary enemies. Soul Wipeout fires beams on
+- **Demon Execution is Mystical.** Its fixed 3-second strike ignores ATK, attack speed, buffs,
+  armor and immunity. It hits one enemy per strike: ordinary enemies are executed, and bosses lose 25% of their max HP instead of dying outright (this superseded the earlier 5-second, boss-executing version). Soul Wipeout fires beams on
   merge (base beam count = tower points; each awakening adds two). Hell Dimensions drops a portal
   on elites and bosses, returns the target to spawn, cracks the ground and blasts nearby enemies back;
   each tier grows the portal by 25% and adds 1m of knockback.
@@ -773,7 +787,7 @@ enemies, with Overpenetration and Rail Burn awakenings).
 
 ## Fixed-count waves, Super Crystals and the Mystical Supervisor
 
-- Every wave now schedules exactly **10 enemies total**, with bosses occupying slots rather than adding extra bodies. Enemy spawn spacing tightens by **0.00002 seconds per wave**.
+- Every wave now schedules exactly **10 enemies total** (later raised to 15; see the latest balance pass), with bosses occupying slots rather than adding extra bodies. Enemy spawn spacing tightens by **0.00002 seconds per wave**.
 - Restored the original **7×4 arena route** and shifted the board lower in the viewport.
 - Added three Super Crystals: **Magician King** (ATK and speed up to +75%), **Superbolt** (lightning-family damage up to +100%, with lane chaining), and **Super Crit** (crit damage up to +850% and chance up to +22.5%).
 - Added the **Mystical Supervisor**. Its kills build permanent +0.1% attack-speed buffs across deployed towers, capped at +200%; each tick has a 20% chance to become a 7× Superbuff. Merging fires red execution bolts at up to ten living enemies, including elites and bosses. Its **Hypervisor** awakening scales Superbuff amplification to +1,200% over waves; **Doomsday** has a 19% merge chance to nuke enemies within 900m.

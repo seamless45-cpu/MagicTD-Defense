@@ -84,16 +84,16 @@ export const MODE_RULES: Record<GameMode, ModeRules> = {
   endless: { hpMul: 1, rewardMul: 1, speedMul: 1, lives: null },
   gauntlet: { hpMul: 1, rewardMul: 1, speedMul: 1, lives: null },
   gemrush: { hpMul: 1, rewardMul: 1, speedMul: 1, lives: null },
-  hardcore: { hpMul: 10, rewardMul: 120, speedMul: 1.25, lives: null },
-  superhardcore: { hpMul: 710, rewardMul: 720, speedMul: 1.75, lives: 1 },
+  hardcore: { hpMul: 10, rewardMul: 5, speedMul: 1.25, lives: null },
+  superhardcore: { hpMul: 710, rewardMul: 10, speedMul: 1.75, lives: 1 },
   sandbox: { hpMul: 1, rewardMul: 0, speedMul: 1, lives: null },
 };
 
 /** HARDCORE is a campaign-shaped run (12 rounds) with brutal modifiers. */
 export const isRunMode = (mode: GameMode) => mode === "battle" || mode === "hardcore" || mode === "superhardcore";
 
-/** every enemy walks 20% faster than its data sheet, in every mode */
-export const ENEMY_SPEED_MUL = 1.2;
+/** every enemy walks 44% faster than its data sheet (the old 20% boost, +20% again), in every mode */
+export const ENEMY_SPEED_MUL = 1.44;
 
 // ---------- hardcore rules ----------
 /** enemies spawn in pairs: two bodies per spawn slot */
@@ -103,13 +103,15 @@ export const HARDCORE_HP_MUL = 10;
 /** Super Hardcore enemy-health multiplier. */
 export const SUPER_HARDCORE_HP_MUL = 710;
 /** rewards for Hardcore, as requested */
-export const HARDCORE_REWARD_MUL = 120;
-export const SUPER_HARDCORE_REWARD_MUL = 720;
+export const HARDCORE_REWARD_MUL = 5;
+export const SUPER_HARDCORE_REWARD_MUL = 10;
 export const HARDCORE_SPEED_MUL = 1.25;
 export const SUPER_HARDCORE_SPEED_MUL = 1.75;
 export const modeSpeedMul = (mode: GameMode) => mode === "hardcore" ? HARDCORE_SPEED_MUL : mode === "superhardcore" ? SUPER_HARDCORE_SPEED_MUL : 1;
 /** the mode is a daily ladder: three attempts per calendar day */
 export const HARDCORE_DAILY_PLAYS = 3;
+/** Super Hardcore is a weekly ladder: three attempts per calendar week */
+export const SUPER_HARDCORE_WEEKLY_PLAYS = 3;
 export const HARDCORE_LIVES = 12;
 /** enemies are immune to crits: crit chance and crit damage never apply */
 export const HARDCORE_CRIT_IMMUNE = true;
@@ -984,9 +986,9 @@ export const TOWERS: TowerDef[] = [
   {
     id: "demon", name: "Demon Execution", rarity: "mystical", kind: "demon", art: "demon", accent: "#9b001b",
     target: "all", exotic: true, unlockFrags: 1,
-    desc: "Every 5 seconds, deep-red execution lightning detonates across the battlefield and executes every enemy—including bosses—through immunity. This strike ignores attack, attack speed and all buffs.",
-    dmg: 0, upDmg: 0, ascDmg: 0, rate: 5, upRate: 0, ascRate: 0,
-    execCd: 5,
+    desc: "Every 3 seconds, a deep-red execution bolt strikes one enemy and executes it through immunity. Bosses cannot be executed outright: each strike takes 25% of their max HP. This strike ignores attack, attack speed and all buffs.",
+    dmg: 0, upDmg: 0, ascDmg: 0, rate: 3, upRate: 0, ascRate: 0,
+    execCd: 3,
     awk1: {
       name: "Soul Wipeout",
       desc: "When merging, fires a beam of deep-red powerful lasers at enemies, with base beam count equal to the Demon Execution tower's points.",
@@ -1342,7 +1344,7 @@ export function towerStatRows(def: TowerDef, menuLv: number, battleLv = 1): Stat
     rows.push({ label: "Attacks", value: def.id === "demon" ? "Unbuffable execution" : "Support tower", better: "up" });
   }
   if (def.id === "demon") {
-    rows.push({ label: "Execution", value: "All enemies and bosses · ignores immunity", better: "up" });
+    rows.push({ label: "Execution", value: "One enemy per strike · bosses take 25% max HP", better: "up" });
     rows.push({ label: "Strike Interval", value: `${def.execCd || 5}s · unaffected by attack speed or buffs`, better: "down", maxed: true });
   }
   if (def.id === "supervisor") {
@@ -1927,62 +1929,62 @@ BOSS_KITS[HERALD_TYPE] = ["siphon", "overcharge", "maelstrom"];
 
 export const bossKit = (type: number): BossSkillId[] => BOSS_KITS[type] || BOSS_KITS[BOSS_TYPE];
 
-export const BOSS_SUMMON_CD = 11;
-export const BOSS_BLINK_CD = 9;
-export const BOSS_WARD_CD = 14;
+export const BOSS_SUMMON_CD = 9.5;
+export const BOSS_BLINK_CD = 7.5;
+export const BOSS_WARD_CD = 12.5;
 export const BOSS_WARD_TIME = 3.4;
 export const BOSS_ENRAGE_AT = 0.45;
 /** Null Field: towers caught in the hex fire this much slower */
-export const BOSS_NULL_CD = 13;
+export const BOSS_NULL_CD = 11.5;
 export const BOSS_NULL_RADIUS = 210;
 export const BOSS_NULL_TIME = 5;
 export const BOSS_NULL_SLOW = 0.62;
 /** Soul Devour: eats its own minions for a share of its max HP each */
-export const BOSS_DEVOUR_CD = 16;
+export const BOSS_DEVOUR_CD = 14.5;
 export const BOSS_DEVOUR_HEAL = 0.045;
 /** Meteor Fall: burning rocks that smash towers offline for a few seconds */
-export const BOSS_METEOR_CD = 12;
+export const BOSS_METEOR_CD = 10.5;
 export const BOSS_METEOR_COUNT = 3;
 export const BOSS_METEOR_DOWN = 4.5;
 /** Rift Chains: minions near the boss take much less damage */
-export const BOSS_CHAINS_CD = 15;
+export const BOSS_CHAINS_CD = 13.5;
 export const BOSS_CHAINS_RADIUS = 230;
 export const BOSS_CHAINS_TIME = 5;
 export const BOSS_CHAINS_DR = 0.55;
 /** Warp Surge: drags the whole horde down the lane */
-export const BOSS_WARP_CD = 18;
+export const BOSS_WARP_CD = 16.5;
 export const BOSS_WARP_DIST = 150;
 
 // ---------- boss-exclusive skills ----------
 /** War Cry: nearby minions sprint for a while */
-export const BOSS_WARCRY_CD = 12;
+export const BOSS_WARCRY_CD = 10.5;
 export const BOSS_WARCRY_RADIUS = 320;
 export const BOSS_WARCRY_TIME = 5;
 export const BOSS_WARCRY_HASTE = 0.45;
 /** Shield Cleave: the nearest tower goes offline */
-export const BOSS_CLEAVE_CD = 11;
+export const BOSS_CLEAVE_CD = 9.5;
 export const BOSS_CLEAVE_DOWN = 2.2;
 /** Iron Banner: temporary armour plating */
-export const BOSS_BANNER_CD = 15;
+export const BOSS_BANNER_CD = 13.5;
 export const BOSS_BANNER_TIME = 6;
 export const BOSS_BANNER_ARMOR = 0.25;
 /** Foundation Quake: every tower near the boss is knocked out */
-export const BOSS_QUAKE_CD = 17;
+export const BOSS_QUAKE_CD = 15.5;
 export const BOSS_QUAKE_RADIUS = 300;
 export const BOSS_QUAKE_DOWN = 2.6;
 /** Undertow: pulls the horde backwards into the boss */
-export const BOSS_UNDERTOW_CD = 14;
+export const BOSS_UNDERTOW_CD = 12.5;
 export const BOSS_UNDERTOW_PULL = 90;
 /** Soul Siphon: steals run SP and heals */
-export const BOSS_SIPHON_CD = 13;
+export const BOSS_SIPHON_CD = 11.5;
 export const BOSS_SIPHON_SP = 90;
 export const BOSS_SIPHON_HEAL = 0.025;
 /** Overcharge: lightning arcs knock towers offline */
-export const BOSS_OVERCHARGE_CD = 10;
+export const BOSS_OVERCHARGE_CD = 8.5;
 export const BOSS_OVERCHARGE_TARGETS = 3;
 export const BOSS_OVERCHARGE_DOWN = 2;
 /** Maelstrom: hurls the horde forward and hastes it */
-export const BOSS_MAELSTROM_CD = 16;
+export const BOSS_MAELSTROM_CD = 14.5;
 export const BOSS_MAELSTROM_DIST = 130;
 
 export function roundHp(round: number) {
@@ -2042,8 +2044,8 @@ export function shortHp(v: number): string {
 export const GOLD_GAIN_MUL = 1.5;
 export const runGold = (v: number) => Math.round(v * GOLD_GAIN_MUL);
 
-export const WAVE_ENEMY_COUNT = 10;
-export const SPAWN_INTERVAL_SECONDS = 0.72;
+export const WAVE_ENEMY_COUNT = 15;
+export const SPAWN_INTERVAL_SECONDS = 0.57;
 export const SPAWN_INTERVAL_STEP = 0.00002;
 export function enemySpawnInterval(wave: number): number {
   return Math.max(0.08, SPAWN_INTERVAL_SECONDS - Math.max(0, wave - 1) * SPAWN_INTERVAL_STEP);
