@@ -191,6 +191,8 @@ export interface SaveData {
   powerSaver: boolean;
   /** directional temporal smear during camera shake */
   motionBlur: boolean;
+  /** opt-in features that trade frame time for effect; every flag is off by default */
+  experimental: { adaptiveScale: boolean; hqMotionBlur: boolean; richLightning: boolean; particleBoost: boolean; frameHud: boolean };
   /** hide the "WAVE N CLEARED" banners, toasts and progress counter in battle */
   hideWaveCleared: boolean;
   /** boost low frequencies on the sound-effects mix */
@@ -337,6 +339,7 @@ export function defaultSave(): SaveData {
     volBoost: false,
     powerSaver: false,
     motionBlur: false,
+    experimental: { adaptiveScale: false, hqMotionBlur: false, richLightning: false, particleBoost: false, frameHud: false },
     hideWaveCleared: false,
     bassBoost: false,
     trebleBoost: false,
@@ -413,6 +416,13 @@ function normalise(s: SaveData): SaveData {
   s.volBoost = !!s.volBoost;
   s.powerSaver = !!s.powerSaver;
   s.motionBlur = !!s.motionBlur;
+  s.experimental = {
+    adaptiveScale: !!s.experimental?.adaptiveScale,
+    hqMotionBlur: !!s.experimental?.hqMotionBlur,
+    richLightning: !!s.experimental?.richLightning,
+    particleBoost: !!s.experimental?.particleBoost,
+    frameHud: !!s.experimental?.frameHud,
+  };
   s.bassBoost = !!s.bassBoost;
   s.trebleBoost = !!s.trebleBoost;
   const eq = (n: number) => Math.max(-12, Math.min(12, Number.isFinite(n) ? n : 0));

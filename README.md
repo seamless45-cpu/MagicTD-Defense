@@ -46,7 +46,10 @@ published site keeps serving the previous version.
 - **Asteroid impact** draws segmented lightning from the sky.
 - **Asteroids** use a pre-rendered jagged rock sprite that sheds embers as it falls. Impact adds an aftershock ring and chain lightning that jumps to up to three nearby enemies.
 - **Lightning** bolts have a flickering outer sheath, short side branches and a landing flare. Sky strikes are unchanged.
-- **Motion blur** is now a directional four-tap smear along the camera's motion vector, so it reads as a streak rather than a ghost. It cross-fades over the sharp frame and scales with shake energy.
+- **Motion blur** no longer draws ghost copies of earlier frames. It samples the current frame along the camera shake vector (six taps, ten with *High-quality motion blur*) and blends the taps with a running average. The blend strength follows shake energy, so it stays quiet when the camera is still.
+- **Bloom** blurs the quarter-resolution buffer only, instead of running a blur filter over the full frame every frame.
+- **Experimental** section (Settings, off by default): *Adaptive render scale* steps the render resolution down while frames run slow (above 15 ms over 90 frames) and back up once they settle (below 9 ms over 240 frames). *High-quality motion blur* uses ten taps. *Rich lightning* adds side branches and a wider glow. *Particle boost* raises spark, ember and debris counts by 50%. *Frame-time readout* shows the arena draw time in the battle HUD.
+- **Sandbox tools** (sandbox battles only): a tools bar with an enemy-type picker, *Spawn 1*, *Spawn 10*, *Clear field*, *+1000 SP*, *+1000 gold*, and *Infinite SP*, *Infinite gold* and *God mode* toggles. God mode stops lives loss.
 - **Upscale** (Settings → Options): the arena renders at the Pixel Ratio (render scale) and is presented at the screen's device pixels. *Sharp* (default) uses a WebGL pass with an edge-restoring unsharp step; *Smooth* is a plain GPU resample; *Native* is the old browser stretch. WebGL is optional and falls back to a smoothed 2D blit.
 - **Boot and loading screens** are reworked: a rune core draws itself on, the title resolves from blur, and a system check list ticks in. The loading screen shows a live progress ring around the emblem and a spark riding a segmented bar.
 - **UI transitions** have a springier screen entrance, tile lift and row slide on hover, and press feedback on buttons. Reduced motion and Power Saving turn the ambient animation off.
@@ -56,7 +59,7 @@ published site keeps serving the previous version.
 - **Enemies** walk 20% faster again (`ENEMY_SPEED_MUL` 1.2 → 1.44, compounding on the previous +20%). Spawn interval is 0.15 s shorter (0.72 → 0.57 s). Every wave has **15** enemies (was 10). Boss skill cooldowns are 1.5 s shorter.
 - **Hide Wave Cleared** toggle (Settings and the battle HUD) hides the wave-cleared counter, banners and toasts.
 - **Language**: every interface string follows the selected language, including the Spanish, French, German, Japanese, Korean and Chinese options (they were being reset to English on load). Text is translated from a shared table (`src/game/i18nTable.ts`) by a DOM walker, and canvas labels use the same table. Hero and tower descriptions are still English.
-- **Performance**: enemy bodies are pre-rendered into per-type walk-cycle sprites, and status overlays are drawn live. Screens animate only transform and opacity, and the liquid-glass backdrop blur is limited to large surfaces. Motion blur now shows during camera shake.
+- **Performance**: enemy bodies are pre-rendered into per-type walk-cycle sprites, and status overlays are drawn live. Screens animate only transform and opacity, and the liquid-glass backdrop blur is limited to large surfaces. Motion blur only shows during camera shake, and the bloom blur runs at quarter resolution.
 - **Sound**: new cues for demon strikes, wave clears, Super Hardcore entry, the HUD toggle and thunder crackle.
 
 ## Latest rework

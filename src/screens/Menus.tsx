@@ -2674,6 +2674,100 @@ export function SettingsModal({
           <option value="sharp">Sharp</option>
         </select>
       </div>
+      <div className="row-card mt-1.5 border-[#f057ff55]" style={{ display: "block" }} data-testid="experimental-section">
+        <div className="mb-2 text-[12px] font-bold tracking-[0.25em] text-[#f057ff]">EXPERIMENTAL</div>
+        <div className="mb-2 text-[11px] font-semibold text-[var(--dim)]">Opt-in features that may cost frame time. Everything here is off by default.</div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="exp-adaptive-scale-row">
+          <SetIcon name="perf" color="#f057ff" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Adaptive render scale</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Lowers the render resolution while frames run slow, then restores it once the arena calms down.</div>
+          </div>
+          <KnobToggle
+            on={!!save.experimental?.adaptiveScale}
+            label="Adaptive render scale"
+            testId="exp-adaptive-scale"
+            onToggle={() => {
+              const next = !save.experimental?.adaptiveScale;
+              mutate((s) => { s.experimental = { ...s.experimental, adaptiveScale: next }; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="exp-hq-motion-blur-row">
+          <SetIcon name="perf" color="#f057ff" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">High-quality motion blur</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Ten-tap directional blur instead of six. Smoother streaks while the camera shakes, at extra cost.</div>
+          </div>
+          <KnobToggle
+            on={!!save.experimental?.hqMotionBlur}
+            label="High-quality motion blur"
+            testId="exp-hq-motion-blur"
+            onToggle={() => {
+              const next = !save.experimental?.hqMotionBlur;
+              mutate((s) => { s.experimental = { ...s.experimental, hqMotionBlur: next }; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="exp-rich-lightning-row">
+          <SetIcon name="perf" color="#f057ff" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Rich lightning</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">More side branches and a wider glow on every bolt.</div>
+          </div>
+          <KnobToggle
+            on={!!save.experimental?.richLightning}
+            label="Rich lightning"
+            testId="exp-rich-lightning"
+            onToggle={() => {
+              const next = !save.experimental?.richLightning;
+              mutate((s) => { s.experimental = { ...s.experimental, richLightning: next }; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="exp-particle-boost-row">
+          <SetIcon name="perf" color="#f057ff" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Particle boost</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Half again as many sparks, embers and debris. Busier, but costs frame time.</div>
+          </div>
+          <KnobToggle
+            on={!!save.experimental?.particleBoost}
+            label="Particle boost"
+            testId="exp-particle-boost"
+            onToggle={() => {
+              const next = !save.experimental?.particleBoost;
+              mutate((s) => { s.experimental = { ...s.experimental, particleBoost: next }; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="exp-frame-hud-row">
+          <SetIcon name="perf" color="#f057ff" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Frame-time readout</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Shows the arena's draw time in the battle HUD.</div>
+          </div>
+          <KnobToggle
+            on={!!save.experimental?.frameHud}
+            label="Frame-time readout"
+            testId="exp-frame-hud"
+            onToggle={() => {
+              const next = !save.experimental?.frameHud;
+              mutate((s) => { s.experimental = { ...s.experimental, frameHud: next }; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+      </div>
       <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div>
