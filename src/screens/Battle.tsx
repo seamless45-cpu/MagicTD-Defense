@@ -2012,9 +2012,34 @@ export default function Battle({
   const [zoom, setZoom] = useState(() => clampZoom(save.zoom));
   /** battle pause + speed controls (the engine reads these through refs) */
   const [paused, setPaused] = useState(false);
-  const [sandboxCfg, setSandboxCfg] = useState({ interval: 0.72, hp: 1, speed: 1, shield: 0, maxLevel: false, awakened: false });
+  const [sandboxCfg, setSandboxCfg] = useState({ interval: 0.72, hp: 1, speed: 1, shield: 0, maxLevel: false, awakened: false, spawnType: 0, infiniteSp: false, infiniteGold: false, godMode: false });
   const sandboxCfgRef = useRef(sandboxCfg);
   sandboxCfgRef.current = sandboxCfg;
+  /** sandbox tools: queue enemies into the live spawn queue (the sim spawns them on the next tick) */
+  const sandboxSpawn = (type: number, count: number) => {
+    const g = gRef.current;
+    if (!g) return;
+    for (let i = 0; i < count; i++) g.spawnQ.push({ type, at: g.t + 0.05 + i * 0.12 });
+    g.spawnQ.sort((a, b) => a.at - b.at);
+    g.waveTotal += count;
+  };
+  const sandboxGrant = (sp: number, gold: number) => {
+    const g = gRef.current;
+    if (!g) return;
+    g.sp += sp;
+    g.gold += gold;
+  };
+  const sandboxClear = () => {
+    const g = gRef.current;
+    if (!g) return;
+    g.spawnQ = [];
+    for (const e of g.enemies) {
+      if (!e.dead) {
+        e.dead = true;
+        e.hp = 0;
+      }
+    }
+  };
   saveRef.current = mode === "sandbox" ? {
     ...save,
     levels: sandboxCfg.maxLevel ? Object.fromEntries(Object.keys(save.levels).map((id) => [id, 25])) : save.levels,
@@ -2085,7 +2110,8 @@ export default function Battle({
     // renders into this offscreen canvas at the chosen render scale, and the
     // present step upscales it to the display's real pixels.
     const canvas = canvasRef.current!;
-    const pixelRatio = saveRef.current.pixelRatio || 1;
+    let pixelRatio = saveRef.current.pixelRatio || 1;
+    const basePixelRatio = pixelRatio;
     const upscaleMode = saveRef.current.upscale || "sharp";
     const renderCanvas = document.createElement("canvas");
     renderCanvas.width = Math.round(W * pixelRatio);
@@ -2093,6 +2119,43 @@ export default function Battle({
     // opaque canvas: the cached backdrop covers every pixel, so the browser can
     // skip per-frame alpha compositing of the whole arena
     const ctx = renderCanvas.getContext("2d", { alpha: false })!;
+    /** resize the render target; every draw resets its transform from pixelRatio */
+    const applyRenderScale = (v: number) => {
+      pixelRatio = v;
+      renderCanvas.width = Math.max(1, Math.round(W * v));
+      renderCanvas.height = Math.max(1, Math.round(H * v));
+    };
+    const adapt = { slow: 0, calm: 0 };
+    /**
+     * Adaptive render scale (experimental): while the frame governor reports slow
+     * frames for about 1.5s, drop the render scale one step; once the arena has
+     * been calm for about 4s, restore it. Hysteresis keeps it from flapping.
+     */
+    const adaptRenderScale = () => {
+      if (!saveRef.current.experimental?.adaptiveScale) {
+        if (pixelRatio !== basePixelRatio) applyRenderScale(basePixelRatio);
+        adapt.slow = 0;
+        adapt.calm = 0;
+        return;
+      }
+      if (fxGov.avg > 15) {
+        adapt.slow++;
+        adapt.calm = 0;
+      } else if (fxGov.avg < 9) {
+        adapt.calm++;
+        adapt.slow = 0;
+      } else {
+        adapt.slow = 0;
+        adapt.calm = 0;
+      }
+      if (adapt.slow > 90 && pixelRatio > 0.5) {
+        adapt.slow = 0;
+        applyRenderScale(Math.max(0.5, pixelRatio - 0.25));
+      } else if (adapt.calm > 240 && pixelRatio < basePixelRatio) {
+        adapt.calm = 0;
+        applyRenderScale(Math.min(basePixelRatio, pixelRatio + 0.25));
+      }
+    };
     const upscaler = upscaleMode === "native" ? null : createUpscaler(canvas, upscaleMode === "sharp");
     const presentCtx = upscaler ? null : (canvas.getContext("2d", { alpha: false }) as CanvasRenderingContext2D | null);
     canvas.style.imageRendering = upscaler || saveRef.current.antiAlias ? "auto" : "pixelated";
@@ -2109,11 +2172,6 @@ export default function Battle({
     currentCanvas.width = trailCanvas.width;
     currentCanvas.height = trailCanvas.height;
     const currentCtx = currentCanvas.getContext("2d", { alpha: true })!;
-    const previousCanvas = document.createElement("canvas");
-    previousCanvas.width = trailCanvas.width;
-    previousCanvas.height = trailCanvas.height;
-    const previousCtx = previousCanvas.getContext("2d", { alpha: true })!;
-    let hasPreviousFrame = false;
     let lastShakeX = 0;
     let lastShakeY = 0;
     const wrap = canvas.parentElement as HTMLElement;
@@ -2389,6 +2447,7 @@ export default function Battle({
       g.texts.push({ x, y, txt: tr(txt), color, size, life: 0.9, crit });
     };
     const burst = (x: number, y: number, color: string, n: number, spd = 160) => {
+      if (saveRef.current.experimental?.particleBoost) n = Math.ceil(n * 1.5);
       if (!fxOn()) n = Math.min(n, 4);
       for (let i = 0; i < n; i++) {
         if (g.parts.length > 380) g.parts.shift();
@@ -2444,6 +2503,7 @@ export default function Battle({
 
     /** spinning triangular debris with gravity — used for shatter / crit impacts */
     const shards = (x: number, y: number, color: string, n: number, spd = 220) => {
+      if (saveRef.current.experimental?.particleBoost) n = Math.ceil(n * 1.5);
       if (!fxOn()) n = Math.min(n, 4);
       for (let i = 0; i < n; i++) {
         const a = Math.random() * Math.PI * 2;
@@ -2467,6 +2527,7 @@ export default function Battle({
 
     /** four-point sparkle stars that drift upward — the "magic" layer */
     const stars = (x: number, y: number, color: string, n: number, spread = 40) => {
+      if (saveRef.current.experimental?.particleBoost) n = Math.ceil(n * 1.5);
       if (!fxOn()) n = Math.min(n, 3);
       for (let i = 0; i < n; i++) {
         pushPart({
@@ -2488,6 +2549,7 @@ export default function Battle({
 
     /** rising embers, for fire effects */
     const embers = (x: number, y: number, color: string, n: number) => {
+      if (saveRef.current.experimental?.particleBoost) n = Math.ceil(n * 1.5);
       if (!fxOn()) n = Math.min(n, 3);
       for (let i = 0; i < n; i++) {
         pushPart({
@@ -2525,6 +2587,7 @@ export default function Battle({
 
     /** fine additive glints that hang in the air after a big cast */
     const sparkle = (x: number, y: number, color: string, n: number, spread = 60) => {
+      if (saveRef.current.experimental?.particleBoost) n = Math.ceil(n * 1.5);
       if (!fxOn()) n = Math.min(n, 3);
       for (let i = 0; i < n; i++) {
         pushPart({
@@ -3317,6 +3380,7 @@ export default function Battle({
 
     /** small helper: a tight fan of sparks at a point (used by the sky bolts) */
     const sparkAt = (x: number, y: number, n: number, spd: number) => {
+      if (saveRef.current.experimental?.particleBoost) n = Math.ceil(n * 1.5);
       if (!fxOn()) n = Math.min(n, 5);
       for (let i = 0; i < n; i++) {
         const a = Math.random() * Math.PI * 2;
@@ -5356,6 +5420,10 @@ export default function Battle({
           startWave();
         }
       } else if (g.phase === "wave") {
+        if (mode === "sandbox") {
+          if (sandboxCfgRef.current.infiniteSp) g.sp = Math.max(g.sp, 99999);
+          if (sandboxCfgRef.current.infiniteGold) g.gold = Math.max(g.gold, 99999);
+        }
         while (g.spawnQ.length && g.spawnQ[0].at <= g.t) {
           const s = g.spawnQ.shift()!;
           // two-gate modes alternate: every other body steps out of the second gate
@@ -5872,7 +5940,7 @@ export default function Battle({
         else e.d += e.speed * slowMul * rageMul * dt;
         if (e.d >= PATH_LEN - 2) {
           e.dead = true;
-          g.lives -= e.lives;
+          if (!(mode === "sandbox" && sandboxCfgRef.current.godMode)) g.lives -= e.lives;
           g.redFlash = 1;
           g.shake = fxShake(8);
           sfx.leak();
@@ -8390,6 +8458,7 @@ export default function Battle({
     };
 
     const draw = () => {
+      adaptRenderScale();
       // Pixel Ratio changes the backing-store resolution, not the game world's
       // 1000×580 coordinate system. Reset this every frame because post-fx
       // compositing temporarily uses its own transform.
@@ -8955,6 +9024,7 @@ export default function Battle({
         ctx.globalCompositeOperation = "lighter";
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
+        const rich = !!saveRef.current.experimental?.richLightning;
         for (const b of g.bolts) {
           boltPts(b, boltCache);
           if (boltCache.length < 2) continue;
@@ -8966,6 +9036,13 @@ export default function Battle({
             for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
             ctx.stroke();
           };
+          if (rich) {
+            // rich lightning: a wide second glow under the sheath
+            ctx.globalAlpha = alpha * 0.16;
+            ctx.strokeStyle = b.color;
+            ctx.lineWidth = b.w * 9;
+            pathOf(boltCache);
+          }
           // outer sheath and body
           ctx.globalAlpha = alpha * 0.26;
           ctx.strokeStyle = b.color;
@@ -8978,7 +9055,7 @@ export default function Battle({
           ctx.globalAlpha = alpha * 0.6;
           ctx.lineWidth = Math.max(0.8, b.w * 0.55);
           ctx.beginPath();
-          for (let i = 2; i < boltCache.length - 2; i += 4) {
+          for (let i = 2; i < boltCache.length - 2; i += rich ? 2 : 4) {
             const q = boltCache[i];
             const dir = (i >> 2) % 2 ? 1 : -1;
             const len = b.w * (2.6 + (i % 3));
@@ -9438,24 +9515,27 @@ export default function Battle({
         ctx.restore();
       }
 
-      // Bloom is a subtle additive halo, kept in a quarter-resolution buffer.
+      // Bloom: a quarter-resolution glow. The blur runs on the small buffer, which
+      // is cheap, and the result is added back at full size. The old version ran a
+      // blur filter over the whole frame every tick, which was a major frame cost.
       if (saveRef.current.bloomFx && fxOn() && !saveRef.current.powerSaver) {
-        bloomCtx.clearRect(0, 0, bloomCanvas.width, bloomCanvas.height);
-        bloomCtx.drawImage(renderCanvas, 0, 0, bloomCanvas.width, bloomCanvas.height);
+        const bw = bloomCanvas.width;
+        const bh = bloomCanvas.height;
+        bloomCtx.clearRect(0, 0, bw, bh);
+        bloomCtx.filter = "blur(2px) brightness(1.6) saturate(1.3)";
+        bloomCtx.drawImage(renderCanvas, 0, 0, bw, bh);
+        bloomCtx.filter = "none";
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = 0.11;
-        ctx.filter = "blur(10px) brightness(1.7) saturate(1.4)";
-        ctx.drawImage(bloomCanvas, 0, 0, bloomCanvas.width, bloomCanvas.height, 0, 0, W, H);
-        ctx.filter = "none";
+        ctx.drawImage(bloomCanvas, 0, 0, bw, bh, 0, 0, W, H);
         ctx.restore();
       }
 
-      // Directional motion blur. The camera's per-frame motion vector sets the
-      // direction and length of a smear. The blur is a running average of four
-      // taps along that vector (the live frame plus three samples of the previous
-      // frame, each pushed back along the motion path), so it reads as a soft
-      // streak rather than a ghost. Its strength follows the shake energy, and the
+      // Directional motion blur. Every tap samples the CURRENT frame, spread along
+      // the camera's motion vector and averaged with equal weight. Nothing from an
+      // earlier frame is drawn, so there are no ghost copies: the result is a soft
+      // streak inside the frame. The streak length follows shake energy, and the
       // blurred layer cross-fades over the sharp frame, so a calm frame is never
       // softened. Only the Motion Blur switch and Power Saving disable it.
       const shakeVelX = shakeX - lastShakeX;
@@ -9464,34 +9544,32 @@ export default function Battle({
       const shakeMag = Math.hypot(shakeX, shakeY);
       const motion = Math.max(shakeVelocity, shakeMag * 0.35);
       const blurAmt = Math.min(1, Math.max(0, motion - 0.6) * 0.08);
-      const useMotionBlur =
-        hasPreviousFrame && blurAmt > 0.04 && saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver;
+      const useMotionBlur = blurAmt > 0.04 && saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver;
       const tw = trailCanvas.width;
       const th = trailCanvas.height;
       // world units -> trail-buffer pixels (the buffer is half resolution)
       const toTrail = tw / W;
-      currentCtx.clearRect(0, 0, tw, th);
-      currentCtx.drawImage(renderCanvas, 0, 0, tw, th);
       if (useMotionBlur) {
+        currentCtx.clearRect(0, 0, tw, th);
+        currentCtx.drawImage(renderCanvas, 0, 0, tw, th);
         // smear vector in trail pixels, clamped so a huge hit never tears the frame apart
         let vx = (shakeVelocity > 0.2 ? shakeVelX : shakeX * 0.5) * toTrail * 2.2;
         let vy = (shakeVelocity > 0.2 ? shakeVelY : shakeY * 0.5) * toTrail * 2.2;
         const vl = Math.hypot(vx, vy);
-        const maxLen = 9 + blurAmt * 9;
+        const maxLen = 5 + blurAmt * 9;
         if (vl > maxLen) {
           vx = (vx / vl) * maxLen;
           vy = (vy / vl) * maxLen;
         }
+        const taps = saveRef.current.experimental?.hqMotionBlur ? 10 : 6;
         trailCtx.clearRect(0, 0, tw, th);
-        trailCtx.globalAlpha = 1;
-        trailCtx.drawImage(currentCanvas, 0, 0, tw, th);
-        // running average: each further tap gets 1/(k+1) so the four weights are equal
-        trailCtx.globalAlpha = 1 / 2;
-        trailCtx.drawImage(previousCanvas, -vx / 3, -vy / 3, tw, th);
-        trailCtx.globalAlpha = 1 / 3;
-        trailCtx.drawImage(previousCanvas, (-vx * 2) / 3, (-vy * 2) / 3, tw, th);
-        trailCtx.globalAlpha = 1 / 4;
-        trailCtx.drawImage(previousCanvas, -vx, -vy, tw, th);
+        for (let k = 0; k < taps; k++) {
+          // taps run from one end of the streak to the other, centred on the sprite
+          const f = k / (taps - 1) - 0.5;
+          // running average: tap k carries weight 1/(k+1), so every tap ends up equal
+          trailCtx.globalAlpha = 1 / (k + 1);
+          trailCtx.drawImage(currentCanvas, vx * f, vy * f, tw, th);
+        }
         trailCtx.globalAlpha = 1;
         ctx.save();
         ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
@@ -9499,8 +9577,6 @@ export default function Battle({
         ctx.drawImage(trailCanvas, 0, 0, tw, th, 0, 0, W, H);
         ctx.restore();
       }
-      previousCtx.clearRect(0, 0, tw, th);
-      previousCtx.drawImage(currentCanvas, 0, 0, tw, th);
       // present: upscale the finished frame onto the visible canvas
       if (upscaler) upscaler.draw(renderCanvas);
       else if (presentCtx) {
@@ -9510,7 +9586,6 @@ export default function Battle({
       }
       lastShakeX = shakeX;
       lastShakeY = shakeY;
-      hasPreviousFrame = true;
     };
 
     // ---------- loop ----------
@@ -10143,6 +10218,22 @@ export default function Battle({
         <label>Speed ×{sandboxCfg.speed.toFixed(1)} <input type="range" min="0.2" max="4" step="0.1" value={sandboxCfg.speed} onChange={(e) => setSandboxCfg((c) => ({ ...c, speed: Number(e.target.value) }))} /></label>
         <label>Shield {Math.round(sandboxCfg.shield * 100)}% <input type="range" min="0" max="0.9" step="0.05" value={sandboxCfg.shield} onChange={(e) => setSandboxCfg((c) => ({ ...c, shield: Number(e.target.value) }))} /></label>
       </div>}
+      {mode === "sandbox" && <div className="flex flex-wrap items-center gap-2 border-b border-[#9b7cff55] bg-[#120c24] px-3 py-2 text-[11px] font-bold text-[#d7ccff]" data-testid="sandbox-tools">
+        <span>SANDBOX TOOLS</span>
+        <select aria-label="Spawn enemy type" className="rounded-md border border-[#9b7cff55] bg-black/60 px-2 py-1 text-[11px] font-bold text-[#f0eaff]" value={sandboxCfg.spawnType} onChange={(e) => setSandboxCfg((c) => ({ ...c, spawnType: Number(e.target.value) }))}>
+          {ENEMY_TYPES.map((t, i) => (
+            <option key={i} value={i}>{t.name}{isBossType(i) ? " (boss)" : ""}</option>
+          ))}
+        </select>
+        <button type="button" className="btn px-2 py-1 text-[11px]" data-testid="sandbox-spawn-1" onClick={() => sandboxSpawn(sandboxCfg.spawnType, 1)}>Spawn 1</button>
+        <button type="button" className="btn px-2 py-1 text-[11px]" data-testid="sandbox-spawn-10" onClick={() => sandboxSpawn(sandboxCfg.spawnType, 10)}>Spawn 10</button>
+        <button type="button" className="btn px-2 py-1 text-[11px]" data-testid="sandbox-clear" onClick={sandboxClear}>Clear field</button>
+        <button type="button" className="btn px-2 py-1 text-[11px]" data-testid="sandbox-grant-sp" onClick={() => sandboxGrant(1000, 0)}>+1000 SP</button>
+        <button type="button" className="btn px-2 py-1 text-[11px]" data-testid="sandbox-grant-gold" onClick={() => sandboxGrant(0, 1000)}>+1000 gold</button>
+        <label><input type="checkbox" aria-label="Infinite SP" checked={sandboxCfg.infiniteSp} onChange={(e) => setSandboxCfg((c) => ({ ...c, infiniteSp: e.target.checked }))} /> Infinite SP</label>
+        <label><input type="checkbox" aria-label="Infinite gold" checked={sandboxCfg.infiniteGold} onChange={(e) => setSandboxCfg((c) => ({ ...c, infiniteGold: e.target.checked }))} /> Infinite gold</label>
+        <label><input type="checkbox" aria-label="God mode" checked={sandboxCfg.godMode} onChange={(e) => setSandboxCfg((c) => ({ ...c, godMode: e.target.checked }))} /> God mode</label>
+      </div>}
       <div className="relative min-h-0 flex-1">
         <div className="scroll-thin h-full w-full overflow-auto">
           <canvas
@@ -10592,11 +10683,12 @@ export default function Battle({
       )}
 
       {/* performance overlay */}
-      {save.perf && g && (
+      {(save.perf || save.experimental?.frameHud) && g && (
         <div className="pointer-events-none absolute left-3 top-[70px] z-20 rounded-md border border-[var(--line)] bg-black/70 px-2 py-1 text-[11px] font-bold leading-tight text-[#8effc4]">
-          <div>{g.fps} FPS</div>
-          <div className="text-[var(--dim)]">{g.enemies.length} enemies · {g.projs.length} shots</div>
-          <div className="text-[var(--dim)]">{g.parts.length} particles · {g.towers.length} towers</div>
+          {save.perf && <div>{g.fps} FPS</div>}
+          {save.experimental?.frameHud && <div>{fxGov.avg.toFixed(1)} ms</div>}
+          {save.perf && <div className="text-[var(--dim)]">{g.enemies.length} enemies · {g.projs.length} shots</div>}
+          {save.perf && <div className="text-[var(--dim)]">{g.parts.length} particles · {g.towers.length} towers</div>}
         </div>
       )}
 
