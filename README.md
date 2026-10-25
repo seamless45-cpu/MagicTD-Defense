@@ -41,9 +41,15 @@ published site keeps serving the previous version.
 
 ## Latest balance and interface pass
 
-- **Demon Execution**: one target per strike, 3 s cooldown, boss damage is 25% of max HP. Its lightning uses a deep-red palette with +50% jitter and +1 jaggedness.
+- **Demon Execution**: one target per strike, boss damage is 50% of max HP. A volley fires one strike per tower point, and the 3 s cooldown shortens by the points buff (+25% per point). Its lightning uses a deep-red palette with +50% jitter and +1 jaggedness.
 - **Thunder God ward** strikes towers that gain points, chosen at random each cast; the storm sovereign's bolts now land on randomly chosen enemies rather than the densest cluster.
 - **Asteroid impact** draws segmented lightning from the sky.
+- **Asteroids** use a pre-rendered jagged rock sprite that sheds embers as it falls. Impact adds an aftershock ring and chain lightning that jumps to up to three nearby enemies.
+- **Lightning** bolts have a flickering outer sheath, short side branches and a landing flare. Sky strikes are unchanged.
+- **Motion blur** is now a directional four-tap smear along the camera's motion vector, so it reads as a streak rather than a ghost. It cross-fades over the sharp frame and scales with shake energy.
+- **Upscale** (Settings → Options): the arena renders at the Pixel Ratio (render scale) and is presented at the screen's device pixels. *Sharp* (default) uses a WebGL pass with an edge-restoring unsharp step; *Smooth* is a plain GPU resample; *Native* is the old browser stretch. WebGL is optional and falls back to a smoothed 2D blit.
+- **Boot and loading screens** are reworked: a rune core draws itself on, the title resolves from blur, and a system check list ticks in. The loading screen shows a live progress ring around the emblem and a spark riding a segmented bar.
+- **UI transitions** have a springier screen entrance, tile lift and row slide on hover, and press feedback on buttons. Reduced motion and Power Saving turn the ambient animation off.
 - **Hardcore and Super Hardcore** each have a second spawn gate (lane cell 3,3). Spawns alternate between the two gates.
 - **Super Hardcore is capped at 3 runs per week** (resets Monday 07:00), with its own counter on the mode card and in the battle HUD. Hardcore keeps its 3 runs per day.
 - **Reward multipliers**: Hardcore 5×, Super Hardcore 10× (these replace the old 120× and 720×, rather than stacking).
@@ -353,7 +359,7 @@ counters, a roster pulled from the ladder, and a chat you can post in.
 | Grave Bloom | Legendary | Heavy percent-of-max-HP strikes on the wounded, and a purse for every kill (Grave Tithe, Bloom Offering) |
 | Rift Colossus | Legendary | Slow siege shells that **shatter armour** on impact and flatten a whole cell (Siege Core, Colossus Rage) |
 | Clone | Legendary | Drag any equal-point tower onto it to **copy** that tower — the original stays. Awakened: Super Clone (any points + +200% attack speed), Perfect Replica (bonus point) |
-| Demon Execution | Mystical | Every 3s, unbuffable deep-red lightning strikes **one** enemy (the furthest along the lane) — regular enemies are executed, bosses lose 25% of max HP; Soul Wipeout adds merge beams, Hell Dimensions opens banishing portals with fire-crack blasts |
+| Demon Execution | Mystical | Deep-red lightning volleys every 3s (cooldown cut by the points buff): one strike per tower point, each striking **one** enemy from the furthest along the lane — regular enemies are executed, bosses lose 50% of max HP; Soul Wipeout adds merge beams, Hell Dimensions opens banishing portals with fire-crack blasts |
 | Heavenly God | Legendary | A lightning laser that punches down the lane, burning five enemies behind the target for 50% (Positive Lightning, Super Charged Ray) |
 | Honor Emperor | Legendary | Drop it on a tower sitting on matching points and that tower grows a point — the Emperor is consumed, never merged away (Honor Blessing, Super Bless) |
 
@@ -716,8 +722,11 @@ enemies, with Overpenetration and Rail Burn awakenings).
   had full five-tier specs. The gate is gone: all **62** towers show both tracks, their tier lines and
   their Magic Token prices, and the effects behind them were already wired into the engine (generic
   on-hit tags like burn/volley/freeze/chain plus the bespoke kits).
-- **Demon Execution is Mystical.** Its fixed 3-second strike ignores ATK, attack speed, buffs,
-  armor and immunity. It hits one enemy per strike: ordinary enemies are executed, and bosses lose 25% of their max HP instead of dying outright (this superseded the earlier 5-second, boss-executing version). Soul Wipeout fires beams on
+- **Demon Execution is Mystical.** Its strikes ignore ATK, attack speed, auras, armor and immunity.
+  Each volley fires one strike per tower point (furthest enemies first), and the 3-second base cooldown
+  shortens only by the tower-points buff (+25% per point, the same buff tower attack speed uses). It hits
+  one enemy per strike: ordinary enemies are executed, and bosses lose 50% of their max HP instead of dying
+  outright (this superseded the earlier 25% cut and the 5-second, boss-executing version). Soul Wipeout fires beams on
   merge (base beam count = tower points; each awakening adds two). Hell Dimensions drops a portal
   on elites and bosses, returns the target to spawn, cracks the ground and blasts nearby enemies back;
   each tier grows the portal by 25% and adds 1m of knockback.

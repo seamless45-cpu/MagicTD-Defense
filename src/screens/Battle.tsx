@@ -398,6 +398,8 @@ interface Met {
   heavy?: boolean;
   asteroid?: boolean;
   directId?: number;
+  /** seconds until the next ember is shed while an asteroid falls */
+  emitT?: number;
 }
 
 interface Proj {
@@ -832,6 +834,73 @@ function boltPts(b: Bolt, out: { x: number; y: number }[]) {
       x: b.x0 + (b.x1 - b.x0) * t + px * b.off[i],
       y: b.y0 + (b.y1 - b.y0) * t + py * b.off[i],
     });
+  }
+}
+
+/**
+ * True upscaling. The arena renders into an offscreen canvas at the chosen
+ * render scale; this presents that frame onto the visible canvas, which is sized
+ * to the real on-screen pixels. The WebGL path resamples with hardware bilinear
+ * filtering and, in Sharp mode, an edge-restoring unsharp pass at the render
+ * scale's texel size, so a low render scale stays crisp instead of mushy.
+ * Returns null when WebGL is unavailable, and the caller falls back to a
+ * smoothed 2D blit.
+ */
+const UPSCALE_VS = "attribute vec2 p; varying vec2 v; void main(){ v = vec2(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5); gl_Position = vec4(p, 0.0, 1.0); }";
+const UPSCALE_FS =
+  "precision mediump float; uniform sampler2D t; uniform vec2 px; uniform float sh; varying vec2 v;" +
+  "void main(){ vec3 c = texture2D(t, v).rgb;" +
+  " if (sh > 0.0) { vec3 n = texture2D(t, v + vec2(px.x, 0.0)).rgb + texture2D(t, v - vec2(px.x, 0.0)).rgb + texture2D(t, v + vec2(0.0, px.y)).rgb + texture2D(t, v - vec2(0.0, px.y)).rgb; c = c + (c - n * 0.25) * sh; }" +
+  " gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0); }";
+function createUpscaler(canvas: HTMLCanvasElement, sharp: boolean): { draw: (src: HTMLCanvasElement) => void } | null {
+  try {
+    const gl = canvas.getContext("webgl", { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false }) as WebGLRenderingContext | null;
+    if (!gl) return null;
+    const compile = (type: number, src: string) => {
+      const sh = gl.createShader(type);
+      if (!sh) return null;
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      return gl.getShaderParameter(sh, gl.COMPILE_STATUS) ? sh : null;
+    };
+    const vs = compile(gl.VERTEX_SHADER, UPSCALE_VS);
+    const fs = compile(gl.FRAGMENT_SHADER, UPSCALE_FS);
+    if (!vs || !fs) return null;
+    const prog = gl.createProgram();
+    if (!prog) return null;
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return null;
+    gl.useProgram(prog);
+    // one oversized triangle covers the whole viewport
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, "p");
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const uPx = gl.getUniformLocation(prog, "px");
+    const uSh = gl.getUniformLocation(prog, "sh");
+    gl.uniform1f(uSh, sharp ? 0.45 : 0);
+    return {
+      draw(src) {
+        if (gl.isContextLost()) return;
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, src);
+        gl.uniform2f(uPx, 1 / src.width, 1 / src.height);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      },
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -1854,6 +1923,61 @@ function paintEnemyStatus(ctx: CanvasRenderingContext2D, e: Enemy, et: EnemyType
   }
 }
 
+// Pre-rendered asteroid rock: a jagged silhouette with craters and a hot rim,
+// cached per colour so every falling rock is a single blit.
+const rockSprites = new Map<string, HTMLCanvasElement>();
+function rockSprite(color: string): HTMLCanvasElement | null {
+  const hit = rockSprites.get(color);
+  if (hit) return hit;
+  try {
+    const c = document.createElement("canvas");
+    c.width = 64;
+    c.height = 64;
+    const x = c.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!x) return null;
+    x.translate(32, 32);
+    const pts = 11;
+    x.beginPath();
+    for (let i = 0; i < pts; i++) {
+      const a = (i / pts) * Math.PI * 2;
+      const r = 17 + ((i * 37) % 5) * 1.3 - 2.5;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) x.moveTo(px, py);
+      else x.lineTo(px, py);
+    }
+    x.closePath();
+    const body = x.createRadialGradient(-5, -6, 2, 0, 0, 22);
+    body.addColorStop(0, "#5a2a14");
+    body.addColorStop(1, "#1a0803");
+    x.fillStyle = body;
+    x.fill();
+    x.lineWidth = 2.4;
+    x.strokeStyle = color;
+    x.stroke();
+    // craters
+    x.fillStyle = "rgba(0,0,0,.45)";
+    for (const [cx, cy, cr] of [[-6, -4, 4], [7, 3, 3], [-2, 8, 2.4], [5, -9, 2]] as const) {
+      x.beginPath();
+      x.arc(cx, cy, cr, 0, Math.PI * 2);
+      x.fill();
+    }
+    // molten seams
+    x.strokeStyle = "rgba(255,190,110,.75)";
+    x.lineWidth = 1.2;
+    x.beginPath();
+    x.moveTo(-12, -2);
+    x.lineTo(-3, 1);
+    x.lineTo(4, -3);
+    x.lineTo(12, 4);
+    x.stroke();
+    rockSprites.set(color, c);
+    return c;
+  } catch {
+    return null;
+  }
+}
+
 // ---------- component ----------
 export default function Battle({
   mode,
@@ -1957,17 +2081,21 @@ export default function Battle({
 
   // ---------- engine ----------
   useEffect(() => {
+    // The visible canvas (pointer target, sized by fit) only presents. The arena
+    // renders into this offscreen canvas at the chosen render scale, and the
+    // present step upscales it to the display's real pixels.
     const canvas = canvasRef.current!;
+    const pixelRatio = saveRef.current.pixelRatio || 1;
+    const upscaleMode = saveRef.current.upscale || "sharp";
+    const renderCanvas = document.createElement("canvas");
+    renderCanvas.width = Math.round(W * pixelRatio);
+    renderCanvas.height = Math.round(H * pixelRatio);
     // opaque canvas: the cached backdrop covers every pixel, so the browser can
     // skip per-frame alpha compositing of the whole arena
-    const pixelRatio = saveRef.current.pixelRatio || 1;
-    canvas.width = Math.round(W * pixelRatio);
-    canvas.height = Math.round(H * pixelRatio);
-    canvas.style.imageRendering = saveRef.current.antiAlias ? "auto" : "pixelated";
-    // `desynchronized` lets the browser skip a compositor hop on supported
-    // hardware — the arena is repainted every frame anyway, so tearing risk is
-    // nil and input latency drops.
-    const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true })!;
+    const ctx = renderCanvas.getContext("2d", { alpha: false })!;
+    const upscaler = upscaleMode === "native" ? null : createUpscaler(canvas, upscaleMode === "sharp");
+    const presentCtx = upscaler ? null : (canvas.getContext("2d", { alpha: false }) as CanvasRenderingContext2D | null);
+    canvas.style.imageRendering = upscaler || saveRef.current.antiAlias ? "auto" : "pixelated";
     // Half-resolution history buffers keep shake blur inexpensive on phones.
     const bloomCanvas = document.createElement("canvas");
     bloomCanvas.width = Math.max(1, Math.round(W * 0.25));
@@ -1993,8 +2121,18 @@ export default function Battle({
       const rw = wrap.clientWidth || 1;
       const rh = wrap.clientHeight || 1;
       const s = Math.max(0.1, Math.min(rw / W, rh / H) * zoomRef.current);
-      canvas.style.width = `${Math.floor(W * s)}px`;
-      canvas.style.height = `${Math.floor(H * s)}px`;
+      const cssW = Math.floor(W * s);
+      const cssH = Math.floor(H * s);
+      canvas.style.width = `${cssW}px`;
+      canvas.style.height = `${cssH}px`;
+      // backing store: native keeps the render size (browser stretches it);
+      // upscaled modes match the real device pixels so the present pass does the resample
+      const bw = upscaler ? Math.max(64, Math.min(3072, Math.round(cssW * Math.min(2, window.devicePixelRatio || 1)))) : renderCanvas.width;
+      const bh = upscaler ? Math.round((bw * H) / W) : renderCanvas.height;
+      if (canvas.width !== bw || canvas.height !== bh) {
+        canvas.width = bw;
+        canvas.height = bh;
+      }
     };
     fitRef.current = fit;
     fit();
@@ -3078,15 +3216,17 @@ export default function Battle({
      * Demon Execution's fixed-cadence, unbuffable execution bolt. One strike
      * now picks ONE enemy (the furthest along the lane) instead of the whole
      * field. Regular enemies and elites are executed outright; bosses cannot be
-     * executed, so they lose 25% of their max HP instead. The sky channel is
+     * executed, so they lose 50% of their max HP instead. The sky channel is
      * deep red with 50% more jitter and one extra jag segment.
      */
-    const demonStrike = (t: BT) => {
+    const demonStrike = (t: BT, rank = 0) => {
       const now = performance.now();
       const tier2 = saveRef.current.awn.demon?.[1] || 0;
-      const list = g.enemies.filter((e) => !e.dead);
+      // rank 0 is the furthest enemy along the lane; each extra point of the tower
+      // queues the next-furthest, so a multi-strike volley spreads across the field
+      const list = g.enemies.filter((e) => !e.dead).sort((a, b) => b.d - a.d);
       if (!list.length) return;
-      const target = list.reduce((best, e) => (e.d > best.d ? e : best), list[0]);
+      const target = list[rank % list.length];
       const ep = enemyPos(target);
       const boss = isBossType(target.type);
       const elite = !!target.elite;
@@ -3155,8 +3295,8 @@ export default function Battle({
       sfx.demonStrike();
 
       if (boss) {
-        // bosses cannot be executed: a quarter of their max health is torn away
-        const cut = target.max * 0.25;
+        // bosses cannot be executed: half of their max health is torn away
+        const cut = target.max * 0.5;
         target.hp = Math.max(0, target.hp - cut);
         target.flash = 0.3;
         addText(ep.x, ep.y - 58, `-25% MAX HP`, "#ff4059", 17, true);
@@ -3165,7 +3305,7 @@ export default function Battle({
           killReward(target);
           addText(ep.x, ep.y - 78, "BOSS EXECUTED", "#ff4059", 17, true);
         }
-        toastRef.current(`DEMON EXECUTION — boss loses 25% max HP`, "#a80020");
+        toastRef.current(`DEMON EXECUTION — boss loses 50% max HP`, "#a80020");
       } else {
         addText(ep.x, ep.y - 58, "EXECUTED", "#ff4059", 13, true);
         target.hp = 0;
@@ -6058,12 +6198,18 @@ export default function Battle({
         const p = cellCenter(t.cell.c, t.cell.r);
         t.flash = Math.max(0, t.flash - dt);
         if (t.def.id === "demon") {
-          // Execution lightning is a fixed-cadence ability, not a tower shot:
-          // ignore ATK, ATK speed, points, auras, run buffs, haste and debuffs.
+          // Execution lightning ignores ATK, ATK speed, auras and run buffs. Two
+          // things come from the tower itself: the strike count equals its points
+          // (one volley strike per point), and the cooldown shortens by the same
+          // per-point buff that tower attack speed uses (POINT_STEP).
           t.cd -= dt;
           if (t.cd <= 0) {
-            t.cd = t.def.execCd || 5;
-            demonStrike(t);
+            const volley = Math.max(1, Math.min(MAX_POINTS, t.points));
+            t.cd = (t.def.execCd || 3) / (1 + POINT_STEP * t.points);
+            for (let k = 0; k < volley; k++) {
+              if (k === 0) demonStrike(t, 0);
+              else schedule(k * 0.14, () => demonStrike(t, k));
+            }
           }
           continue;
         }
@@ -6132,6 +6278,15 @@ export default function Battle({
       if (g.meteors.length) {
         for (const m of g.meteors) {
           m.t -= dt;
+          // asteroids shed embers while they fall, so the descent reads as a burning rock
+          if (m.asteroid && m.t > 0) {
+            m.emitT = (m.emitT ?? 0) - dt;
+            if (m.emitT <= 0) {
+              m.emitT = 0.04;
+              const kk = 1 - Math.max(0, m.t) / m.total;
+              embers(m.x + (1 - kk) * 120, m.y - (1 - kk) * 300, kk > 0.6 ? "#ffd08a" : "#ff7a24", 2);
+            }
+          }
           if (m.t <= 0 && !m.done) {
             m.done = true;
             if (m.dmg !== undefined) {
@@ -6150,6 +6305,21 @@ export default function Battle({
                 if (g.strikes.length < 24) g.strikes.push({ x: m.x, y: m.y, life: 0.4, max: 0.4, width: 8, color: "#ffd08a", core: "#ffffff", seed: Math.random() * 100, forks: 4, top: -H * 0.5, jag: 1, jit: 1.4 });
                 if (g.bolts.length < 40) g.bolts.push(randBolt(m.x - 70, -60, m.x, m.y, "#ff7a24", 4, 0.42, sky, { jag: 1, jit: 1.4 }));
                 if (g.bolts.length < 40) g.bolts.push(randBolt(m.x, m.y, m.x + 90, m.y - 60, "#ffb36b", 2.2, 0.3, sky, { jag: 1, jit: 1.4 }));
+                // aftershock ring a beat later, and lightning that chains from the crater
+                schedule(0.14, () => {
+                  shock(m.x, m.y, "#ffb36b", blast * 0.7, 0.42);
+                  ring(m.x, m.y, "#ff7a24", blast * 0.9);
+                });
+                const near = g.enemies
+                  .filter((e) => !e.dead && e.id !== m.directId)
+                  .map((e) => ({ e, p: enemyPos(e) }))
+                  .filter(({ p }) => Math.hypot(p.x - m.x, p.y - m.y) <= blast * 1.5)
+                  .slice(0, 3);
+                const chainDmg = (m.dmg ?? 0) * 0.35;
+                near.forEach(({ e, p }, i) => {
+                  if (g.bolts.length < 44) g.bolts.push(randBolt(m.x, m.y, p.x, p.y, i % 2 ? "#ffd08a" : "#ff7a24", 3.2, 0.4, sky + i * 40, { jag: 1, jit: 1.2 }));
+                  schedule(0.08 + i * 0.05, () => dealDamage(e, chainDmg, { tw: m.tw, color: "#ffb36b" }));
+                });
               }
               shock(m.x, m.y, m.asteroid ? "#ff7a24" : "#ffd23f", blast, 0.55);
               burst(m.x, m.y, "#ffb324", 20, 260);
@@ -8410,19 +8580,28 @@ export default function Battle({
         trail.addColorStop(0, "transparent");
         trail.addColorStop(1, m.color + "cc");
         ctx.strokeStyle = trail;
-        ctx.lineWidth = 10;
+        ctx.lineWidth = m.asteroid ? 16 : 10;
         ctx.beginPath();
         ctx.moveTo(rx, ry);
         ctx.lineTo(m.x, m.y);
         ctx.stroke();
         ctx.globalCompositeOperation = "source-over";
-        ctx.fillStyle = "#3a1206";
-        ctx.strokeStyle = m.color;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(rx, ry, 12, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+        const rock = m.asteroid ? rockSprite(m.color) : null;
+        if (rock) {
+          // the sprite spins as it falls; the scale grows as it nears the ground
+          ctx.translate(rx, ry);
+          ctx.rotate(performance.now() / 260 + k * 3);
+          const sc = 0.9 + k * 0.35;
+          ctx.drawImage(rock, -32 * sc, -32 * sc, 64 * sc, 64 * sc);
+        } else {
+          ctx.fillStyle = "#3a1206";
+          ctx.strokeStyle = m.color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(rx, ry, 12, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
         ctx.restore();
       }
 
@@ -8769,26 +8948,59 @@ export default function Battle({
         ctx.restore();
       }
 
-      for (const b of g.bolts) {
-        boltPts(b, boltCache);
-        if (boltCache.length < 2) continue;
+      // Lightning: additive glow body, a flickering outer sheath, short side
+      // branches off the jagged spine and a flare where the bolt lands.
+      if (g.bolts.length) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
         ctx.lineCap = "round";
-        const alpha = Math.min(1, b.life / b.max + 0.25);
-        ctx.globalAlpha = alpha * 0.35;
-        ctx.strokeStyle = b.color;
-        ctx.lineWidth = b.w * 3;
-        ctx.beginPath();
-        ctx.moveTo(boltCache[0].x, boltCache[0].y);
-        for (const p of boltCache) ctx.lineTo(p.x, p.y);
-        ctx.stroke();
-        ctx.globalAlpha = alpha;
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = b.w;
-        ctx.beginPath();
-        ctx.moveTo(boltCache[0].x, boltCache[0].y);
-        for (const p of boltCache) ctx.lineTo(p.x, p.y);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
+        ctx.lineJoin = "round";
+        for (const b of g.bolts) {
+          boltPts(b, boltCache);
+          if (boltCache.length < 2) continue;
+          const flick = 0.86 + 0.14 * Math.sin(now / 37 + b.x0 * 0.05 + b.y0 * 0.03);
+          const alpha = Math.min(1, b.life / b.max + 0.25) * flick;
+          const pathOf = (pts: { x: number; y: number }[]) => {
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+            ctx.stroke();
+          };
+          // outer sheath and body
+          ctx.globalAlpha = alpha * 0.26;
+          ctx.strokeStyle = b.color;
+          ctx.lineWidth = b.w * 5.2;
+          pathOf(boltCache);
+          ctx.globalAlpha = alpha * 0.7;
+          ctx.lineWidth = b.w * 1.9;
+          pathOf(boltCache);
+          // side branches: every few vertices a short fork peels off, alternating sides
+          ctx.globalAlpha = alpha * 0.6;
+          ctx.lineWidth = Math.max(0.8, b.w * 0.55);
+          ctx.beginPath();
+          for (let i = 2; i < boltCache.length - 2; i += 4) {
+            const q = boltCache[i];
+            const dir = (i >> 2) % 2 ? 1 : -1;
+            const len = b.w * (2.6 + (i % 3));
+            ctx.moveTo(q.x, q.y);
+            ctx.lineTo(q.x + dir * len, q.y + len * 0.7);
+          }
+          ctx.stroke();
+          // white-hot core
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = Math.max(0.9, b.w * 0.75);
+          pathOf(boltCache);
+          // landing flare
+          const tip = boltCache[boltCache.length - 1];
+          const gs = glowSprite(b.color);
+          if (gs) {
+            const fs = b.w * 9;
+            ctx.globalAlpha = alpha * 0.85;
+            ctx.drawImage(gs, tip.x - fs / 2, tip.y - fs / 2, fs, fs);
+          }
+        }
+        ctx.restore();
       }
 
       // ---------- particles ----------
@@ -9229,7 +9441,7 @@ export default function Battle({
       // Bloom is a subtle additive halo, kept in a quarter-resolution buffer.
       if (saveRef.current.bloomFx && fxOn() && !saveRef.current.powerSaver) {
         bloomCtx.clearRect(0, 0, bloomCanvas.width, bloomCanvas.height);
-        bloomCtx.drawImage(canvas, 0, 0, bloomCanvas.width, bloomCanvas.height);
+        bloomCtx.drawImage(renderCanvas, 0, 0, bloomCanvas.width, bloomCanvas.height);
         ctx.save();
         ctx.globalCompositeOperation = "lighter";
         ctx.globalAlpha = 0.11;
@@ -9239,42 +9451,63 @@ export default function Battle({
         ctx.restore();
       }
 
-      // Directional temporal smear while the camera is shaking. The ghost is the
-      // previous frame, pushed along the shake vector. Strength follows the live
-      // shake amplitude as well as the per-frame jump, so every hard hit shows a
-      // visible streak. Only the user's Motion Blur switch and Power Saving can
-      // disable it: the frame governor no longer hides it mid-shake.
-      const shakeVelocity = Math.hypot(shakeX - lastShakeX, shakeY - lastShakeY);
+      // Directional motion blur. The camera's per-frame motion vector sets the
+      // direction and length of a smear. The blur is a running average of four
+      // taps along that vector (the live frame plus three samples of the previous
+      // frame, each pushed back along the motion path), so it reads as a soft
+      // streak rather than a ghost. Its strength follows the shake energy, and the
+      // blurred layer cross-fades over the sharp frame, so a calm frame is never
+      // softened. Only the Motion Blur switch and Power Saving disable it.
+      const shakeVelX = shakeX - lastShakeX;
+      const shakeVelY = shakeY - lastShakeY;
+      const shakeVelocity = Math.hypot(shakeVelX, shakeVelY);
       const shakeMag = Math.hypot(shakeX, shakeY);
-      const blurStrength = Math.min(0.42, Math.max(shakeVelocity, shakeMag) * 0.03);
+      const motion = Math.max(shakeVelocity, shakeMag * 0.35);
+      const blurAmt = Math.min(1, Math.max(0, motion - 0.6) * 0.08);
       const useMotionBlur =
-        hasPreviousFrame && blurStrength > 0.04 && saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver;
+        hasPreviousFrame && blurAmt > 0.04 && saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver;
       const tw = trailCanvas.width;
       const th = trailCanvas.height;
       // world units -> trail-buffer pixels (the buffer is half resolution)
       const toTrail = tw / W;
       currentCtx.clearRect(0, 0, tw, th);
-      currentCtx.drawImage(canvas, 0, 0, tw, th);
+      currentCtx.drawImage(renderCanvas, 0, 0, tw, th);
       if (useMotionBlur) {
-        const dx = (shakeX - lastShakeX) * toTrail * 3;
-        const dy = (shakeY - lastShakeY) * toTrail * 3;
+        // smear vector in trail pixels, clamped so a huge hit never tears the frame apart
+        let vx = (shakeVelocity > 0.2 ? shakeVelX : shakeX * 0.5) * toTrail * 2.2;
+        let vy = (shakeVelocity > 0.2 ? shakeVelY : shakeY * 0.5) * toTrail * 2.2;
+        const vl = Math.hypot(vx, vy);
+        const maxLen = 9 + blurAmt * 9;
+        if (vl > maxLen) {
+          vx = (vx / vl) * maxLen;
+          vy = (vy / vl) * maxLen;
+        }
         trailCtx.clearRect(0, 0, tw, th);
         trailCtx.globalAlpha = 1;
         trailCtx.drawImage(currentCanvas, 0, 0, tw, th);
-        // long ghost at full strength, a short ghost closer in for a soft streak
-        trailCtx.globalAlpha = blurStrength;
-        trailCtx.drawImage(previousCanvas, -dx, -dy, tw, th);
-        trailCtx.globalAlpha = blurStrength * 0.5;
-        trailCtx.drawImage(previousCanvas, -dx * 0.5, -dy * 0.5, tw, th);
+        // running average: each further tap gets 1/(k+1) so the four weights are equal
+        trailCtx.globalAlpha = 1 / 2;
+        trailCtx.drawImage(previousCanvas, -vx / 3, -vy / 3, tw, th);
+        trailCtx.globalAlpha = 1 / 3;
+        trailCtx.drawImage(previousCanvas, (-vx * 2) / 3, (-vy * 2) / 3, tw, th);
+        trailCtx.globalAlpha = 1 / 4;
+        trailCtx.drawImage(previousCanvas, -vx, -vy, tw, th);
         trailCtx.globalAlpha = 1;
         ctx.save();
         ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-        ctx.clearRect(0, 0, W, H);
+        ctx.globalAlpha = Math.min(1, blurAmt * 1.4);
         ctx.drawImage(trailCanvas, 0, 0, tw, th, 0, 0, W, H);
         ctx.restore();
       }
       previousCtx.clearRect(0, 0, tw, th);
       previousCtx.drawImage(currentCanvas, 0, 0, tw, th);
+      // present: upscale the finished frame onto the visible canvas
+      if (upscaler) upscaler.draw(renderCanvas);
+      else if (presentCtx) {
+        presentCtx.imageSmoothingEnabled = true;
+        presentCtx.imageSmoothingQuality = "high";
+        presentCtx.drawImage(renderCanvas, 0, 0, canvas.width, canvas.height);
+      }
       lastShakeX = shakeX;
       lastShakeY = shakeY;
       hasPreviousFrame = true;

@@ -184,11 +184,11 @@ describe("Boot sequence", () => {
     expect(intro.textContent).toContain("MAGICTD");
     expect(intro.textContent).toContain("DEFENSE");
     expect(document.querySelectorAll(".boot-letter").length).toBe("MAGICTD".length);
-    expect(document.querySelector(".boot-emblem")).toBeTruthy();
+    expect(document.querySelector(".bt-core")).toBeTruthy();
 
     // 2. the loading screen: logo + title on top, one car on a track below
     await waitFor(() => document.querySelector('[data-testid="loading-screen"]'), "loading screen");
-    expect(document.querySelector(".load-logo")).toBeTruthy();
+    expect(document.querySelector(".ld-emblem")).toBeTruthy();
     expect(document.body.textContent).toContain("MagicTD");
     expect(document.body.textContent).toContain("DEFENSE");
     expect(document.querySelector('[data-testid="loading-car"]'), "loading car").toBeTruthy();
@@ -204,8 +204,9 @@ describe("Boot sequence", () => {
     const bar = document.querySelector("[role=progressbar]")!;
     const pct = () => Number(bar.getAttribute("aria-valuenow"));
     await waitFor(() => pct() > 0, "progress moving");
-    const run1 = (document.querySelector(".load-car-run") as HTMLElement).style.left;
-    await waitFor(() => (document.querySelector(".load-car-run") as HTMLElement).style.left !== run1, "car moved");
+    const spark = () => document.querySelector(".ld-spark") as HTMLElement;
+    const run1 = spark().style.left;
+    await waitFor(() => spark().style.left !== run1, "car moved");
     expect(pct()).toBeLessThanOrEqual(100);
 
     // 3. then the game itself

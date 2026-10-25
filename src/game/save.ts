@@ -243,8 +243,10 @@ export interface SaveData {
   shakeIntensity: number;
   /** skip the boss cutscene card and jump straight into the fight */
   autoSkipBossCut: boolean;
-  /** internal canvas resolution multiplier (0.75..2) */
+  /** internal canvas resolution multiplier (0.25..2) */
   pixelRatio: number;
+  /** how the render is presented: native browser stretch, smooth GPU resample, or sharpened GPU upscale */
+  upscale: "native" | "smooth" | "sharp";
   bloomFx: boolean;
   shadowFx: boolean;
   antiAlias: boolean;
@@ -367,6 +369,7 @@ export function defaultSave(): SaveData {
     shakeIntensity: 1,
     autoSkipBossCut: false,
     pixelRatio: 1,
+    upscale: "sharp",
     bloomFx: true,
     shadowFx: true,
     antiAlias: true,
@@ -442,6 +445,7 @@ function normalise(s: SaveData): SaveData {
   // the floor is a quarter-resolution render (0.25) for low-end phones
   s.pixelRatio = Math.round(Math.max(0.25, Math.min(2, Number.isFinite(s.pixelRatio) ? s.pixelRatio : 1)) * 4) / 4;
   s.shakeIntensity = Math.round(Math.max(0, Math.min(2, Number.isFinite(s.shakeIntensity) ? s.shakeIntensity : 1)) * 20) / 20;
+  s.upscale = s.upscale === "native" || s.upscale === "smooth" ? s.upscale : "sharp";
   s.bloomFx = s.bloomFx !== false;
   s.shadowFx = s.shadowFx !== false;
   s.antiAlias = s.antiAlias !== false;

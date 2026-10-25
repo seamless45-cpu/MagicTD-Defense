@@ -174,7 +174,7 @@ describe("tower data", () => {
     }
   });
 
-  it("defines Demon Execution as a mystical, unbuffable executor with its two new awakenings", () => {
+  it("defines Demon Execution as a mystical executor whose volley and cooldown scale with tower points", () => {
     const demon = TOWER_BY_ID.demon;
     expect(demon.rarity).toBe("mystical");
     expect(demon.execCd).toBe(3);
@@ -185,7 +185,8 @@ describe("tower data", () => {
     expect(demon.awk2?.mult[0]).toBe(0.25);
     expect(demon.awk2?.mult2?.[0]).toBe(1);
     const rows = towerStatRows(demon, 15);
-    expect(rows.find((r) => r.label === "Strike Interval")?.value).toContain("unaffected");
+    expect(rows.find((r) => r.label === "Strike Interval")?.value).toContain("strikes per volley = points");
+    expect(rows.find((r) => r.label === "Strike Interval")?.value).toContain("points buff");
     expect(rows.some((r) => r.label.includes("Attack Speed"))).toBe(false);
   });
 
