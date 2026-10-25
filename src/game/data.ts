@@ -986,7 +986,7 @@ export const TOWERS: TowerDef[] = [
   {
     id: "demon", name: "Demon Execution", rarity: "mystical", kind: "demon", art: "demon", accent: "#9b001b",
     target: "all", exotic: true, unlockFrags: 1,
-    desc: "Every 3 seconds, a deep-red execution bolt strikes one enemy and executes it through immunity. Bosses cannot be executed outright: each strike takes 25% of their max HP. This strike ignores attack, attack speed and all buffs.",
+    desc: "Deep-red execution bolts strike one enemy each, executing it through immunity. Strikes per volley equal the tower's points, and the cooldown (3s base) shortens by the points buff. Bosses cannot be executed outright: each strike takes 50% of their max HP. Attack, attack speed and other buffs do not affect it.",
     dmg: 0, upDmg: 0, ascDmg: 0, rate: 3, upRate: 0, ascRate: 0,
     execCd: 3,
     awk1: {
@@ -1344,8 +1344,8 @@ export function towerStatRows(def: TowerDef, menuLv: number, battleLv = 1): Stat
     rows.push({ label: "Attacks", value: def.id === "demon" ? "Unbuffable execution" : "Support tower", better: "up" });
   }
   if (def.id === "demon") {
-    rows.push({ label: "Execution", value: "One enemy per strike · bosses take 25% max HP", better: "up" });
-    rows.push({ label: "Strike Interval", value: `${def.execCd || 5}s · unaffected by attack speed or buffs`, better: "down", maxed: true });
+    rows.push({ label: "Execution", value: "One enemy per strike · bosses take 50% max HP", better: "up" });
+    rows.push({ label: "Strike Interval", value: `${def.execCd || 3}s base · strikes per volley = points · cooldown cut by the points buff`, better: "down", maxed: true });
   }
   if (def.id === "supervisor") {
     rows.push({ label: "Kill Buff", value: "+1% ATK speed per kill · +2,000% cap", better: "up" });

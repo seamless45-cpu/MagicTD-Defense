@@ -200,40 +200,51 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
   }, [finish]);
 
   const TITLE = "MAGICTD";
+  /** the system checks that tick in under the tagline, like a machine coming online */
+  const CHECKS = ["LINK ESTABLISHED", "RENDERER ONLINE", "AUDIO ARMED"];
   return (
-    <div className="boot-root" data-testid="launch-intro" aria-label="MagicTD Defense boot sequence">
-      <div className="boot-vignette" />
+    <div className="boot-root bt-root" data-testid="launch-intro" aria-label="MagicTD Defense boot sequence">
+      <div className="bt-grid" aria-hidden="true" />
+      <div className={`bt-sweep ${beat >= 1 ? "on" : ""}`} aria-hidden="true" />
+      <div className={`bt-flash ${beat >= 2 ? "on" : ""}`} aria-hidden="true" />
       <div className="boot-stars" aria-hidden="true">
-        {Array.from({ length: 18 }, (_, i) => <i key={i} style={{ left: `${(i * 47 + 11) % 100}%`, top: `${(i * 61 + 7) % 100}%`, animationDelay: `${(i % 7) * -0.43}s`, animationDuration: `${2.2 + (i % 5) * 0.6}s` }} />)}
+        {Array.from({ length: 18 }, (_, i) => (
+          <i key={i} style={{ left: `${(i * 47 + 11) % 100}%`, top: `${(i * 61 + 7) % 100}%`, animationDelay: `${(i % 7) * -0.43}s`, animationDuration: `${2.2 + (i % 5) * 0.4}s` }} />
+        ))}
       </div>
-      <div className={`boot-collapse ${beat >= 1 ? "on" : ""}`} />
-      <div className={`boot-shock ${beat >= 2 ? "on" : ""}`} />
-      {beat >= 6 && <div className="boot-wipe" />}
 
-      <div className="relative z-10 flex flex-col items-center">
-        <div className={`boot-emblem ${beat >= 2 ? "on" : ""}`}>
-          <span className="boot-emblem-halo" />
-          <span className="boot-emblem-ring r1" />
-          <span className="boot-emblem-ring r2" />
-          <Emblem size={132} />
+      <div className="relative z-10 flex flex-col items-center bt-stack">
+        {/* the rune core: rings draw themselves on, then the emblem lights up */}
+        <div className={`bt-core ${beat >= 1 ? "on" : ""} ${beat >= 2 ? "lit" : ""}`}>
+          <svg className="bt-ring" viewBox="0 0 200 200" aria-hidden="true">
+            <circle className="bt-ring-a" cx="100" cy="100" r="92" pathLength={1} />
+            <circle className="bt-ring-b" cx="100" cy="100" r="76" pathLength={1} />
+            <circle className="bt-ring-c" cx="100" cy="100" r="60" pathLength={1} />
+          </svg>
+          <div className="bt-emblem">
+            <Emblem size={112} />
+          </div>
         </div>
 
-        <div className="mt-5 flex items-end justify-center">
+        <div className="mt-4 flex items-end justify-center bt-title">
           {TITLE.split("").map((ch, i) => (
-            <span
-              key={i}
-              className={`boot-letter ${beat >= 3 ? "on" : ""}`}
-              style={{ animationDelay: `${i * 62}ms` }}
-            >
+            <span key={i} className={`boot-letter bt-letter ${beat >= 3 ? "on" : ""}`} style={{ animationDelay: `${i * 70}ms` }}>
               {ch}
             </span>
           ))}
         </div>
 
-        <div className={`boot-sub ${beat >= 4 ? "on" : ""}`}>DEFENSE</div>
-        <div className={`boot-tagline ${beat >= 5 ? "on" : ""}`}>
+        <div className={`boot-sub bt-sub ${beat >= 4 ? "on" : ""}`}>DEFENSE</div>
+        <div className={`boot-tagline bt-tagline ${beat >= 5 ? "on" : ""}`}>
           DEFEND THE RIFT <span className="boot-dot">◆</span> COMMAND THE STORM
         </div>
+        <ul className={`bt-checks ${beat >= 5 ? "on" : ""}`} aria-hidden="true">
+          {CHECKS.map((c, i) => (
+            <li key={c} style={{ animationDelay: `${i * 180}ms` }}>
+              <b>✓</b> {c}
+            </li>
+          ))}
+        </ul>
       </div>
 
       <div className={`boot-skip ${beat >= 4 ? "on" : ""}`}>TAP TO SKIP</div>
@@ -380,68 +391,58 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
 
   return (
     <div
-      className="load-root h-full w-full"
+      className={`load-root ld-root h-full w-full ${launching ? "launching" : ""}`}
       data-testid="loading-screen"
       onPointerDown={() => {
         if (armedRef.current) finish();
       }}
     >
       <div className="load-grid" />
-      <div className="load-orb" style={{ width: 300, height: 300, left: "4%", top: "4%", background: "radial-gradient(circle, rgba(53,224,255,.26), transparent 70%)" }} />
-      <div className="load-orb" style={{ width: 340, height: 340, right: "0%", top: "-2%", background: "radial-gradient(circle, rgba(255,79,216,.2), transparent 70%)", animationDelay: "1.4s" }} />
+      <div className="ld-aurora" aria-hidden="true" />
+      <div className="ld-flare" aria-hidden="true" />
 
-      {/* ---------- logo + title, pinned to the top ---------- */}
-      <div className="load-top">
-        <div className="load-logo">
-          <span className="load-logo-halo" />
-          <Emblem size={104} />
-          <span className="load-logo-scan" />
+      {/* ---------- emblem with a live progress ring, title below ---------- */}
+      <div className="load-top ld-top">
+        <div className="ld-emblem">
+          <svg className="ld-ring" viewBox="0 0 120 120" aria-hidden="true">
+            <circle className="ld-ring-track" cx="60" cy="60" r="56" pathLength={1} />
+            <circle className="ld-ring-fill" cx="60" cy="60" r="56" pathLength={1} style={{ strokeDashoffset: 1 - (launching ? 1 : p) }} />
+            <circle className="ld-ring-orbit" cx="60" cy="60" r="48" pathLength={1} />
+          </svg>
+          <Emblem size={92} />
         </div>
-        <div className="load-word">
+        <div className="load-word ld-word">
           <span className="load-word-a">MagicTD</span>
           <span className="load-word-b">DEFENSE</span>
-          <span className="load-word-rule" />
         </div>
       </div>
 
-      {/* ---------- the loading car ---------- */}
-      <div className="load-bay">
+      {/* ---------- the progress bar: segmented fill with a travelling spark ---------- */}
+      <div className="load-bay ld-bay">
         <div
-          className="load-track"
+          className="ld-track"
           role="progressbar"
           aria-label="Loading progress"
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={pct}
         >
-          <div className="load-track-fill" style={{ width: `${pct}%` }} />
-          <div className="load-track-pips">
-            {Array.from({ length: 11 }, (_, i) => (
-              <i key={i} className={pct >= (i / 10) * 100 ? "on" : ""} />
-            ))}
-          </div>
-          <div className="load-car-run" style={{ left: `${6 + p * 80}%` }}>
-            <div className={`load-car ${launching ? "launching" : ""}`} data-testid="loading-car">
-              <span className="load-car-thrust" />
-              <span className="load-car-body" />
-              <span className="load-car-stripe" />
-              <span className="load-car-wing" />
-              <span className="load-car-wheel w1" />
-              <span className="load-car-wheel w2" />
-              <span className="load-car-headlight" />
-            </div>
-            <span className="load-car-smoke s1" />
-            <span className="load-car-smoke s2" />
-            <span className="load-car-smoke s3" />
+          <div className="ld-fill" style={{ width: `${pct}%` }} />
+          <div className="ld-spark" style={{ left: `${pct}%` }} data-testid="loading-car">
+            <span className="ld-spark-glow" />
+            <span className="ld-spark-core" />
+            <span className="ld-spark-ring r1" />
+            <span className="ld-spark-ring r2" />
+            <span className="ld-spark-trail" />
           </div>
         </div>
         <div className="load-bay-row">
           <span className="load-state" data-testid="load-state">
             {launching ? "ENTERING THE ARENA" : ready ? "READY" : "LOADING"}
           </span>
-          <span className="load-pct">{pct}%</span>
+          <span className="load-pct ld-pct">{pct}%</span>
         </div>
-        <div key={tip} className="load-tip">
+        <div key={tip} className="load-tip ld-tip">
           <span className="load-tip-k">TIP</span> {LOAD_TIPS[tip]}
         </div>
         <div className="load-hint">TAP TO SKIP</div>
@@ -2663,6 +2664,15 @@ export function SettingsModal({
         <SetIcon name="perf" color="#54f4ff" />
         <div className="min-w-0 flex-1"><div className="font-bold">Pixel Ratio</div><div className="text-[11px] font-semibold text-[var(--dim)]">Canvas render resolution · {save.pixelRatio.toFixed(2)}× · 0.25 = fastest, 2.00 = sharpest</div></div>
         <input className="w-36" type="range" min="0.25" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
+      </div>
+      <div className="row-card mt-1.5" data-testid="upscale-row">
+        <SetIcon name="perf" color="#54f4ff" />
+        <div className="min-w-0 flex-1"><div className="font-bold">Upscale</div><div className="text-[11px] font-semibold text-[var(--dim)]">Presents the render at screen size · Sharp adds an edge-restoring GPU pass</div></div>
+        <select className="w-36 rounded-lg border border-[var(--line)] bg-black/40 px-2 py-1 font-bold" value={save.upscale} aria-label="Upscale" onChange={(e) => { const value = e.target.value as "native" | "smooth" | "sharp"; mutate((s) => { s.upscale = value; }); }}>
+          <option value="native">Native</option>
+          <option value="smooth">Smooth</option>
+          <option value="sharp">Sharp</option>
+        </select>
       </div>
       <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
         <div className="mb-2 flex items-center justify-between gap-2">
