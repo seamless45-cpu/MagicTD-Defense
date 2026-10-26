@@ -608,6 +608,11 @@ function collectFiles(): string[] {
 
 const SAMPLE_FILES = collectFiles();
 
+/** the sample files the first battle plays most: menu clicks and impacts (preloaded by the loading screen) */
+export function coreSampleFiles(): string[] {
+  return SAMPLE_FILES.filter((file) => file.startsWith("ui/") || file.startsWith("impact/"));
+}
+
 function shootCue(kind: string): SampleCue {
   return SHOOT_CUES[kind] || SHOOT_CUES.default;
 }

@@ -191,6 +191,10 @@ export interface SaveData {
   powerSaver: boolean;
   /** directional temporal smear during camera shake */
   motionBlur: boolean;
+  /** motion blur strength in percent, 0..200; above 100 the slider turns red */
+  motionBlurAmt: number;
+  /** one switch that cuts the heaviest effects and caps the arena at 60 FPS */
+  superBoost: boolean;
   /** opt-in features that trade frame time for effect; every flag is off by default */
   experimental: { adaptiveScale: boolean; hqMotionBlur: boolean; richLightning: boolean; particleBoost: boolean; frameHud: boolean };
   /** hide the "WAVE N CLEARED" banners, toasts and progress counter in battle */
@@ -213,8 +217,8 @@ export interface SaveData {
   liquidGlass: boolean;
   /** color palette selected in the theme picker */
   uiTheme: UiTheme;
-  language: "en" | "th" | "es" | "fr" | "de" | "ja" | "ko" | "zh";
-  toggleStyle: "fluorescent" | "incandescent" | "led" | "halogen";
+  language: "en" | "th" | "es" | "fr" | "de" | "ja" | "ko" | "zh" | "fil" | "ms" | "id" | "my" | "lo";
+  toggleStyle: "fluorescent" | "incandescent" | "led" | "halogen" | "edison";
   /** selected UI font id from the 80-font catalog in game/fonts.ts */
   font: string;
   /** crystal potions, spent on the crystal vault in the Towers tab */
@@ -236,7 +240,7 @@ export interface SaveData {
   /** draw between sim steps for smoother motion */
   frameInterp: boolean;
   /** interpolation curve used between fixed-step updates */
-  interpolationMethod: "linear" | "smoothstep" | "hermite";
+  interpolationMethod: "linear" | "smoothstep" | "hermite" | "extrapolate";
   /** effects budget: 0 = everything, 1 = reduced, 2 = minimal */
   fxq: number;
   /** camera shake on explosions */
@@ -339,6 +343,8 @@ export function defaultSave(): SaveData {
     volBoost: false,
     powerSaver: false,
     motionBlur: false,
+    motionBlurAmt: 100,
+    superBoost: false,
     experimental: { adaptiveScale: false, hqMotionBlur: false, richLightning: false, particleBoost: false, frameHud: false },
     hideWaveCleared: false,
     bassBoost: false,
@@ -416,6 +422,9 @@ function normalise(s: SaveData): SaveData {
   s.volBoost = !!s.volBoost;
   s.powerSaver = !!s.powerSaver;
   s.motionBlur = !!s.motionBlur;
+  s.motionBlurAmt = Math.round(Math.min(200, Math.max(0, Number.isFinite(s.motionBlurAmt) ? s.motionBlurAmt : 100)));
+  s.superBoost = !!s.superBoost;
+  s.frameInterp = s.frameInterp !== false;
   s.experimental = {
     adaptiveScale: !!s.experimental?.adaptiveScale,
     hqMotionBlur: !!s.experimental?.hqMotionBlur,
@@ -435,7 +444,7 @@ function normalise(s: SaveData): SaveData {
   s.musicRate = Math.round(Math.max(0.5, Math.min(2, Number.isFinite(s.musicRate) ? s.musicRate : 1)) * 100) / 100;
   s.musicName = typeof s.musicName === "string" ? s.musicName.slice(0, 160) : "";
   s.font = typeof s.font === "string" && s.font ? s.font : "rajdhani";
-  s.interpolationMethod = s.interpolationMethod === "linear" || s.interpolationMethod === "hermite" ? s.interpolationMethod : "smoothstep";
+  s.interpolationMethod = (["linear", "smoothstep", "hermite", "extrapolate"] as const).includes(s.interpolationMethod) ? s.interpolationMethod : "smoothstep";
   s.potions = Math.max(0, Number.isFinite(s.potions) ? Math.round(s.potions) : 0);
   s.crystals = s.crystals && typeof s.crystals === "object" ? s.crystals : {};
   for (const def of CRYSTALS) {
@@ -461,8 +470,8 @@ function normalise(s: SaveData): SaveData {
   s.antiAlias = s.antiAlias !== false;
   if (!UI_THEMES.some((theme) => theme.id === s.uiTheme)) s.uiTheme = "rift";
   // keep any supported language; anything unknown falls back to English
-  s.language = (["en", "th", "es", "fr", "de", "ja", "ko", "zh"] as const).includes(s.language) ? s.language : "en";
-  if (!["fluorescent", "incandescent", "led", "halogen"].includes(s.toggleStyle)) s.toggleStyle = "led";
+  s.language = (["en", "th", "es", "fr", "de", "ja", "ko", "zh", "fil", "ms", "id", "my", "lo"] as const).includes(s.language) ? s.language : "en";
+  if (!["fluorescent", "incandescent", "led", "halogen", "edison"].includes(s.toggleStyle)) s.toggleStyle = "led";
   s.autoSkipBossCut = s.autoSkipBossCut === true;
   s.heroAwn = s.heroAwn && typeof s.heroAwn === "object" ? s.heroAwn : {};
   // clamp every hero awakening pair into 0..HERO_AWAKENING_MAX_TIER

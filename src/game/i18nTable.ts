@@ -6,7 +6,8 @@
  * Dynamic toasts and canvas labels that interpolate numbers are covered by the
  * PATTERNS list at the bottom, which matches the English template.
  */
-import type { Language } from "./i18nExtras";
+import type { Language, LegacyLanguage } from "./i18nExtras";
+import { isNewLanguage, lookupNewRow } from "./i18nNew";
 
 type Row = [string, string, string, string, string, string, string, string];
 
@@ -521,9 +522,9 @@ const PATTERNS: Pattern[] = [
 ];
 
 const TABLE: Partial<Record<Language, Map<string, string>>> = {};
-const LANG_INDEX: Record<Exclude<Language, "en">, number> = { th: 1, es: 2, fr: 3, de: 4, ja: 5, ko: 6, zh: 7 };
+const LANG_INDEX: Record<LegacyLanguage, number> = { th: 1, es: 2, fr: 3, de: 4, ja: 5, ko: 6, zh: 7 };
 for (const row of ROWS) {
-  for (const lang of Object.keys(LANG_INDEX) as Exclude<Language, "en">[]) {
+  for (const lang of Object.keys(LANG_INDEX) as LegacyLanguage[]) {
     const value = row[LANG_INDEX[lang]];
     if (!value || value === row[0]) continue;
     let map = TABLE[lang];
@@ -542,6 +543,10 @@ export function lookupInterface(text: string, lang: Language): string | undefine
   if (!key) return undefined;
   const hit = TABLE[lang]?.get(key);
   if (hit) return hit;
+  if (isNewLanguage(lang)) {
+    const fresh = lookupNewRow(key, lang);
+    if (fresh) return fresh;
+  }
   for (const [re, build] of PATTERNS) {
     const m = key.match(re);
     if (!m) continue;

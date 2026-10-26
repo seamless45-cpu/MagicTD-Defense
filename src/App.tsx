@@ -6,6 +6,7 @@ import { sfx, setSfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTr
 import { loadSavedMusic, setMusicSettings } from "./game/music";
 import { useUiLanguage } from "./game/i18n";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
+import { ScreenStage } from "./components/ScreenStage";
 import { LaunchIntro, LoadingScreen, Home, Specials, Guild, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
 import Towers from "./screens/Towers";
@@ -294,6 +295,7 @@ export default function App() {
 
       {/* content — keyed so every tab change replays the entrance animation */}
       <div className="min-h-0 flex-1 px-3 pt-3">
+        <ScreenStage screenKey={screen}>
         <div key={screen} className="screen-enter h-full">
         {screen === "home" && (
           <Home
@@ -345,6 +347,7 @@ export default function App() {
           {screen === "mail" && <Mail save={save} mutate={mutate} push={push} />}
           {screen === "season" && <Season save={save} mutate={mutate} push={push} />}
         </div>
+        </ScreenStage>
       </div>
 
       {/* bottom nav */}

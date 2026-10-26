@@ -1,4 +1,7 @@
-export type Language = "en" | "th" | "es" | "fr" | "de" | "ja" | "ko" | "zh";
+import { isNewLanguage, lookupNewRow } from "./i18nNew";
+export type Language = "en" | "th" | "es" | "fr" | "de" | "ja" | "ko" | "zh" | "fil" | "ms" | "id" | "my" | "lo";
+/** the languages that have full per-language dictionaries */
+export type LegacyLanguage = Exclude<Language, "en" | "fil" | "ms" | "id" | "my" | "lo">;
 export const LANGUAGES: { id: Language; label: string }[] = [
   { id: "en", label: "English" },
   { id: "th", label: "ไทย" },
@@ -8,8 +11,13 @@ export const LANGUAGES: { id: Language; label: string }[] = [
   { id: "ja", label: "日本語" },
   { id: "ko", label: "한국어" },
   { id: "zh", label: "简体中文" },
+  { id: "fil", label: "Filipino" },
+  { id: "ms", label: "Bahasa Melayu" },
+  { id: "id", label: "Bahasa Indonesia" },
+  { id: "my", label: "မြန်မာ" },
+  { id: "lo", label: "ລາວ" },
 ];
-const dictionaries: Record<Exclude<Language, "en">, Record<string, string>> = {
+const dictionaries: Record<LegacyLanguage, Record<string, string>> = {
   th: {
     Settings: "ตั้งค่า",
     Home: "หน้าหลัก",
@@ -183,7 +191,7 @@ const dictionaries: Record<Exclude<Language, "en">, Record<string, string>> = {
     "Spawn interval": "生成间隔",
   },
 };
-const additions: Record<Exclude<Language, "en">, Record<string, string>> = {
+const additions: Record<LegacyLanguage, Record<string, string>> = {
   th: {
     APP: "แอป",
     "Battle SFX": "เสียงประกอบเกม",
@@ -391,10 +399,10 @@ const additions: Record<Exclude<Language, "en">, Record<string, string>> = {
     Shield: "护盾",
   },
 };
-for (const lang of Object.keys(additions) as Exclude<Language, "en">[])
+for (const lang of Object.keys(additions) as LegacyLanguage[])
   Object.assign(dictionaries[lang], additions[lang]);
 const modeTranslations: Record<
-  Exclude<Language, "en">,
+  LegacyLanguage,
   Record<string, string>
 > = {
   th: {
@@ -448,10 +456,10 @@ const modeTranslations: Record<
       "在没有竞技奖励和压力的环境中，用可调敌人测试防御塔。",
   },
 };
-for (const lang of Object.keys(modeTranslations) as Exclude<Language, "en">[])
+for (const lang of Object.keys(modeTranslations) as LegacyLanguage[])
   Object.assign(dictionaries[lang], modeTranslations[lang]);
 const navigationTranslations: Record<
-  Exclude<Language, "en">,
+  LegacyLanguage,
   Record<string, string>
 > = {
   th: { Specials: "พิเศษ", Guild: "กิลด์", Mail: "จดหมาย", Season: "ซีซัน" },
@@ -472,15 +480,14 @@ const navigationTranslations: Record<
   ko: { Specials: "특별", Guild: "길드", Mail: "메일", Season: "시즌" },
   zh: { Specials: "特别", Guild: "公会", Mail: "邮件", Season: "赛季" },
 };
-for (const lang of Object.keys(navigationTranslations) as Exclude<
-  Language,
-  "en"
->[])
+for (const lang of Object.keys(navigationTranslations) as LegacyLanguage[])
   Object.assign(dictionaries[lang], navigationTranslations[lang]);
 
-const featureTranslations: Record<Exclude<Language, "en">, Record<string, string>> = {"th": {"Meteor": "อุกกาบาตลึกลับ", "Asteroid Drop": "ทิ้งดาวเคราะห์น้อย", "Meteor Shower": "ฝนอุกกาบาต", "Custom testing arena": "สนามทดสอบแบบกำหนดเอง", "Test towers against adjustable enemies with no competitive rewards or pressure.": "ทดสอบป้อมกับศัตรูที่ปรับค่าได้ ไม่มีรางวัลแข่งขันหรือแรงกดดัน", "SANDBOX CONTROLS": "ตัวควบคุมแซนด์บ็อกซ์", "Max-level owned towers": "ป้อมที่เป็นเจ้าของเลเวลสูงสุด", "Max awakenings": "ปลุกพลังสูงสุด", "Spawn interval": "ช่วงเวลาการเกิด", "Enemy HP": "พลังชีวิตศัตรู", "Speed": "ความเร็ว", "Shield": "โล่"}, "es": {"Meteor": "Meteorito místico", "Asteroid Drop": "Caída de asteroides", "Meteor Shower": "Lluvia de meteoritos", "Custom testing arena": "Arena de pruebas personalizable", "Test towers against adjustable enemies with no competitive rewards or pressure.": "Prueba torres contra enemigos ajustables, sin presión ni recompensas competitivas.", "SANDBOX CONTROLS": "CONTROLES DEL SANDBOX", "Max-level owned towers": "Torres propias al nivel máximo", "Max awakenings": "Despertar máximo", "Spawn interval": "Intervalo de aparición", "Enemy HP": "Vida enemiga", "Speed": "Velocidad", "Shield": "Escudo"}, "fr": {"Meteor": "Météore mystique", "Asteroid Drop": "Chute d’astéroïde", "Meteor Shower": "Pluie de météores", "Custom testing arena": "Arène de test personnalisable", "Test towers against adjustable enemies with no competitive rewards or pressure.": "Testez les tours contre des ennemis réglables, sans pression ni récompense compétitive.", "SANDBOX CONTROLS": "COMMANDES DU BAC À SABLE", "Max-level owned towers": "Tours possédées au niveau max", "Max awakenings": "Éveil maximal", "Spawn interval": "Intervalle d’apparition", "Enemy HP": "PV ennemis", "Speed": "Vitesse", "Shield": "Bouclier"}, "de": {"Meteor": "Mystischer Meteor", "Asteroid Drop": "Asteroidensturz", "Meteor Shower": "Meteorschauer", "Custom testing arena": "Anpassbare Testarena", "Test towers against adjustable enemies with no competitive rewards or pressure.": "Teste Türme gegen einstellbare Gegner ohne Druck oder Ranglistenbelohnungen.", "SANDBOX CONTROLS": "SANDBOX-STEUERUNG", "Max-level owned towers": "Eigene Türme auf Maximalstufe", "Max awakenings": "Maximale Erweckung", "Spawn interval": "Spawn-Intervall", "Enemy HP": "Gegner-LP", "Speed": "Tempo", "Shield": "Schild"}, "ja": {"Meteor": "ミスティカルメテオ", "Asteroid Drop": "アステロイドドロップ", "Meteor Shower": "メテオシャワー", "Custom testing arena": "カスタムテストアリーナ", "Test towers against adjustable enemies with no competitive rewards or pressure.": "競争報酬やプレッシャーなしで、設定可能な敵にタワーを試そう。", "SANDBOX CONTROLS": "サンドボックス設定", "Max-level owned towers": "所持タワーを最大レベル", "Max awakenings": "覚醒最大", "Spawn interval": "出現間隔", "Enemy HP": "敵HP", "Speed": "速度", "Shield": "シールド"}, "ko": {"Meteor": "미스티컬 메테오", "Asteroid Drop": "소행성 낙하", "Meteor Shower": "유성우", "Custom testing arena": "맞춤형 테스트 아레나", "Test towers against adjustable enemies with no competitive rewards or pressure.": "경쟁 보상이나 압박 없이 설정 가능한 적을 상대로 타워를 시험하세요.", "SANDBOX CONTROLS": "샌드박스 설정", "Max-level owned towers": "보유 타워 최대 레벨", "Max awakenings": "최대 각성", "Spawn interval": "생성 간격", "Enemy HP": "적 체력", "Speed": "속도", "Shield": "방패"}, "zh": {"Meteor": "神秘陨星", "Asteroid Drop": "小行星坠落", "Meteor Shower": "流星雨", "Custom testing arena": "可自定义的测试竞技场", "Test towers against adjustable enemies with no competitive rewards or pressure.": "在没有竞技奖励和压力的环境中，用可调敌人测试防御塔。", "SANDBOX CONTROLS": "沙盒设置", "Max-level owned towers": "已拥有塔升至最高等级", "Max awakenings": "最高觉醒", "Spawn interval": "生成间隔", "Enemy HP": "敌人生命值", "Speed": "速度", "Shield": "护盾"}};
-for (const lang of Object.keys(featureTranslations) as Exclude<Language, "en">[]) Object.assign(dictionaries[lang], featureTranslations[lang]);
+const featureTranslations: Record<LegacyLanguage, Record<string, string>> = {"th": {"Meteor": "อุกกาบาตลึกลับ", "Asteroid Drop": "ทิ้งดาวเคราะห์น้อย", "Meteor Shower": "ฝนอุกกาบาต", "Custom testing arena": "สนามทดสอบแบบกำหนดเอง", "Test towers against adjustable enemies with no competitive rewards or pressure.": "ทดสอบป้อมกับศัตรูที่ปรับค่าได้ ไม่มีรางวัลแข่งขันหรือแรงกดดัน", "SANDBOX CONTROLS": "ตัวควบคุมแซนด์บ็อกซ์", "Max-level owned towers": "ป้อมที่เป็นเจ้าของเลเวลสูงสุด", "Max awakenings": "ปลุกพลังสูงสุด", "Spawn interval": "ช่วงเวลาการเกิด", "Enemy HP": "พลังชีวิตศัตรู", "Speed": "ความเร็ว", "Shield": "โล่"}, "es": {"Meteor": "Meteorito místico", "Asteroid Drop": "Caída de asteroides", "Meteor Shower": "Lluvia de meteoritos", "Custom testing arena": "Arena de pruebas personalizable", "Test towers against adjustable enemies with no competitive rewards or pressure.": "Prueba torres contra enemigos ajustables, sin presión ni recompensas competitivas.", "SANDBOX CONTROLS": "CONTROLES DEL SANDBOX", "Max-level owned towers": "Torres propias al nivel máximo", "Max awakenings": "Despertar máximo", "Spawn interval": "Intervalo de aparición", "Enemy HP": "Vida enemiga", "Speed": "Velocidad", "Shield": "Escudo"}, "fr": {"Meteor": "Météore mystique", "Asteroid Drop": "Chute d’astéroïde", "Meteor Shower": "Pluie de météores", "Custom testing arena": "Arène de test personnalisable", "Test towers against adjustable enemies with no competitive rewards or pressure.": "Testez les tours contre des ennemis réglables, sans pression ni récompense compétitive.", "SANDBOX CONTROLS": "COMMANDES DU BAC À SABLE", "Max-level owned towers": "Tours possédées au niveau max", "Max awakenings": "Éveil maximal", "Spawn interval": "Intervalle d’apparition", "Enemy HP": "PV ennemis", "Speed": "Vitesse", "Shield": "Bouclier"}, "de": {"Meteor": "Mystischer Meteor", "Asteroid Drop": "Asteroidensturz", "Meteor Shower": "Meteorschauer", "Custom testing arena": "Anpassbare Testarena", "Test towers against adjustable enemies with no competitive rewards or pressure.": "Teste Türme gegen einstellbare Gegner ohne Druck oder Ranglistenbelohnungen.", "SANDBOX CONTROLS": "SANDBOX-STEUERUNG", "Max-level owned towers": "Eigene Türme auf Maximalstufe", "Max awakenings": "Maximale Erweckung", "Spawn interval": "Spawn-Intervall", "Enemy HP": "Gegner-LP", "Speed": "Tempo", "Shield": "Schild"}, "ja": {"Meteor": "ミスティカルメテオ", "Asteroid Drop": "アステロイドドロップ", "Meteor Shower": "メテオシャワー", "Custom testing arena": "カスタムテストアリーナ", "Test towers against adjustable enemies with no competitive rewards or pressure.": "競争報酬やプレッシャーなしで、設定可能な敵にタワーを試そう。", "SANDBOX CONTROLS": "サンドボックス設定", "Max-level owned towers": "所持タワーを最大レベル", "Max awakenings": "覚醒最大", "Spawn interval": "出現間隔", "Enemy HP": "敵HP", "Speed": "速度", "Shield": "シールド"}, "ko": {"Meteor": "미스티컬 메테오", "Asteroid Drop": "소행성 낙하", "Meteor Shower": "유성우", "Custom testing arena": "맞춤형 테스트 아레나", "Test towers against adjustable enemies with no competitive rewards or pressure.": "경쟁 보상이나 압박 없이 설정 가능한 적을 상대로 타워를 시험하세요.", "SANDBOX CONTROLS": "샌드박스 설정", "Max-level owned towers": "보유 타워 최대 레벨", "Max awakenings": "최대 각성", "Spawn interval": "생성 간격", "Enemy HP": "적 체력", "Speed": "속도", "Shield": "방패"}, "zh": {"Meteor": "神秘陨星", "Asteroid Drop": "小行星坠落", "Meteor Shower": "流星雨", "Custom testing arena": "可自定义的测试竞技场", "Test towers against adjustable enemies with no competitive rewards or pressure.": "在没有竞技奖励和压力的环境中，用可调敌人测试防御塔。", "SANDBOX CONTROLS": "沙盒设置", "Max-level owned towers": "已拥有塔升至最高等级", "Max awakenings": "最高觉醒", "Spawn interval": "生成间隔", "Enemy HP": "敌人生命值", "Speed": "速度", "Shield": "护盾"}};
+for (const lang of Object.keys(featureTranslations) as LegacyLanguage[]) Object.assign(dictionaries[lang], featureTranslations[lang]);
 
 export function t(key: string, language: Language = "en"): string {
-  return language === "en" ? key : dictionaries[language][key] || key;
+  if (language === "en") return key;
+  if (isNewLanguage(language)) return lookupNewRow(key, language) ?? key;
+  return dictionaries[language][key] || key;
 }

@@ -39,6 +39,18 @@ serves the app at `/` (it rewrites `/` to `app.html`).
 **After changing game code, run `npm run build` and commit `index.html`**, otherwise the
 published site keeps serving the previous version.
 
+## Latest round 4 pass
+
+- **Languages**: Filipino, Malay, Indonesian, Burmese and Lao join the language picker. The core interface (navigation, shell actions, Settings, the battle HUD basics, mode names and this round's new strings) is translated; any string not yet covered falls back to English. Burmese and Lao load Noto Sans Myanmar and Noto Sans Lao. The translations were written without native-speaker review.
+- **Motion blur strength** slider (Settings, 0–200%). The value turns red above 100%.
+- **Super Performance Booster** (Settings → Options): cuts the heaviest effects, skips motion blur and bloom, and caps the arena at 60 FPS.
+- **Interpolation**: a new *Extrapolate* method renders one step ahead to remove the one-step delay. Fixed: when a frame ran over budget, interpolation was switched off and the glide snapped to the newest state. The leftover fraction is now kept, so the glide continues on slow frames.
+- **Hit effects**: shock and wave rings are drawn from one cached sprite per colour instead of a new gradient per particle per frame. Impacts drop their decorative layers (rune, embers, sparkle, extra debris) when the effect budget is near full.
+- **Screen transitions**: screens slide in from outside the right edge, and the previous screen slides out past the left edge (keyframes).
+- **Chest opening**: a sunburst of rays fans out behind the chest during the burst, and the lid pops clear on an arc.
+- **Light bulb toggle**: a new *Edison bulb* switch style whose carbon filament warms in steps.
+- **Loading screen** follows real work: the window, webfonts, the EDO font, the icon images and the core sound samples. The bar moves with completed tasks, and a stalled task counts as done after 9 s.
+
 ## Latest balance and interface pass
 
 - **Demon Execution**: one target per strike, boss damage is 50% of max HP. A volley fires one strike per tower point, and the 3 s cooldown shortens by the points buff (+25% per point). Its lightning uses a deep-red palette with +50% jitter and +1 jaggedness.
