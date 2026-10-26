@@ -944,6 +944,32 @@ const fxGov = { avg: 5, q: 1 };
 let fxUserLevel = 0;
 /** how many FX we are allowed to throw this frame (1 = everything) */
 const fxQ = () => (fxUserLevel >= 2 ? 0.25 : fxUserLevel === 1 ? Math.min(fxGov.q, 0.7) : fxGov.q);
+const ringSprites = new Map<string, HTMLCanvasElement>();
+/** pre-rendered soft annulus, drawn scaled: one gradient per colour instead of one per particle per frame */
+function ringSprite(color: string): HTMLCanvasElement | null {
+  let c = ringSprites.get(color);
+  if (c) return c;
+  try {
+    c = document.createElement("canvas");
+    c.width = 128;
+    c.height = 128;
+    const x = c.getContext("2d") as CanvasRenderingContext2D | null;
+    if (!x) return null;
+    const gr = x.createRadialGradient(64, 64, 33.28, 64, 64, 64);
+    gr.addColorStop(0, "rgba(0,0,0,0)");
+    gr.addColorStop(0.62, color);
+    gr.addColorStop(0.86, "rgba(255,255,255,0.92)");
+    gr.addColorStop(1, "rgba(0,0,0,0)");
+    x.fillStyle = gr;
+    x.beginPath();
+    x.arc(64, 64, 64, 0, Math.PI * 2);
+    x.fill();
+    ringSprites.set(color, c);
+    return c;
+  } catch {
+    return null;
+  }
+}
 const glowSprites = new Map<string, HTMLCanvasElement>();
 function glowSprite(color: string): HTMLCanvasElement | null {
   let c = glowSprites.get(color);
@@ -2620,10 +2646,15 @@ export default function Battle({
       shock(x, y, color, r * 0.8, heavy ? 0.66 : 0.48);
       shock(x, y, "#fff8e8", r * 0.4, heavy ? 0.36 : 0.28);
       rune(x, y, color, r * (heavy ? 1.15 : 0.9), heavy ? 0.7 : 0.5);
-      burst(x, y, color, heavy ? 20 : 10, heavy ? 320 : 220);
-      shards(x, y, heavy ? "#fff4d6" : color, heavy ? 14 : 6, heavy ? 300 : 200);
-      embers(x, y, color, heavy ? 10 : 4);
-      sparkle(x, y, "#fff8e8", heavy ? 16 : 8, r * 0.9);
+      // budget: when the frame is already loaded, keep the core detonation and
+      // shed the decorative layers instead of stacking more additive sprites
+      const lean = fxQ() < 0.75 || g.parts.length > partCap() * 0.7;
+      burst(x, y, color, heavy ? (lean ? 10 : 20) : lean ? 5 : 10, heavy ? 320 : 220);
+      shards(x, y, heavy ? "#fff4d6" : color, heavy ? (lean ? 6 : 14) : lean ? 2 : 6, heavy ? 300 : 200);
+      if (!lean) {
+        embers(x, y, color, heavy ? 10 : 4);
+        sparkle(x, y, "#fff8e8", heavy ? 16 : 8, r * 0.9);
+      }
     };
 
     /** full-screen colour wash */
@@ -9117,16 +9148,20 @@ export default function Battle({
           // leaves a hot white leading edge. Reads clearly on every background.
           const ease = 1 - Math.pow(1 - t, 3);
           const r = p.size * (0.3 + ease * 2.3);
-          const grad = ctx.createRadialGradient(p.x, p.y, r * 0.52, p.x, p.y, r);
-          grad.addColorStop(0, "transparent");
-          grad.addColorStop(0.62, p.color);
-          grad.addColorStop(0.86, "rgba(255,255,255,0.92)");
-          grad.addColorStop(1, "transparent");
           ctx.globalAlpha = al * al * 0.9;
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-          ctx.fill();
+          const rs = ringSprite(p.color);
+          if (rs) {
+            ctx.drawImage(rs, p.x - r, p.y - r, r * 2, r * 2);
+          } else {
+            const grad = ctx.createRadialGradient(p.x, p.y, r * 0.52, p.x, p.y, r);
+            grad.addColorStop(0, "transparent");
+            grad.addColorStop(0.62, p.color);
+            grad.addColorStop(1, "transparent");
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
           ctx.globalAlpha = al * 0.85;
           ctx.strokeStyle = "#ffffff";
           ctx.lineWidth = Math.max(0.7, 2.4 * al * al);
@@ -9276,18 +9311,23 @@ export default function Battle({
           // ground-plane shockwave: a flattened annulus that races outward
           const ease = 1 - Math.pow(1 - t, 4);
           const r = p.size * (0.2 + ease * 2.4);
-          const grad = ctx.createRadialGradient(p.x, p.y, r * 0.42, p.x, p.y, r);
-          grad.addColorStop(0, "transparent");
-          grad.addColorStop(0.7, p.color + "aa");
-          grad.addColorStop(1, "transparent");
           ctx.globalAlpha = al * 0.7;
           ctx.save();
           ctx.translate(p.x, p.y);
           ctx.scale(1, 0.48);
-          ctx.fillStyle = grad;
-          ctx.beginPath();
-          ctx.arc(0, 0, r, 0, Math.PI * 2);
-          ctx.fill();
+          const rsw = ringSprite(p.color);
+          if (rsw) {
+            ctx.drawImage(rsw, -r, -r, r * 2, r * 2);
+          } else {
+            const grad = ctx.createRadialGradient(0, 0, r * 0.42, 0, 0, r);
+            grad.addColorStop(0, "transparent");
+            grad.addColorStop(0.7, p.color + "aa");
+            grad.addColorStop(1, "transparent");
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(0, 0, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
           ctx.strokeStyle = "#ffffff";
           ctx.globalAlpha = al * 0.4;
           ctx.lineWidth = 1.6;
@@ -9543,8 +9583,10 @@ export default function Battle({
       const shakeVelocity = Math.hypot(shakeVelX, shakeVelY);
       const shakeMag = Math.hypot(shakeX, shakeY);
       const motion = Math.max(shakeVelocity, shakeMag * 0.35);
-      const blurAmt = Math.min(1, Math.max(0, motion - 0.6) * 0.08);
-      const useMotionBlur = blurAmt > 0.04 && saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver;
+      // strength slider: 0..200%, 100% is the tuned default
+      const amtMul = Math.min(200, Math.max(0, saveRef.current.motionBlurAmt ?? 100)) / 100;
+      const blurAmt = Math.min(1, Math.max(0, motion - 0.6) * 0.08) * amtMul;
+      const useMotionBlur = blurAmt > 0.04 && saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver && !saveRef.current.superBoost;
       const tw = trailCanvas.width;
       const th = trailCanvas.height;
       // world units -> trail-buffer pixels (the buffer is half resolution)
@@ -9553,8 +9595,8 @@ export default function Battle({
         currentCtx.clearRect(0, 0, tw, th);
         currentCtx.drawImage(renderCanvas, 0, 0, tw, th);
         // smear vector in trail pixels, clamped so a huge hit never tears the frame apart
-        let vx = (shakeVelocity > 0.2 ? shakeVelX : shakeX * 0.5) * toTrail * 2.2;
-        let vy = (shakeVelocity > 0.2 ? shakeVelY : shakeY * 0.5) * toTrail * 2.2;
+        let vx = (shakeVelocity > 0.2 ? shakeVelX : shakeX * 0.5) * toTrail * 2.2 * amtMul;
+        let vy = (shakeVelocity > 0.2 ? shakeVelY : shakeY * 0.5) * toTrail * 2.2 * amtMul;
         const vl = Math.hypot(vx, vy);
         const maxLen = 5 + blurAmt * 9;
         if (vl > maxLen) {
@@ -9610,8 +9652,9 @@ export default function Battle({
       raf = requestAnimationFrame(loop);
       if (document.hidden) return;
       const ps = !!saveRef.current.powerSaver;
-      // power saving wins over the manual cap: never above 30 FPS
-      const cap = ps ? Math.min(30, saveRef.current.maxFps || 30) : saveRef.current.maxFps || 0;
+      const sb = !!saveRef.current.superBoost;
+      // power saving wins over the manual cap: never above 30 FPS; super booster caps at 60
+      const cap = ps ? Math.min(30, saveRef.current.maxFps || 30) : sb ? Math.min(60, saveRef.current.maxFps || 60) : saveRef.current.maxFps || 0;
       if (cap > 0 && now - lastDraw < 1000 / cap - 0.6) return;
       lastDraw = now;
 
@@ -9620,7 +9663,7 @@ export default function Battle({
         last = now;
         if (!pausedDraw) {
           renderAlpha = 1;
-          fxUserLevel = ps ? 2 : saveRef.current.fxq || 0;
+          fxUserLevel = ps || sb ? 2 : saveRef.current.fxq || 0;
           draw();
           pausedDraw = true;
         }
@@ -9641,15 +9684,22 @@ export default function Battle({
         steps++;
       }
       // fell too far behind: drop the backlog and draw the true state
-      const dropped = acc >= STEP;
-      if (dropped) acc = 0;
-      rawRenderAlpha = dropped ? 1 : Math.max(0, Math.min(1, acc / STEP));
+      // Backlog: whole steps the loop could not afford are discarded, but the
+      // fraction left over is kept. Snapping alpha to 1 here (the old code) turned
+      // interpolation off on exactly the slow frames where the glide matters.
+      if (acc >= STEP) acc = acc % STEP;
+      rawRenderAlpha = Math.max(0, Math.min(1, acc / STEP));
+      // linear/hermite use the raw step fraction; smoothstep eases it;
+      // extrapolate runs past the last step (1 + fraction) to remove the one-step lag
+      const im = saveRef.current.interpolationMethod;
       renderAlpha = saveRef.current.frameInterp && !ps
-        ? saveRef.current.interpolationMethod === "smoothstep"
+        ? im === "smoothstep"
           ? rawRenderAlpha * rawRenderAlpha * (3 - 2 * rawRenderAlpha)
-          : rawRenderAlpha
+          : im === "extrapolate"
+            ? 1 + rawRenderAlpha
+            : rawRenderAlpha
         : 1;
-      fxUserLevel = ps ? 2 : saveRef.current.fxq || 0;
+      fxUserLevel = ps || sb ? 2 : saveRef.current.fxq || 0;
       const drawStart = performance.now();
       draw();
       // render FPS (not simulation steps) so speed ×2 does not read as 120fps

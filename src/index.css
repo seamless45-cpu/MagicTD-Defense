@@ -5950,3 +5950,32 @@ html[data-ui-theme="liquid"] [class*="rounded"]:not([class*="rounded-2xl"]):not(
 .power-saver .ld-fill::after {
   animation: none !important;
 }
+
+/* ---------- Round 4: screen slide, chest rework, Edison bulb toggle ---------- */
+/* Screens slide in from outside the right edge and the old one slides out past the left edge. */
+.screen-stage { position: relative; overflow-x: clip; }
+.screen-stage > .screen-enter { animation: screenSlideIn 0.48s cubic-bezier(0.2, 0.85, 0.25, 1) both; }
+.screen-stage > .screen-exit { position: absolute; inset: 0; z-index: 0; pointer-events: none; animation: screenSlideOut 0.38s cubic-bezier(0.5, 0, 0.75, 0) both; }
+@keyframes screenSlideIn { from { transform: translateX(100%); } to { transform: translateX(0); } }
+@keyframes screenSlideOut { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+.calm .screen-stage > .screen-enter { animation: none; }
+.calm .screen-exit { display: none; }
+
+/* chest rework: sunburst rays fan out behind the chest while the lid pops clear */
+.chest-rays { position: absolute; left: 50%; top: 50%; width: 360px; height: 360px; margin: -180px 0 0 -180px; border-radius: 50%; pointer-events: none; background: repeating-conic-gradient(from 0deg, rgba(255, 240, 190, 0.5) 0deg 7deg, transparent 7deg 22deg); -webkit-mask: radial-gradient(circle, #000 10%, transparent 68%); mask: radial-gradient(circle, #000 10%, transparent 68%); animation: chestRays 1.6s linear both, chestRaysFade 1.6s ease-out both; will-change: transform, opacity; }
+@keyframes chestRays { from { transform: rotate(0deg) scale(0.4); } 30% { transform: rotate(40deg) scale(1); } to { transform: rotate(120deg) scale(1.25); } }
+@keyframes chestRaysFade { 0% { opacity: 0; } 18% { opacity: 1; } 100% { opacity: 0; } }
+.chest-lid-off { animation: chestLidPop 0.72s cubic-bezier(0.2, 1.25, 0.4, 1) both; }
+@keyframes chestLidPop { 0% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(-10px, -30px) rotate(-22deg); } 100% { transform: translate(-16px, -46px) rotate(-34deg); } }
+.calm .chest-rays, .calm .chest-lid-off { animation: none; }
+
+/* edison: pear-shaped bulb; the carbon filament heats up in steps */
+html[data-toggle-style="edison"] .knob-head { width: 26px; height: 30px; top: 6px; border-radius: 50% 50% 46% 46%; background: radial-gradient(circle at 40% 30%, #ffffff, #e9e2d0 60%, #8a7f6a); border-color: #b9ab8a; }
+html[data-toggle-style="edison"] .knob.on .knob-head { transform: translateX(38px); background: radial-gradient(circle at 40% 35%, #fff7d6, #ffd27a 45%, #9a5a1c); box-shadow: 0 0 22px #ffb84f99; }
+html[data-toggle-style="edison"] .knob.on .knob-rail { animation: edisonWarm 0.9s steps(4, end) both; }
+@keyframes edisonWarm { 0% { filter: brightness(0.6); } 25% { filter: brightness(0.8); } 50% { filter: brightness(1.05); } 100% { filter: brightness(1.2); } }
+html[data-toggle-style="edison"] .knob.on .knob-glow { background: linear-gradient(90deg, #ffb13b06, #ffb13b99); box-shadow: inset 0 0 14px #ffb13b66; }
+
+/* Burmese and Lao need their own script fonts; Rajdhani has no glyphs for either. */
+html:lang(my), html:lang(my) body { font-family: "Noto Sans Myanmar", "Rajdhani", system-ui, sans-serif; }
+html:lang(lo), html:lang(lo) body { font-family: "Noto Sans Lao", "Rajdhani", system-ui, sans-serif; }

@@ -1641,6 +1641,7 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
             )}
             {phase === "burst" && (
               <>
+                <span className="chest-rays" />
                 <span className="chest-blastwave absolute" style={{ background: `radial-gradient(circle, #ffffff, ${data.color}00 62%)` }} />
                 {embers.map((e) => (
                   <span

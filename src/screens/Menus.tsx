@@ -58,6 +58,7 @@ import {
   UI_THEMES,
 } from "../game/save";
 import { sfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost } from "../game/audio";
+import { coreSampleFiles } from "../game/sfxSamples";
 import { clearMusic, getMusicSnapshot, loadSavedMusic, pauseMusic, subscribeMusic, setMusicSettings, toggleMusic, uploadMusic, type MusicSnapshot } from "../game/music";
 import {
   ChipIcon,
@@ -261,13 +262,48 @@ const LOAD_TIPS = [
   "Tap any tower in the Towers tab for its full stat sheet.",
 ];
 
-const LOAD_TIME = 2200;
-
 /**
  * The loading screen: logo and title up top, and a single rocket car screaming
  * along a light-track at the bottom. The car's position *is* the progress bar —
  * when the track fills it blasts off and the game takes over.
  */
+/** the real assets the first battle needs, each with a weight in the progress bar */
+function loadTasks(): { w: number; run: () => Promise<unknown> }[] {
+  const url = (path: string) => {
+    try {
+      return new URL(path, document.baseURI).href;
+    } catch {
+      return path;
+    }
+  };
+  const fetchBytes = (path: string) =>
+    fetch(url(path), { cache: "force-cache" }).then((r) => {
+      if (!r.ok) throw new Error(path);
+      return r.arrayBuffer();
+    });
+  // icons are fetched (not decoded) so the browser cache is warm for the shell's
+  // own <img> requests; fetch also fails fast in environments without images
+  const decodeImage = (path: string) => fetchBytes(path);
+  const windowReady = () =>
+    document.readyState === "complete"
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => window.addEventListener("load", () => resolve(), { once: true }));
+  const fontsReady = () => {
+    const fs = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts;
+    return fs?.ready ?? Promise.resolve();
+  };
+  const sampleTasks = coreSampleFiles().map((file) => ({ w: 0.4, run: () => fetchBytes(`sfx/${file}`) }));
+  return [
+    { w: 3, run: windowReady },
+    { w: 3, run: fontsReady },
+    { w: 2, run: () => fetchBytes("fonts/edo.ttf") },
+    { w: 1, run: () => decodeImage("icons/icon-192.png") },
+    { w: 1, run: () => decodeImage("icons/icon-512.png") },
+    { w: 1, run: () => decodeImage("icons/favicon-64.png") },
+    ...sampleTasks,
+  ];
+}
+
 export function LoadingScreen({ onDone }: { onDone: () => void }) {
   const [p, setP] = useState(0);
   const [launching, setLaunching] = useState(false);
@@ -324,41 +360,52 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
    * frames of the game then reflowed. The hard cap keeps a stuck font request
    * from stranding the player on the loading screen.
    */
+  /**
+   * Real loading. The bar follows the resources the game actually needs: the
+   * window, the webfonts, the EDO display font, the icon images and the core
+   * sound samples. Each task counts once it has finished (or failed, or stalled
+   * past its timeout), so the car tracks real work instead of a fixed clock.
+   * The bar eases toward the true fraction and never runs ahead of it.
+   */
   useEffect(() => {
+    let cancelled = false;
     let raf = 0;
-    // "interactive" already means the document is parsed and the bundle ran
-    let shell = document.readyState !== "loading";
-    let fonts = true;
-    const markShell = () => {
-      shell = true;
-    };
-    const markFonts = () => {
-      fonts = true;
-    };
-    window.addEventListener("load", markShell, { once: true });
-    const fontSet = (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts;
-    if (fontSet?.ready) {
-      fonts = false;
-      fontSet.ready.then(markFonts, markFonts);
+    const tasks = loadTasks();
+    const total = tasks.reduce((a, task) => a + task.w, 0) || 1;
+    let loaded = 0;
+    for (const task of tasks) {
+      const stall = new Promise<void>((resolve) => setTimeout(resolve, 4000));
+      Promise.race([task.run().catch(() => {}), stall]).then(() => {
+        if (!cancelled) loaded += task.w;
+      });
     }
+    // hard cap: whatever is still pending after 5 s is counted as done, so a
+    // bad network can never strand the player on the loading screen
+    const cap = setTimeout(() => {
+      if (!cancelled) loaded = total;
+    }, 5000);
     const t0 = performance.now();
+    let shown = 0;
     const tick = (t: number) => {
-      if (doneRef.current) return;
-      const el = t - t0;
-      const raw = Math.min(1, el / LOAD_TIME);
-      setP(raw);
-      const isReady = shell && fonts;
-      if (isReady && !readyRef.current) {
+      if (doneRef.current || cancelled) return;
+      const target = Math.min(1, loaded / total);
+      // ease toward the real fraction; a small floor keeps the car moving
+      shown = Math.min(target, shown + Math.max(0.004, (target - shown) * 0.14));
+      setP(shown);
+      if (!readyRef.current && loaded >= total) {
         readyRef.current = true;
         setReady(true);
       }
-      if (raw < 1 || (!isReady && el < LOAD_TIME + 2600)) raf = requestAnimationFrame(tick);
-      else finish(raw);
+      // a short floor so the car lap is always seen, even on a fast cache hit
+      const seen = t - t0 >= 900;
+      if (readyRef.current && seen && shown >= 0.985) finish(shown);
+      else raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => {
+      cancelled = true;
       cancelAnimationFrame(raf);
-      window.removeEventListener("load", markShell);
+      clearTimeout(cap);
     };
   }, [finish]);
 
@@ -2459,6 +2506,7 @@ export function SettingsModal({
     ["Hide Notifications", "hideNotifs", "Mutes toast popups and battle callouts — rewards still land", "bell", "#ff9be9"],
     ["Hide Wave Cleared", "hideWaveCleared", "Hides the WAVE CLEARED banners, toasts and counter in battle", "guides", "#7ce7ff"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
+    ["Super Performance Booster", "superBoost", "Cuts the heaviest effects, skips motion blur and bloom, and caps the arena at 60 FPS", "power", "#3dff8e"],
     ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffcf4d"],
     ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
   ];
@@ -2472,7 +2520,7 @@ export function SettingsModal({
       <div className="mt-2 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="toggle-style-picker">
         <div className="mb-2"><div className="font-bold">Toggle mechanism</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose how the switch looks and warms up when turned on.</div></div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {([ ["fluorescent", "Fluorescent tube", "Flicker-start glow"], ["incandescent", "Incandescent bulb", "Warm filament fade"], ["led", "LED bulb", "Instant diode"], ["halogen", "Halogen", "Quartz flash-on"] ] as const).map(([id, label, desc]) => (
+          {([ ["fluorescent", "Fluorescent tube", "Flicker-start glow"], ["incandescent", "Incandescent bulb", "Warm filament fade"], ["led", "LED bulb", "Instant diode"], ["halogen", "Halogen", "Quartz flash-on"], ["edison", "Edison bulb", "Carbon filament warms in steps"] ] as const).map(([id, label, desc]) => (
             <button key={id} type="button" aria-pressed={save.toggleStyle === id} data-testid={`toggle-style-${id}`} onClick={() => { sfx.uiTab(); mutate((s) => { s.toggleStyle = id; }); }} className={`toggle-style-choice ${save.toggleStyle === id ? "active" : ""}`}><span className={`toggle-style-lamp lamp-${id}`} aria-hidden="true" /><span className="block text-[10px] font-bold leading-tight">{label}</span><span className="mt-0.5 block text-[9px] text-[var(--dim)]">{desc}</span></button>
           ))}
         </div>
@@ -2653,6 +2701,25 @@ export function SettingsModal({
               else sfx.uiOff();
             }}
           />
+        </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="motion-blur-amt-row">
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Motion Blur Strength</div>
+            <div className="text-[11px] font-semibold text-[var(--dim)]">100% is the tuned default. Above 100% the smear gets heavy and can hide enemies.</div>
+          </div>
+          <input
+            type="range"
+            min="0"
+            max="200"
+            step="5"
+            value={save.motionBlurAmt}
+            aria-label="Motion blur strength"
+            data-testid="motion-blur-amt"
+            className="w-36"
+            style={{ accentColor: save.motionBlurAmt > 100 ? "#ff315c" : "#35e0ff" }}
+            onChange={(e) => { const motionBlurAmt = Number(e.target.value); mutate((s) => { s.motionBlurAmt = motionBlurAmt; }); }}
+          />
+          <span data-testid="motion-blur-amt-value" className="w-12 text-right font-bold" style={{ color: save.motionBlurAmt > 100 ? "#ff315c" : undefined }}>{save.motionBlurAmt}%</span>
         </div>
         <div className="text-[10px] font-semibold text-[var(--dim)]">
           Shake is pure random offset per axis at 120 Hz — no sway, rotation or zoom. Intensity 0% keeps the FX but holds the camera still.
@@ -2872,7 +2939,8 @@ export function SettingsModal({
         ))}
         <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
           <div className="min-w-0 flex-1"><div className="font-bold">Interpolation Method</div><div className="text-xs font-semibold text-[var(--dim)]">Hermite uses velocity-aware, monotonic easing; Smoothstep or Linear remain available.</div></div>
-          <select aria-label="Interpolation Method" className="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-xs" value={save.interpolationMethod} onChange={(e) => mutate((s) => { const method = e.target.value; s.interpolationMethod = method === "linear" || method === "hermite" ? method : "smoothstep"; })}><option value="linear">Linear</option><option value="smoothstep">Smoothstep</option><option value="hermite">Hermite</option></select>
+          <select aria-label="Interpolation Method" className="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-xs" value={save.interpolationMethod} onChange={(e) => mutate((s) => { const method = e.target.value; s.interpolationMethod = (["linear", "smoothstep", "hermite", "extrapolate"] as const).includes(method as never) ? (method as typeof s.interpolationMethod) : "smoothstep"; })}><option value="linear">Linear</option><option value="smoothstep">Smoothstep</option><option value="hermite">Hermite</option>
+          <option value="extrapolate">Extrapolate (lowest latency)</option></select>
         </div>
       </div>
 
