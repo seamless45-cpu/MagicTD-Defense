@@ -1,3 +1,4 @@
+import { routeMusicElement, resumeSampleEngine } from "./sfxSamples";
 export interface MusicSettings {
   volume: number;
   start: number;
@@ -184,6 +185,9 @@ export async function toggleMusic() {
   if (!audio?.src) return false;
   if (audio.paused) {
     if (audio.currentTime < settings.start || (settings.end > 0 && audio.currentTime >= settings.end)) audio.currentTime = settings.start;
+    // music runs through the mixer (EQ, boosts) once the sample bus exists
+    resumeSampleEngine();
+    routeMusicElement(audio);
     try { await audio.play(); return true; } catch { return false; }
   }
   pauseMusic();

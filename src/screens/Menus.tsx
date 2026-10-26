@@ -14,11 +14,12 @@ import {
   taskProgress,
   tasksReady,
   tasksRemaining,
+  INTERP_METHODS,
+  INTERP_LABELS,
+  type InterpMethod,
 } from "../game/save";
 import {
   todayStr,
-  hardcorePlaysLeft,
-  superHardcorePlaysLeft,
   defaultSave,
   importSave,
   persistSave,
@@ -57,7 +58,19 @@ import {
   GUILD_DONATIONS_PER_DAY,
   UI_THEMES,
 } from "../game/save";
-import { sfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost } from "../game/audio";
+import { useRecorder } from "../components/ScreenRecorder";
+import { startRecording, stopRecording } from "../game/recorder";
+import { sfx, setVolume, setVolumeBoost, setSuperVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost } from "../game/audio";
+
+/** equalizer presets: 60 · 250 · 1k · 4k · 12k Hz, in dB */
+const EQ_PRESETS: Record<string, number[]> = {
+  Flat: [0, 0, 0, 0, 0],
+  Bass: [6, 3, 0, -1, -2],
+  Vocal: [-2, 0, 3, 4, 0],
+  Bright: [-2, -1, 0, 3, 6],
+  Loud: [4, 2, -1, 2, 4],
+};
+const EQ_BAND_LABELS = ["60 Hz", "250 Hz", "1 kHz", "4 kHz", "12 kHz"];
 import { coreSampleFiles } from "../game/sfxSamples";
 import { clearMusic, getMusicSnapshot, loadSavedMusic, pauseMusic, subscribeMusic, setMusicSettings, toggleMusic, uploadMusic, type MusicSnapshot } from "../game/music";
 import {
@@ -82,8 +95,6 @@ import {
 import {
   TOWERS,
   BATTLE_ROUNDS,
-  HARDCORE_DAILY_PLAYS,
-  SUPER_HARDCORE_WEEKLY_PLAYS,
   CHIPS,
   COMPETITION_TIERS,
   DAILY_REWARDS,
@@ -648,8 +659,8 @@ export function Home({
   };
 
   /** hero awakening tier + purchase (Magic Tokens) */
-  const awkTierOf = (slot: 0 | 1) => heroAwkTier(save, hero.id, slot);
-  const doHeroAwaken = (slot: 0 | 1) => {
+  const awkTierOf = (slot: number) => heroAwkTier(save, hero.id, slot);
+  const doHeroAwaken = (slot: number) => {
     const spec = heroAwkSpec(hero.id, slot);
     if (!spec) return;
     const cur = awkTierOf(slot);
@@ -736,8 +747,8 @@ export function Home({
                 <b className="num">{save.tokens}</b>
               </span>
             </div>
-            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {([0, 1] as const).map((slot) => {
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {([0, 1, 2] as const).filter((slot) => heroAwkSpec(hero.id, slot)).map((slot) => {
                 const spec = heroAwkSpec(hero.id, slot)!;
                 const tier = awkTierOf(slot);
                 const maxed = tier >= HERO_AWAKENING_MAX_TIER;
@@ -752,7 +763,7 @@ export function Home({
                   >
                     <div className="flex items-center gap-1.5">
                       <span className="text-[11.5px] font-bold text-[#ff9be9]">
-                        {slot === 0 ? "1" : "2"}. {spec.name}
+                        {slot + 1}. {spec.name}
                       </span>
                       {spec.passive && <span className="rounded bg-[#7ce7ff] px-1 text-[8.5px] font-black leading-tight text-black">PASSIVE</span>}
                     </div>
@@ -863,20 +874,20 @@ export function Home({
         <ModeCard
           accent="#ff315c"
           title="Hardcore"
-          sub={`${BATTLE_ROUNDS} rounds · 3 runs a day${save.hardcoreBest ? ` · best R${save.hardcoreBest}` : ""}`}
+          sub={`${BATTLE_ROUNDS} rounds · unlimited runs${save.hardcoreBest ? ` · best R${save.hardcoreBest}` : ""}`}
           body="Double spawns, a second gate, 10× enemy HP, enemies immune to crits, 25% faster enemies — and 5× the rewards."
           onClick={onHardcore}
           delay="180ms"
-          badge={hardcorePlaysLeft(save) > 0 ? `${hardcorePlaysLeft(save)}/${HARDCORE_DAILY_PLAYS} LEFT` : "NO RUNS LEFT"}
+          badge="NO LIMIT"
         />
         <ModeCard
           accent="#ff315c"
           title="Super Hardcore"
-          sub="12 rounds · one life · 3 runs a week"
+          sub="12 rounds · one life · unlimited runs"
           body="710× enemy HP, 75% faster enemies and 10× rewards. One leak ends the run."
           onClick={onSuperHardcore}
           delay="240ms"
-          badge={superHardcorePlaysLeft(save) > 0 ? `${superHardcorePlaysLeft(save)}/${SUPER_HARDCORE_WEEKLY_PLAYS} THIS WEEK` : "NO RUNS LEFT"}
+          badge="NO LIMIT"
         />
       </div>
 
@@ -2452,6 +2463,7 @@ export function SettingsModal({
   mutate: (fn: (s: SaveData) => void) => void;
   onClose: () => void;
 }) {
+  const rec = useRecorder();
   const [diagOpen, setDiagOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -2570,6 +2582,27 @@ export function SettingsModal({
           }}
         />
       </div>
+      <div className="row-card mt-1.5" data-testid="super-volume-row">
+        <SetIcon name="booster" color="#ff315c" />
+        <div className="min-w-0 flex-1">
+          <div className="font-bold">Super Volume Booster <span className="text-[10px] font-bold text-[#ff315c]">· 500%</span></div>
+          <div className="text-xs font-semibold text-[var(--dim)]">
+            Pushes every sound <b>and your personal music</b> to 500%. Very loud: the limiter tightens at this level, but protect your ears.
+          </div>
+        </div>
+        <KnobToggle
+          on={save.superVolBoost}
+          label="Super Volume Booster"
+          testId="toggle-superVolBoost"
+          onToggle={() => {
+            const next = !save.superVolBoost;
+            mutate((s) => { s.superVolBoost = next; });
+            setSuperVolumeBoost(next);
+            if (next) sfx.uiPop();
+            else sfx.uiOff();
+          }}
+        />
+      </div>
 
       <div className="mt-3 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="music-player">
         <div className="flex flex-wrap items-center gap-2">
@@ -2610,7 +2643,7 @@ export function SettingsModal({
       </div>
 
       <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {([['Bass Boost', 'bassBoost', 'Low-end +6 dB', setBassBoost], ['Treble Boost', 'trebleBoost', 'High-end +6 dB', setTrebleBoost]] as const).map(([label, key, desc, apply]) => (
+        {([['Bass Boost', 'bassBoost', 'Low-end +6 dB · effects & music', setBassBoost], ['Treble Boost', 'trebleBoost', 'High-end +6 dB · effects & music', setTrebleBoost]] as const).map(([label, key, desc, apply]) => (
           <div key={key} className="row-card" data-testid={`toggle-${key}`}>
             <SetIcon name="volume" color={key === "bassBoost" ? "#ff8a3d" : "#35e0ff"} />
             <div className="min-w-0 flex-1"><div className="font-bold">{label}</div><div className="text-[11px] font-semibold text-[var(--dim)]">{desc}</div></div>
@@ -2619,15 +2652,45 @@ export function SettingsModal({
         ))}
       </div>
       <div className="mt-2 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="sound-eq">
-        <div className="mb-2 font-bold">Sound EQ <span className="text-[10px] font-semibold text-[var(--dim)]">· Sound effects only</span></div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          {([['Bass', 'eqBass'], ['Mids', 'eqMid'], ['Treble', 'eqTreble']] as const).map(([label, key]) => (
-            <label key={key} className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">{label}<span className="ml-auto min-w-8 text-right text-[var(--txt)]">{save[key] > 0 ? "+" : ""}{save[key]} dB</span>
-              <input className="w-24 accent-[#b98bff]" type="range" min="-12" max="12" step="1" value={save[key]} aria-label={`${label} EQ`} onChange={(e) => {
-                const value = Number(e.target.value);
-                mutate((s) => { s[key] = value; });
-                setAudioEQ(key === "eqBass" ? value : save.eqBass, key === "eqMid" ? value : save.eqMid, key === "eqTreble" ? value : save.eqTreble);
-              }} />
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <div className="font-bold">Equalizer <span className="text-[10px] font-semibold text-[var(--dim)]">· sound effects and personal music</span></div>
+          <div className="ml-auto flex flex-wrap gap-1" role="group" aria-label="Equalizer presets">
+            {Object.entries(EQ_PRESETS).map(([name, bands]) => (
+              <button
+                key={name}
+                className="btn px-2 py-1 text-[10px]"
+                aria-label={`EQ preset ${name}`}
+                onClick={() => {
+                  sfx.click();
+                  mutate((s) => { s.eqBands = [...bands]; });
+                  setAudioEQ(bands);
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {EQ_BAND_LABELS.map((label, i) => (
+            <label key={label} className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">
+              {label}
+              <span className="ml-auto min-w-10 text-right text-[var(--txt)]">{save.eqBands[i] > 0 ? "+" : ""}{save.eqBands[i]} dB</span>
+              <input
+                className="w-24 accent-[#b98bff]"
+                type="range"
+                min="-12"
+                max="12"
+                step="1"
+                value={save.eqBands[i] ?? 0}
+                aria-label={`${label} EQ`}
+                onChange={(e) => {
+                  const next = [...save.eqBands];
+                  next[i] = Number(e.target.value);
+                  mutate((s) => { s.eqBands = next; });
+                  setAudioEQ(next);
+                }}
+              />
             </label>
           ))}
         </div>
@@ -2710,7 +2773,7 @@ export function SettingsModal({
           <input
             type="range"
             min="0"
-            max="200"
+            max="300"
             step="5"
             value={save.motionBlurAmt}
             aria-label="Motion blur strength"
@@ -2724,6 +2787,11 @@ export function SettingsModal({
         <div className="text-[10px] font-semibold text-[var(--dim)]">
           Shake is pure random offset per axis at 120 Hz — no sway, rotation or zoom. Intensity 0% keeps the FX but holds the camera still.
         </div>
+        {save.motionBlurAmt > 100 && (
+          <div className="text-[10px] font-bold text-[#ff315c]" data-testid="motion-blur-warning">
+            ⚠ Above 100% is a warning: strong blur can cause eye strain or motion discomfort. Up to 300% is available.
+          </div>
+        )}
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
@@ -2939,9 +3007,32 @@ export function SettingsModal({
         ))}
         <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
           <div className="min-w-0 flex-1"><div className="font-bold">Interpolation Method</div><div className="text-xs font-semibold text-[var(--dim)]">Hermite uses velocity-aware, monotonic easing; Smoothstep or Linear remain available.</div></div>
-          <select aria-label="Interpolation Method" className="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-xs" value={save.interpolationMethod} onChange={(e) => mutate((s) => { const method = e.target.value; s.interpolationMethod = (["linear", "smoothstep", "hermite", "extrapolate"] as const).includes(method as never) ? (method as typeof s.interpolationMethod) : "smoothstep"; })}><option value="linear">Linear</option><option value="smoothstep">Smoothstep</option><option value="hermite">Hermite</option>
-          <option value="extrapolate">Extrapolate (lowest latency)</option></select>
+          <select aria-label="Interpolation Method" className="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-xs" value={save.interpolationMethod} onChange={(e) => mutate((s) => { const method = e.target.value; s.interpolationMethod = (INTERP_METHODS as readonly string[]).includes(method) ? (method as InterpMethod) : "smoothstep"; })}>
+            {INTERP_METHODS.map((m) => (
+              <option key={m} value={m}>{INTERP_LABELS[m]}</option>
+            ))}
+          </select>
         </div>
+      </div>
+
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">SCREEN RECORDING</div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="screen-recording-row">
+        <div className="min-w-[160px] flex-1">
+          <div className="font-bold">Record Screen</div>
+          <div className="text-xs font-semibold text-[var(--dim)]">
+            Saves a video file on stop. Your browser asks which screen or tab to share; without screen capture the battle canvas is recorded instead.
+          </div>
+          {rec.error && <div className="mt-1 text-[11px] font-bold text-[#ff8f9a]" data-testid="recording-error">{rec.error}</div>}
+        </div>
+        {rec.recording ? (
+          <button className="btn px-3 py-1.5 text-xs text-[#ff8f9a]" aria-label="Stop and save recording" data-testid="screen-record-stop" onClick={() => { sfx.click(); stopRecording(); }}>
+            ■ STOP & SAVE
+          </button>
+        ) : (
+          <button className="btn btn-cyan px-3 py-1.5 text-xs" aria-label="Start screen recording" data-testid="screen-record-start" onClick={() => { sfx.click(); void startRecording(); }}>
+            ● START RECORDING
+          </button>
+        )}
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">APP</div>
@@ -3084,6 +3175,8 @@ export function SettingsModal({
                   });
                   setVolume(next.vol);
                   setVolumeBoost(!!next.volBoost);
+                  setSuperVolumeBoost(!!next.superVolBoost);
+                  setAudioEQ(next.eqBands);
                   setImportOpen(false);
                   setImportText("");
                   sfx.gem();

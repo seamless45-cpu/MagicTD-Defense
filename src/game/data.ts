@@ -108,10 +108,8 @@ export const SUPER_HARDCORE_REWARD_MUL = 10;
 export const HARDCORE_SPEED_MUL = 1.25;
 export const SUPER_HARDCORE_SPEED_MUL = 1.75;
 export const modeSpeedMul = (mode: GameMode) => mode === "hardcore" ? HARDCORE_SPEED_MUL : mode === "superhardcore" ? SUPER_HARDCORE_SPEED_MUL : 1;
-/** the mode is a daily ladder: three attempts per calendar day */
-export const HARDCORE_DAILY_PLAYS = 3;
-/** Super Hardcore is a weekly ladder: three attempts per calendar week */
-export const SUPER_HARDCORE_WEEKLY_PLAYS = 3;
+/** Hardcore and Super Hardcore have no attempt limit: the daily and weekly caps were removed. Attempts are still counted for stats. */
+export const HARDCORE_UNLIMITED = true;
 export const HARDCORE_LIVES = 12;
 /** enemies are immune to crits: crit chance and crit damage never apply */
 export const HARDCORE_CRIT_IMMUNE = true;
@@ -1639,7 +1637,8 @@ export const ENEMY_TYPES: EnemyType[] = [
     shade: "#9a6b00",
     shape: "runner",
     hpMul: 0.55,
-    speed: 118,
+    // +24% runner speed (this round)
+    speed: 118 * 1.24,
     r: 11,
     armor: 0,
     lives: 1,
@@ -2285,7 +2284,18 @@ export const boltResetInterval = (tier: number) => (tier > 0 ? Math.max(0.2, 0.5
 
 const awkTier = (tier: number) => Math.max(1, Math.min(HERO_AWAKENING_MAX_TIER, tier));
 
-export const HERO_AWAKENINGS: Record<string, [HeroAwkSpec, HeroAwkSpec]> = {
+/**
+ * Electrical Judgement (Thunder God, awakening 3). Tier I is the base; every
+ * tier adds one bolt, half a second of duration, 2.5% chance and 25 m radius.
+ * The chance is the roll each Storm Sovereign cast makes to be replaced.
+ */
+export const JUDGEMENT_BOLT_WIDTH = 15;
+export const judgementBolts = (tier: number) => (tier > 0 ? 2 + (tier - 1) : 0);
+export const judgementDuration = (tier: number) => (tier > 0 ? 3 + 0.5 * (tier - 1) : 0);
+export const judgementChance = (tier: number) => (tier > 0 ? 0.3 + 0.025 * (tier - 1) : 0);
+export const judgementRadius = (tier: number) => (tier > 0 ? 1200 + 25 * (tier - 1) : 0);
+
+export const HERO_AWAKENINGS: Record<string, HeroAwkSpec[]> = {
   thunder: [
     {
       id: "induction",
@@ -2306,16 +2316,26 @@ export const HERO_AWAKENINGS: Record<string, [HeroAwkSpec, HeroAwkSpec]> = {
         return `bolts below ${Math.round(boltThreshold(t) * 100)}% HP · ${Math.round(boltResetChance(t) * 100)}% cooldown reset at ${boltResetInterval(t).toFixed(2)}s`;
       },
     },
+    {
+      id: "judgement",
+      name: "Electrical Judgement",
+      desc: "Storm Sovereign may skip its chain strikes: two 15 m judgement bolts strike the front-most enemies and blast a 1200 m radius every 0.5s for 3s, burning everything inside.",
+      fmt: (tier) => {
+        const t = awkTier(tier);
+        const pct = (x: number) => Number((x * 100).toFixed(1));
+        return `${judgementBolts(t)} bolts · ${judgementDuration(t).toFixed(1)}s · ${pct(judgementChance(t))}% chance · ${judgementRadius(t)} m blast`;
+      },
+    },
   ],
 };
 
-export function heroAwkSpec(heroId: string, slot: 0 | 1): HeroAwkSpec | null {
-  const pair = HERO_AWAKENINGS[heroId];
-  return pair ? pair[slot] : null;
+export function heroAwkSpec(heroId: string, slot: number): HeroAwkSpec | null {
+  const list = HERO_AWAKENINGS[heroId];
+  return list?.[slot] ?? null;
 }
 
 /** "+120% shield cut · +50% SP & gold …" for the hero card */
-export function heroAwkText(heroId: string, slot: 0 | 1, tier: number): string {
+export function heroAwkText(heroId: string, slot: number, tier: number): string {
   const spec = heroAwkSpec(heroId, slot);
   if (!spec) return "";
   if (tier <= 0) return spec.passive ? "Passive · not awakened" : "Not awakened";

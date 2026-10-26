@@ -90,7 +90,6 @@ import {
   HERO_AWAKENING_MAX_TIER,
   ENEMY_SPEED_MUL,
   HARDCORE_CRIT_IMMUNE,
-  HARDCORE_DAILY_PLAYS,
   HARDCORE_HP_MUL,
   HARDCORE_REWARD_MUL,
   HARDCORE_SPAWN_MUL,
@@ -1748,8 +1747,8 @@ describe("boss skills", () => {
 
 // ---------- the font vault ----------
 describe("font vault", () => {
-  it("ships sixty faces with unique ids", () => {
-    expect(FONTS).toHaveLength(80);
+  it("ships ninety-two faces with unique ids", () => {
+    expect(FONTS).toHaveLength(92);
     const ids = FONTS.map((f) => f.id);
     expect(new Set(ids).size).toBe(ids.length);
     // the three the brief called out by name
@@ -1905,9 +1904,9 @@ describe("auto-battle expeditions", () => {
 
 // ---------- hero awakenings ----------
 describe("hero awakenings", () => {
-  it("ships the Thunder God's two token-bought paths", () => {
+  it("ships the Thunder God's three token-bought paths", () => {
     const pair = HERO_AWAKENINGS.thunder;
-    expect(pair).toHaveLength(2);
+    expect(pair).toHaveLength(3);
     expect(pair[0].name).toBe("Electrical Induction");
     expect(pair[1].name).toBe("Bolt from the Blue");
     expect(pair[1].passive).toBe(true);
@@ -1915,6 +1914,7 @@ describe("hero awakenings", () => {
     expect(heroAwkSpec("nova", 0)).toBeNull();
     expect(heroAwkText("thunder", 0, 1)).toContain("120% shield cut");
     expect(heroAwkText("thunder", 1, 1)).toContain("80% HP");
+    expect(pair[2].name).toBe("Electrical Judgement");
   });
 
   it("scales every tier exactly like the card promises", () => {
@@ -1969,12 +1969,12 @@ describe("hero awakenings", () => {
     s.autoSkipBossCut = true;
     persistSave(s);
     const back = loadSave();
-    expect(back.heroAwn.thunder).toEqual([1, 1]);
+    expect(back.heroAwn.thunder).toEqual([1, 1, 0]);
     expect(back.autoSkipBossCut).toBe(true);
 
     // junk tier values are clamped rather than trusted
     const junk = importSave(JSON.stringify({ heroAwn: { thunder: [99, -4] } }));
-    expect(junk.heroAwn.thunder).toEqual([HERO_AWAKENING_MAX_TIER, 0]);
+    expect(junk.heroAwn.thunder).toEqual([HERO_AWAKENING_MAX_TIER, 0, 0]);
   });
 });
 
@@ -2039,7 +2039,6 @@ describe("hardcore mode", () => {
     expect(HARDCORE_SPAWN_MUL).toBe(2);
     expect(HARDCORE_HP_MUL).toBe(10);
     expect(HARDCORE_REWARD_MUL).toBe(5);
-    expect(HARDCORE_DAILY_PLAYS).toBe(3);
     expect(HARDCORE_CRIT_IMMUNE).toBe(true);
     // it is a campaign-shaped run, like Battle
     expect(isRunMode("hardcore")).toBe(true);
@@ -2072,24 +2071,21 @@ describe("hardcore mode", () => {
     expect(critAllowed("endless")).toBe(true);
   });
 
-  it("gives three attempts per game-day and refuses the fourth", () => {
+  it("has no attempt limit: every run starts and is counted for stats", () => {
     const s = defaultSave();
-    expect(hardcorePlaysLeft(s)).toBe(3);
-    expect(spendHardcorePlay(s)).toBe(true);
-    expect(hardcorePlaysLeft(s)).toBe(2);
-    expect(spendHardcorePlay(s)).toBe(true);
-    expect(spendHardcorePlay(s)).toBe(true);
-    expect(hardcorePlaysLeft(s)).toBe(0);
-    expect(spendHardcorePlay(s)).toBe(false);
-    expect(s.hardcoreUses).toBe(3);
+    expect(hardcorePlaysLeft(s)).toBe(Infinity);
+    for (let i = 0; i < 10; i++) expect(spendHardcorePlay(s)).toBe(true);
+    expect(hardcorePlaysLeft(s)).toBe(Infinity);
+    expect(s.hardcoreUses).toBe(10);
   });
 
-  it("resets the daily budget on the next game-day and persists the record", () => {
+  it("resets the attempt counter on the next game-day and persists the record", () => {
     const s = defaultSave();
     s.hardcoreDay = "2020-01-01";
     s.hardcoreUses = 3;
-    // a stale stamp means a fresh budget
-    expect(hardcorePlaysLeft(s, "2026-10-20")).toBe(3);
+    expect(hardcorePlaysLeft(s, "2026-10-20")).toBe(Infinity);
+    spendHardcorePlay(s, "2026-10-20");
+    expect(s.hardcoreUses).toBe(1);
     s.hardcoreBest = 9;
     persistSave(s);
     const back = loadSave();
@@ -2101,7 +2097,7 @@ describe("hardcore mode", () => {
   it("clamps a hand-edited record and attempt count", () => {
     const junk = importSave(JSON.stringify({ hardcoreBest: 9999, hardcoreUses: 99, hardcoreDay: todayStr() }));
     expect(junk.hardcoreBest).toBe(BATTLE_ROUNDS);
-    expect(junk.hardcoreUses).toBe(HARDCORE_DAILY_PLAYS);
+    expect(junk.hardcoreUses).toBe(99);
   });
 });
 
@@ -2124,5 +2120,63 @@ describe("performance + notification settings", () => {
     expect(loadSave().hideNotifs).toBe(true);
     // junk values fall back to "notifications on"
     expect(importSave(JSON.stringify({ hideNotifs: "yes" })).hideNotifs).toBe(false);
+  });
+});
+
+// ---------- round 5: judgement, awakening slots, interpolation, runner, EQ, recording ----------
+import { judgementBolts, judgementChance, judgementDuration, judgementRadius, JUDGEMENT_BOLT_WIDTH } from "../game/data";
+import { INTERP_METHODS, INTERP_LABELS } from "../game/save";
+import { recordingMime, getRecorderState } from "../game/recorder";
+
+describe("electrical judgement (thunder awakening 3)", () => {
+  it("is the third thunder path and is named as shipped", () => {
+    const paths = HERO_AWAKENINGS.thunder;
+    expect(paths.length).toBe(3);
+    expect(paths[2].id).toBe("judgement");
+    expect(paths[2].name).toBe("Electrical Judgement");
+  });
+
+  it("starts at 2 bolts / 3 s / 30% / 1200 m and adds one step per upgrade", () => {
+    expect(judgementBolts(1)).toBe(2);
+    expect(judgementDuration(1)).toBe(3);
+    expect(judgementChance(1)).toBeCloseTo(0.3);
+    expect(judgementRadius(1)).toBe(1200);
+    expect(judgementBolts(4)).toBe(5);
+    expect(judgementDuration(4)).toBe(4.5);
+    expect(judgementChance(4)).toBeCloseTo(0.375);
+    expect(judgementRadius(4)).toBe(1275);
+    expect(JUDGEMENT_BOLT_WIDTH).toBe(15);
+    // no tier, no judgement
+    expect(judgementChance(0)).toBe(0);
+  });
+
+  it("stores three awakening slots per hero and clamps them on load", () => {
+    const s = defaultSave();
+    expect(awakenHero(s, "thunder", 2)).toBe(0); // no tokens yet
+    s.tokens = 10_000;
+    expect(awakenHero(s, "thunder", 2)).toBe(1);
+    expect(heroAwkTier(s, "thunder", 2)).toBe(1);
+    expect(s.heroAwn.thunder.length).toBe(3);
+  });
+});
+
+describe("round 5 balance and settings", () => {
+  it("raises runner speed by 24%", () => {
+    const runner = ENEMY_TYPES.find((t) => t.name === "Runner")!;
+    expect(runner.speed).toBeCloseTo(118 * 1.24);
+  });
+
+  it("offers the new interpolation curves alongside the originals", () => {
+    for (const m of ["linear", "smoothstep", "hermite", "extrapolate", "cosine", "quintic", "ease-out"]) {
+      expect(INTERP_METHODS).toContain(m);
+      expect(INTERP_LABELS[m as (typeof INTERP_METHODS)[number]]).toBeTruthy();
+    }
+  });
+
+  it("reports a recorder that is idle before anything starts", () => {
+    const st = getRecorderState();
+    expect(st.recording).toBe(false);
+    // jsdom has no MediaRecorder, so no container is offered
+    expect(recordingMime()).toBe("");
   });
 });

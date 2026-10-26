@@ -640,17 +640,30 @@ function chestLootCue(n: number): SampleCue {
 
 /** level of the sample bus at volume 100%, before the player's volume slider */
 const SAMPLE_MASTER = 0.52;
-/** same 300% loudness switch the Tone bus uses */
-const BOOST_MUL = 3;
 
 type AudioContextCtor = new () => AudioContext;
+
+/**
+ * Five-band equalizer shared by the sample bus and the Tone fallback:
+ * sub/bass shelf, low-mid, mid, presence and air. Gains are in dB.
+ */
+export const EQ_LAYOUT: ReadonlyArray<{ type: BiquadFilterType; freq: number; q: number }> = [
+  { type: "lowshelf", freq: 80, q: 0.7 },
+  { type: "peaking", freq: 250, q: 1 },
+  { type: "peaking", freq: 1000, q: 1 },
+  { type: "peaking", freq: 4000, q: 1 },
+  { type: "highshelf", freq: 11000, q: 0.7 },
+];
 
 interface SampleRack {
   ctx: AudioContext;
   master: GainNode;
-  lowShelf: BiquadFilterNode;
-  midPeak: BiquadFilterNode;
-  highShelf: BiquadFilterNode;
+  lowCut: BiquadFilterNode;
+  /** the five EQ bands, in EQ_LAYOUT order */
+  eq: BiquadFilterNode[];
+  comp: DynamicsCompressorNode | null;
+  /** personal-music input: joins the mix after the EQ, not after the SFX master */
+  musicIn: GainNode;
   buffers: Map<string, AudioBuffer>;
   loading: Map<string, Promise<AudioBuffer | null>>;
   /** shared reverb bus; null when the browser has no ConvolverNode */
@@ -666,31 +679,71 @@ let loadJob: Promise<void> | null = null;
 let onExhausted: (() => void) | null = null;
 let stateOn = true;
 let stateVol = 0.7;
-let stateBoost = false;
-let stateEq = { bass: 0, mid: 0, treble: 0 };
+/** loudness multiplier from the volume switches: 1, 3 (booster) or 5 (super) */
+let stateMul = 1;
+let stateEq: number[] = [0, 0, 0, 0, 0];
 
 const masterGain = () =>
-  stateOn ? SAMPLE_MASTER * Math.min(1, Math.max(0, stateVol)) * (stateBoost ? BOOST_MUL : 1) : 0;
+  stateOn ? SAMPLE_MASTER * Math.min(1, Math.max(0, stateVol)) * stateMul : 0;
 
-/** remember the player's mixer state and apply it if the bus already exists */
-export function setSampleEQ(bass: number, mid: number, treble: number) {
-  stateEq = { bass, mid, treble };
+/** remember the player's five-band EQ (dB) and apply it if the bus already exists */
+export function setSampleEQ(bands: number[]) {
+  stateEq = bands.slice(0, 5);
   if (!rack) return;
   const now = rack.ctx.currentTime;
-  rack.lowShelf.gain.setTargetAtTime(bass, now, 0.035);
-  rack.midPeak.gain.setTargetAtTime(mid, now, 0.035);
-  rack.highShelf.gain.setTargetAtTime(1.5 + treble, now, 0.035);
+  rack.eq.forEach((node, i) => node.gain.setTargetAtTime(stateEq[i] ?? 0, now, 0.035));
 }
 
-export function setSampleState(on: boolean, vol: number, boost: boolean) {
+/**
+ * Mixer state: on/off, slider volume and the loudness multiplier. Above the
+ * booster level the limiter tightens, so 500% gets loud without a fuzzy top end.
+ */
+export function setSampleState(on: boolean, vol: number, mul: number) {
   stateOn = on;
   stateVol = Math.min(1, Math.max(0, vol));
-  stateBoost = boost;
+  stateMul = mul;
   if (!rack) return;
   try {
-    rack.master.gain.setTargetAtTime(masterGain(), rack.ctx.currentTime, 0.02);
+    const now = rack.ctx.currentTime;
+    rack.master.gain.setTargetAtTime(masterGain(), now, 0.02);
+    rack.musicIn.gain.setTargetAtTime(mul, now, 0.02);
+    if (rack.comp) {
+      const hard = mul >= 5;
+      rack.comp.threshold.setTargetAtTime(hard ? -6 : -15, now, 0.05);
+      rack.comp.ratio.setTargetAtTime(hard ? 20 : 4.5, now, 0.05);
+    }
   } catch {
     /* context closed */
+  }
+}
+
+const routedMedia = new WeakSet<HTMLMediaElement>();
+
+/**
+ * Route the personal-music element through the mixer, so the five-band EQ,
+ * the bass/treble boosts and the volume switches all reach the music. Safe to
+ * call again. Returns false while there is no sample bus (the element then plays
+ * directly, unprocessed).
+ */
+export function routeMusicElement(el: HTMLMediaElement): boolean {
+  if (!rack) return false;
+  if (routedMedia.has(el)) return true;
+  try {
+    const src = rack.ctx.createMediaElementSource(el);
+    src.connect(rack.musicIn);
+    routedMedia.add(el);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** browsers suspend audio until a gesture: call from the play button */
+export function resumeSampleEngine() {
+  try {
+    void rack?.ctx.resume().catch(() => {});
+  } catch {
+    /* ignore */
   }
 }
 
@@ -825,33 +878,34 @@ export function initSamples(fallback?: () => void): boolean {
     lowCut.type = "highpass";
     lowCut.frequency.value = 34;
     lowCut.Q.value = 0.65;
-    const lowShelf = ctx.createBiquadFilter();
-    lowShelf.type = "lowshelf";
-    lowShelf.frequency.value = 120;
-    const midPeak = ctx.createBiquadFilter();
-    midPeak.type = "peaking";
-    midPeak.frequency.value = 1000;
-    midPeak.Q.value = 0.85;
-    const highShelf = ctx.createBiquadFilter();
-    highShelf.type = "highshelf";
-    highShelf.frequency.value = 4800;
-    highShelf.gain.value = 1.5;
+    const eq = EQ_LAYOUT.map((band) => {
+      const node = ctx.createBiquadFilter();
+      node.type = band.type;
+      node.frequency.value = band.freq;
+      node.Q.value = band.q;
+      node.gain.value = 0;
+      return node;
+    });
+    // music joins after the EQ: the sample bus fans into the same chain
+    const musicIn = ctx.createGain();
+    musicIn.gain.value = 1;
     master.connect(lowCut);
-    lowCut.connect(lowShelf);
-    lowShelf.connect(midPeak);
-    midPeak.connect(highShelf);
+    lowCut.connect(eq[0]);
+    for (let i = 1; i < eq.length; i++) eq[i - 1].connect(eq[i]);
+    musicIn.connect(lowCut);
+    let comp: DynamicsCompressorNode | null = null;
     try {
-      const comp = ctx.createDynamicsCompressor();
+      comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -15;
       comp.knee.value = 22;
       comp.ratio.value = 4.5;
       comp.attack.value = 0.004;
       comp.release.value = 0.2;
-      highShelf.connect(comp);
+      eq[eq.length - 1].connect(comp);
       comp.connect(ctx.destination);
     } catch {
       // no compressor node: the limiter-less path still works, just louder
-      highShelf.connect(ctx.destination);
+      eq[eq.length - 1].connect(ctx.destination);
     }
     // ---- reworked space: one shared convolution reverb on a send ----
     let verbIn: GainNode | null = null;
@@ -877,9 +931,10 @@ export function initSamples(fallback?: () => void): boolean {
     rack = {
       ctx,
       master,
-      lowShelf,
-      midPeak,
-      highShelf,
+      lowCut,
+      eq,
+      comp,
+      musicIn,
       buffers: new Map(),
       loading: new Map(),
       verbIn,
@@ -888,7 +943,7 @@ export function initSamples(fallback?: () => void): boolean {
       maxVoices: 42,
       ready: false,
     };
-    setSampleEQ(stateEq.bass, stateEq.mid, stateEq.treble);
+    setSampleEQ(stateEq);
     try {
       void ctx.resume().catch(() => {});
     } catch {
