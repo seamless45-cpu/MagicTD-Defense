@@ -22,15 +22,14 @@
  * sample layer has nothing to play.
  */
 import * as Tone from "tone";
-import { initSamples, playSample, setSampleState, setSampleEQ } from "./sfxSamples";
+import { initSamples, playSample, setSampleState, setSampleEQ, EQ_LAYOUT } from "./sfxSamples";
 
 let rack: {
   master: Tone.Gain;
   bus: Tone.Gain;
   bass: Tone.Gain;
-  eqLow: Tone.Filter;
-  eqMid: Tone.Filter;
-  eqHigh: Tone.Filter;
+  /** the five EQ bands, in EQ_LAYOUT order */
+  eqBands: Tone.Filter[];
   send: Tone.Gain;
   built: boolean;
 } | null = null;
@@ -39,28 +38,36 @@ let enabled = true;
 let volume = 0.7;
 /** volume booster: pushes the master bus up to 300% of the slider value */
 let boosted = false;
+/** super volume booster: 500% of the slider value, for every sound and the music */
+let superBoosted = false;
 let bassBoosted = false;
 let trebleBoosted = false;
-let eq = { bass: 0, mid: 0, treble: 0 };
+/** five-band equalizer in dB (-12..12) — bands follow EQ_LAYOUT */
+let eq: number[] = [0, 0, 0, 0, 0];
 let lastShot = 0;
 
 const MASTER_LEVEL = 0.42;
-const BOOST_MUL = 3;
+
+/** loudness multiplier of the volume switches: super (500%) beats the booster (300%) */
+export const boostMul = () => (superBoosted ? 5 : boosted ? 3 : 1);
 
 /** the gain the master bus should sit at right now */
-const masterGain = () => (enabled ? MASTER_LEVEL * volume * (boosted ? BOOST_MUL : 1) : 0);
+const masterGain = () => (enabled ? MASTER_LEVEL * volume * boostMul() : 0);
+
+function pushVolume(ramp: number) {
+  if (rack) rack.master.gain.rampTo(masterGain(), ramp);
+  setSampleState(enabled, volume, boostMul());
+}
 
 export function setSfx(on: boolean) {
   enabled = on;
-  if (rack) rack.master.gain.rampTo(masterGain(), 0.06);
-  setSampleState(enabled, volume, boosted);
+  pushVolume(0.06);
 }
 
 /** master volume, 0..1 */
 export function setVolume(v: number) {
   volume = Math.min(1, Math.max(0, v));
-  if (rack) rack.master.gain.rampTo(masterGain(), 0.06);
-  setSampleState(enabled, volume, boosted);
+  pushVolume(0.06);
 }
 
 /**
@@ -70,29 +77,46 @@ export function setVolume(v: number) {
  */
 export function setVolumeBoost(on: boolean) {
   boosted = !!on;
-  if (rack) rack.master.gain.rampTo(masterGain(), 0.08);
-  setSampleState(enabled, volume, boosted);
+  pushVolume(0.08);
+}
+
+/**
+ * SUPER VOLUME BOOSTER — 500%, for every sound and the personal music. The
+ * limiter tightens at this level, but it is still very loud: use with care.
+ */
+export function setSuperVolumeBoost(on: boolean) {
+  superBoosted = !!on;
+  pushVolume(0.08);
 }
 
 export const volumeBoosterOn = () => boosted;
+export const superVolumeBoosterOn = () => superBoosted;
 
-function applyEq() {
-  const bass = eq.bass + (bassBoosted ? 6 : 0);
-  const treble = eq.treble + (trebleBoosted ? 6 : 0);
-  setSampleEQ(bass, eq.mid, treble);
-  if (!rack?.built) return;
-  rack.eqLow.gain.rampTo(bass, 0.08);
-  rack.eqMid.gain.rampTo(eq.mid, 0.08);
-  rack.eqHigh.gain.rampTo(1.5 + treble, 0.08);
+/** the per-band gains actually applied: the bass/treble switches add 6 dB to the end bands */
+export function effectiveEq(): number[] {
+  const bands = [...eq];
+  if (bassBoosted) bands[0] += 6;
+  if (trebleBoosted) bands[bands.length - 1] += 6;
+  return bands.map((v) => Math.max(-18, Math.min(18, v)));
 }
 
-/** Three-band sound-effects equalizer, in decibels (-12 to +12). */
-export function setAudioEQ(bass: number, mid: number, treble: number) {
-  eq = {
-    bass: Math.max(-12, Math.min(12, bass)),
-    mid: Math.max(-12, Math.min(12, mid)),
-    treble: Math.max(-12, Math.min(12, treble)),
-  };
+function applyEq() {
+  const bands = effectiveEq();
+  setSampleEQ(bands);
+  if (!rack?.built) return;
+  // dB gains can be negative: use a linear ramp (exponential ramps break on them)
+  rack.eqBands.forEach((node, i) => node.gain.linearRampTo(bands[i] ?? 0, 0.08));
+}
+
+/**
+ * Five-band equalizer (60 · 250 · 1k · 4k · 12k), in decibels (-12 to +12).
+ * It shapes the sound effects and the personal music alike.
+ */
+export function setAudioEQ(bands: number[]) {
+  eq = Array.from({ length: EQ_LAYOUT.length }, (_, i) => {
+    const v = Number(bands[i]);
+    return Math.max(-12, Math.min(12, Number.isFinite(v) ? v : 0));
+  });
   applyEq();
 }
 export function setBassBoost(on: boolean) { bassBoosted = !!on; applyEq(); }
@@ -118,10 +142,12 @@ function initRack() {
     }).connect(limiter);
     const bus = new Tone.Gain(0.9);
     const lowCut = new Tone.Filter({ frequency: 36, type: "highpass", Q: 0.65 });
-    const eqLow = new Tone.Filter({ frequency: 120, type: "lowshelf", gain: eq.bass + (bassBoosted ? 6 : 0) });
-    const eqMid = new Tone.Filter({ frequency: 1000, type: "peaking", Q: 0.85, gain: eq.mid });
-    const eqHigh = new Tone.Filter({ frequency: 4800, type: "highshelf", gain: 1.5 + eq.treble + (trebleBoosted ? 6 : 0) });
-    bus.connect(lowCut).connect(eqLow).connect(eqMid).connect(eqHigh).connect(comp);
+    const bandGains = effectiveEq();
+    const eqBands = EQ_LAYOUT.map((band, i) => new Tone.Filter({ frequency: band.freq, type: band.type, Q: band.q, gain: bandGains[i] ?? 0 }));
+    bus.connect(lowCut);
+    lowCut.connect(eqBands[0]);
+    for (let i = 1; i < eqBands.length; i++) eqBands[i - 1].connect(eqBands[i]);
+    eqBands[eqBands.length - 1].connect(comp);
 
     // a small plate-style reverb on a send, plus slap delay in front of it
     const reverb = new Tone.Reverb({ decay: 2.1, preDelay: 0.018, wet: 1 }).connect(master);
@@ -131,12 +157,12 @@ function initRack() {
     const bass = new Tone.Gain(1);
     bass.connect(new Tone.Filter(220, "lowpass")).connect(bus);
 
-    rack = { master, bus, bass, eqLow, eqMid, eqHigh, send, built: true };
+    rack = { master, bus, bass, eqBands, send, built: true };
     applyEq();
   } catch {
     rack = rack ?? {
       master: new Tone.Gain(0) as Tone.Gain, bus: new Tone.Gain(0) as Tone.Gain, bass: new Tone.Gain(0) as Tone.Gain,
-      eqLow: new Tone.Filter(120, "lowshelf"), eqMid: new Tone.Filter(1000, "peaking"), eqHigh: new Tone.Filter(4800, "highshelf"),
+      eqBands: [],
       send: new Tone.Gain(0) as Tone.Gain, built: false,
     };
   }
@@ -159,7 +185,7 @@ function useSynth() {
  */
 export function initAudio() {
   const samplesOk = initSamples(() => initRack());
-  setSampleState(enabled, volume, boosted);
+  setSampleState(enabled, volume, boostMul());
   if (!samplesOk) initRack();
 }
 

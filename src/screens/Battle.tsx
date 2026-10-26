@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tr } from "../game/i18n";
 import type { EnemyType } from "../game/data";
-import type { SaveData } from "../game/save";
-import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, hardcorePlaysLeft, heroLevel, superHardcorePlaysLeft, weekStr } from "../game/save";
+import type { InterpMethod, SaveData } from "../game/save";
+import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, heroLevel, weekStr } from "../game/save";
 import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import {
@@ -88,8 +88,6 @@ import {
   BOSS_MAELSTROM_CD,
   BOSS_MAELSTROM_DIST,
   ENEMY_SPEED_MUL,
-  HARDCORE_DAILY_PLAYS,
-  SUPER_HARDCORE_WEEKLY_PLAYS,
   HARDCORE_LIVES,
   HARDCORE_SPAWN_MUL,
   MODE_RULES,
@@ -101,6 +99,11 @@ import {
   payoutMul,
   inductionBonus,
   heroAwkSpec,
+  JUDGEMENT_BOLT_WIDTH,
+  judgementBolts,
+  judgementChance,
+  judgementDuration,
+  judgementRadius,
   boltThreshold,
   boltResetChance,
   boltResetInterval,
@@ -358,6 +361,23 @@ interface BT {
  * changing lateral channel and forked branches. Offsets are reused in a typed
  * buffer so the 10ms flicker adds no geometry allocations.
  */
+/** Electrical Judgement: one long bolt that keeps blasting the same spot until it fades */
+interface Judgement {
+  x: number;
+  y: number;
+  /** blast radius in world units (the 1200 m radius) */
+  radius: number;
+  life: number;
+  /** seconds between blasts, and the countdown to the next one */
+  every: number;
+  tick: number;
+  /** direct damage per blast, and burn per second applied to everything inside */
+  dmg: number;
+  burnDps: number;
+  color: string;
+  seed: number;
+}
+
 interface Strike {
   x: number;
   y: number;
@@ -588,6 +608,8 @@ interface G {
   meteors: Met[];
   /** vertical lightning pillars (Lightning Princess) */
   strikes: Strike[];
+  /** live Electrical Judgement bolts */
+  judges: Judgement[];
   /** summons bought this run — drives the summon price */
   spSpend: number;
   enemies: Enemy[];
@@ -779,6 +801,7 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     bestHit: 0,
     meteors: [],
     strikes: [],
+    judges: [],
     final: null,
   };
   // no free placements: the opening SP is spent on summons by the player
@@ -918,6 +941,28 @@ const shopRef: { current: (item: RunShopItem) => void } = { current: () => {} };
 /** where in the current sim step to draw (1 = now, 0 = start of step) */
 let renderAlpha = 1;
 let rawRenderAlpha = 1;
+/**
+ * Reshape the raw step fraction into the glide amount for one method. Every
+ * curve starts at 0 and ends at 1 (extrapolate runs past 1 by design), so a
+ * sim step never teleports an entity. Hermite is applied separately in drawEnemy.
+ */
+function shapeAlpha(method: InterpMethod, a: number): number {
+  switch (method) {
+    case "smoothstep":
+      return a * a * (3 - 2 * a);
+    case "cosine":
+      return 0.5 - 0.5 * Math.cos(Math.PI * a);
+    case "quintic":
+      return a * a * a * (a * (a * 6 - 15) + 10);
+    case "ease-out":
+      return 1 - (1 - a) * (1 - a) * (1 - a);
+    case "extrapolate":
+      return 1 + a;
+    default:
+      return a;
+  }
+}
+
 function hermiteLerp(previous2: number | undefined, previous: number, current: number, t: number): number {
   if (previous2 === undefined || !Number.isFinite(previous2)) return previous + (current - previous) * t;
   const t2 = t * t;
@@ -4872,6 +4917,68 @@ export default function Battle({
      * (wind-up, main event, payoff) instead of resolving in a single frame.
      * Every skill also leaves a real secondary mechanic on the field.
      */
+    /**
+     * One judgement blast: every live enemy inside the radius takes a hit and
+     * catches fire. Visuals are capped so a 1200 m ring does not cost a frame.
+     */
+    const judgementBlast = (j: Judgement) => {
+      const r2 = j.radius * j.radius;
+      for (const e of g.enemies) {
+        if (e.dead) continue;
+        const ep = enemyPos(e);
+        const dx = ep.x - j.x;
+        const dy = ep.y - j.y;
+        if (dx * dx + dy * dy > r2) continue;
+        dealDamage(e, j.dmg, { alwaysCrit: true, color: j.color, lightning: true });
+        e.burnDps = Math.max(e.burnDps, j.burnDps);
+        e.burnT = Math.max(e.burnT, 1.2);
+      }
+      if (g.strikes.length < 24) {
+        g.strikes.push({ x: j.x, y: j.y, life: 0.36, max: 0.36, width: JUDGEMENT_BOLT_WIDTH, color: j.color, core: "#fff6c4", seed: (j.seed + g.t * 13) % 100, forks: 3, top: -H });
+      }
+      shock(j.x, j.y, j.color, Math.min(j.radius, 420), 0.5);
+      glow(j.x, j.y, j.color, Math.min(j.radius, 300), 0.4);
+    };
+
+    /**
+     * Electrical Judgement replaces the Storm Sovereign's chain strikes: two (or
+     * more, by tier) long bolts land on the front-most enemies, one per enemy,
+     * and blast their spot every 0.5 s until the duration runs out. Returns
+     * false when there is nothing on the lane to strike.
+     */
+    const castJudgement = (tier: number, power: number, hero: { color: string; color2: string }): boolean => {
+      const front = g.enemies.filter((e) => !e.dead).sort((a, b) => b.d - a.d);
+      if (!front.length) return false;
+      const bolts = judgementBolts(tier);
+      const duration = judgementDuration(tier);
+      const radius = judgementRadius(tier);
+      const base = (150 + 42 * g.round) * power;
+      for (let i = 0; i < bolts; i++) {
+        const target = front[Math.min(i, front.length - 1)];
+        const p = enemyPos(target);
+        const j: Judgement = {
+          x: p.x,
+          y: p.y,
+          radius,
+          life: duration,
+          every: 0.5,
+          tick: 0.5,
+          dmg: base * 0.35,
+          burnDps: base * 0.08,
+          color: hero.color,
+          seed: Math.random() * 100,
+        };
+        g.judges.push(j);
+        judgementBlast(j);
+      }
+      flash(hero.color2, 0.26);
+      g.shake = fxShake(14);
+      punch(0.9, 0.7);
+      hitStop(0.08);
+      addText(W / 2, H / 2 - 110, "ELECTRICAL JUDGEMENT", hero.color, 30, true);
+      return true;
+    };
+
     const hero = () => {
       if (g.heroCd > 0 || g.final) return;
       const hero = HERO_BY_ID[g.heroId] || HERO_BY_ID.nova;
@@ -5146,6 +5253,11 @@ export default function Battle({
         return;
       }
 
+      // Electrical Judgement (awakening 3): a roll can swap the chain strikes
+      // for two long judgement bolts on the front of the lane
+      const judgeTier = hero.id === "thunder" ? saveRef.current.heroAwn?.thunder?.[2] || 0 : 0;
+      if (judgeTier > 0 && Math.random() < judgementChance(judgeTier) && castJudgement(judgeTier, power, hero)) return;
+
       // ===== STORM SOVEREIGN: a single instantaneous sky fracture =====
       // The old cast walked a bolt front down the lane over 1.5s and finished
       // with a delayed hammer. Now the whole lane is struck on ONE frame: every
@@ -5383,6 +5495,18 @@ export default function Battle({
       g.redFlash = Math.max(0, g.redFlash - dt * 2);
       g.heroCd = Math.max(0, g.heroCd - dt);
       g.odT = Math.max(0, g.odT - dt);
+      // ---- electrical judgement: each bolt blasts its spot on a fixed beat ----
+      if (g.judges.length) {
+        for (const j of g.judges) {
+          j.life -= dt;
+          j.tick -= dt;
+          while (j.tick <= 0 && j.life > 0) {
+            j.tick += j.every;
+            judgementBlast(j);
+          }
+        }
+        g.judges = g.judges.filter((j) => j.life > 0);
+      }
 
       // ---- hero cast timeline: fire every beat whose moment has arrived ----
       if (g.casts.length) {
@@ -9584,7 +9708,7 @@ export default function Battle({
       const shakeMag = Math.hypot(shakeX, shakeY);
       const motion = Math.max(shakeVelocity, shakeMag * 0.35);
       // strength slider: 0..200%, 100% is the tuned default
-      const amtMul = Math.min(200, Math.max(0, saveRef.current.motionBlurAmt ?? 100)) / 100;
+      const amtMul = Math.min(300, Math.max(0, saveRef.current.motionBlurAmt ?? 100)) / 100;
       const blurAmt = Math.min(1, Math.max(0, motion - 0.6) * 0.08) * amtMul;
       const useMotionBlur = blurAmt > 0.04 && saveRef.current.motionBlur && saveRef.current.shakeFx && !saveRef.current.powerSaver && !saveRef.current.superBoost;
       const tw = trailCanvas.width;
@@ -9692,13 +9816,7 @@ export default function Battle({
       // linear/hermite use the raw step fraction; smoothstep eases it;
       // extrapolate runs past the last step (1 + fraction) to remove the one-step lag
       const im = saveRef.current.interpolationMethod;
-      renderAlpha = saveRef.current.frameInterp && !ps
-        ? im === "smoothstep"
-          ? rawRenderAlpha * rawRenderAlpha * (3 - 2 * rawRenderAlpha)
-          : im === "extrapolate"
-            ? 1 + rawRenderAlpha
-            : rawRenderAlpha
-        : 1;
+      renderAlpha = saveRef.current.frameInterp && !ps ? shapeAlpha(im, rawRenderAlpha) : 1;
       fxUserLevel = ps || sb ? 2 : saveRef.current.fxq || 0;
       const drawStart = performance.now();
       draw();
@@ -9840,10 +9958,17 @@ export default function Battle({
         } else if (occ.points >= MAX_POINTS) {
           sfx.error();
           toastRef.current(`${occ.def.name} is already at ${MAX_POINTS} points`, "#ff4d5e");
-        } else if (occ.points === src.points) mergeTowers(src, occ);
-        else {
+        } else if (occ.def.id === src.def.id && occ.points === src.points) {
+          // only the same tower at the same points may merge
+          mergeTowers(src, occ);
+        } else {
           sfx.error();
-          toastRef.current(`Points must match to merge (${src.points} vs ${occ.points})`, "#ff4d5e");
+          toastRef.current(
+            occ.def.id !== src.def.id
+              ? `${src.def.name} only merges with another ${src.def.name} at the same points`
+              : `Points must match to merge (${src.points} vs ${occ.points})`,
+            "#ff4d5e",
+          );
         }
         return;
       }
@@ -10080,9 +10205,9 @@ export default function Battle({
               </span>
               {mode === "gemrush" && <span className="hud-pill" style={{ color: "#35e0ff" }} data-testid="gem-rush-earned"><GemIcon size={14} /><b className="num">{g.gemRushGems.toLocaleString()}</b><em>earned</em></span>}
               {(mode === "hardcore" || mode === "superhardcore") && (
-                <span className="hud-pill hud-hardcore" data-testid="hardcore-plays" title={mode === "superhardcore" ? `Super Hardcore · ${SUPER_HARDCORE_WEEKLY_PLAYS} attempts per week` : `Hardcore · ${HARDCORE_DAILY_PLAYS} attempts per day · best round ${save.hardcoreBest}`}>
-                  <b className="num">{mode === "superhardcore" ? superHardcorePlaysLeft(save) : hardcorePlaysLeft(save)}</b>
-                  <em>/ {mode === "superhardcore" ? SUPER_HARDCORE_WEEKLY_PLAYS : HARDCORE_DAILY_PLAYS} left</em>
+                <span className="hud-pill hud-hardcore" data-testid="hardcore-plays" title={`${mode === "superhardcore" ? "Super Hardcore" : "Hardcore"} · no attempt limit · best round ${save.hardcoreBest}`}>
+                  <b className="num">∞</b>
+                  <em>no limit</em>
                 </span>
               )}
               <span className="hud-pill hud-dim" style={{ color: "#8effc4" }} data-testid="towers-on-board" title="Towers deployed">
@@ -10498,12 +10623,11 @@ export default function Battle({
               </span>
               {/* awakening tiers earned with Magic Tokens */}
               {heroAwkSpec(heroDef.id, 0) && (() => {
-                const t1 = save.heroAwn?.[heroDef.id]?.[0] || 0;
-                const t2 = save.heroAwn?.[heroDef.id]?.[1] || 0;
-                if (!t1 && !t2) return null;
+                const tiers = [0, 1, 2].map((i) => save.heroAwn?.[heroDef.id]?.[i] || 0);
+                if (!tiers.some((t) => t > 0)) return null;
                 return (
                   <span className="hero-awk-badges" data-testid="hero-awakening-badges">
-                    {[t1, t2].map((t, i) => (
+                    {tiers.map((t, i) => (
                       <i key={i} className={t > 0 ? "on" : ""} title={`Awakening ${i + 1}`}>
                         {t > 0 ? ROMAN[t] : "·"}
                       </i>

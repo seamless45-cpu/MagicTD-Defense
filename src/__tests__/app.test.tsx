@@ -326,11 +326,11 @@ describe("Settings", () => {
     click(document.querySelector('[data-testid="toggle-bassBoost"] [role="switch"]') as HTMLElement);
     click(document.querySelector('[data-testid="toggle-trebleBoost"] [role="switch"]') as HTMLElement);
     await waitFor(() => saved().motionBlur && saved().bassBoost && saved().trebleBoost, "audio and motion toggles saved");
-    const eq = document.querySelector('[aria-label="Bass EQ"]') as HTMLInputElement;
+    const eq = document.querySelector('[aria-label="60 Hz EQ"]') as HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")!.set!;
     setter.call(eq, "5");
     eq.dispatchEvent(new Event("input", { bubbles: true }));
-    await waitFor(() => saved().eqBass === 5, "bass EQ saved");
+    await waitFor(() => saved().eqBands[0] === 5, "60 Hz EQ band saved");
     noErrors();
   });
 
@@ -406,13 +406,13 @@ describe("Settings", () => {
 });
 
 describe("Font vault", () => {
-  it("offers eighty previewable faces and applies the picked one", async () => {
+  it("offers ninety-two previewable faces and applies the picked one", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
     // every tile carries data-font; the section/grid/count testids do not
-    expect(all("[data-font]").length).toBe(80);
+    expect(all("[data-font]").length).toBe(92);
     expect(document.body.textContent).toContain("Permanent Marker");
     expect(document.body.textContent).toContain("EDO");
 
@@ -1638,19 +1638,66 @@ describe("Battle", () => {
     noErrors();
   });
 
-  it("spawns only through the grid and merges into a tower from the rotation", async () => {
+  it("never merges two different tower types, even at the same points", async () => {
+    persistSave({ ...defaultSave(), lineup: ["arrow", "cannon"] });
     await mountApp();
     startMode("Battle");
     await waitFor(() => document.querySelector('[data-testid="summon-btn"]'), "battle HUD");
 
     const boardCount = () =>
-      Number((document.querySelector('[data-testid="towers-on-board"]')!.textContent || "0").replace(/[^\d]/g, ""));
-    const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
+      Number((document.querySelector('[data-testid="towers-on-board"]')?.textContent || "0").replace(/[^\d]/g, ""));
+    // the rotation rule picks the least-represented type, so the two towers differ
     for (let i = 0; i < 2; i++) {
-      click(summon);
-      await sleep(120);
+      const btn = await waitFor(() => {
+        const b = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement | null;
+        return b && !b.disabled ? b : null;
+      }, `summon ${i + 1} enabled`);
+      click(btn);
+      await waitFor(() => boardCount() === i + 1, `tower ${i + 1} summoned`);
     }
-    await waitFor(() => boardCount() === 2, "two towers summoned");
+
+    const cells: [number, number][] = [];
+    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([185 + (c + 0.5) * 90, 158 + (r + 0.5) * 90]);
+    const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+    const mismatch = () => (document.body.textContent || "").includes("only merges with another");
+    for (const [ax, ay] of cells) {
+      for (const [bx, by] of cells) {
+        if (ax === bx && ay === by) continue;
+        pointer("pointerdown", canvas, ax, ay);
+        pointer("pointermove", canvas, bx, by);
+        pointer("pointerup", canvas, bx, by);
+        if (mismatch()) break;
+      }
+      if (mismatch()) break;
+    }
+    await waitFor(mismatch, "mismatch toast");
+    // both towers survive: the rule refused the merge
+    expect(boardCount()).toBe(2);
+
+    click(byText("button", "Abandon")!);
+    await waitFor(() => byText("div", "Command Center"), "back home");
+    noErrors();
+  }, 40000);
+
+  it("spawns only through the grid and merges into a tower from the rotation", async () => {
+    // merging needs the same tower type AND the same points; a one-tower rotation
+    // guarantees both summoned towers match
+    persistSave({ ...defaultSave(), lineup: ["arrow"] });
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => document.querySelector('[data-testid="summon-btn"]'), "battle HUD");
+
+    const boardCount = () =>
+      Number((document.querySelector('[data-testid="towers-on-board"]')?.textContent || "0").replace(/[^\d]/g, ""));
+    for (let i = 0; i < 2; i++) {
+      // wait until the HUD reports the button as enabled, then summon and wait for the tower
+      const btn = await waitFor(() => {
+        const b = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement | null;
+        return b && !b.disabled ? b : null;
+      }, `summon ${i + 1} enabled`);
+      click(btn);
+      await waitFor(() => boardCount() === i + 1, `tower ${i + 1} summoned`);
+    }
 
     // the build cells: c=1..5 x r=0..2 (c=0, c=6 and r=3 are the path). The canvas
     // maps client coordinates 1:1 onto its 1000x580 backing store in jsdom.
@@ -1986,17 +2033,17 @@ describe("Hardcore", () => {
     await mountApp();
     const card = document.querySelector('[data-mode="Hardcore"]') as HTMLElement;
     expect(card, "hardcore mode card").toBeTruthy();
-    expect(card.textContent).toContain("3/3 LEFT");
+    // weekly/daily uses were removed: the card advertises no limit
+    expect(card.textContent).toContain("NO LIMIT");
 
     click(card.querySelector("button") as HTMLElement);
     await waitFor(() => saved().hardcoreUses === 1, "attempt banked");
-    // the HUD advertises the remaining daily attempts and the rule set
+    // the HUD advertises that attempts are unlimited and shows the rule set
     const plays = await waitFor(
       () => document.querySelector('[data-testid="hardcore-plays"]') as HTMLElement,
       "hardcore HUD pill"
     );
-    expect(plays.textContent || "").toContain("2");
-    expect(plays.textContent || "").toContain("/ 3 left");
+    expect(plays.textContent || "").toContain("no limit");
     expect((document.querySelector('[data-testid="hardcore-rules"]') as HTMLElement).textContent).toContain("5× REWARDS");
 
     // the first wave fields two bodies per slot: thirty enemies (15 slots x 2)
@@ -2010,20 +2057,18 @@ describe("Hardcore", () => {
     click(byText("button", "Abandon") as HTMLElement);
     await waitFor(() => byText("div", "Command Center"), "back home");
     expect(saved().hardcoreUses).toBe(1);
-    expect((document.querySelector('[data-mode="Hardcore"]') as HTMLElement).textContent).toContain("2/3 LEFT");
+    expect((document.querySelector('[data-mode="Hardcore"]') as HTMLElement).textContent).toContain("NO LIMIT");
     noErrors();
   }, 40000);
 
-  it("locks the mode out after three runs in one day", async () => {
+  it("does not lock the mode out after many runs in one day", async () => {
     persistSave({ ...defaultSave(), hardcoreUses: 3, hardcoreDay: todayStr() });
     await mountApp();
     const card = document.querySelector('[data-mode="Hardcore"]') as HTMLElement;
-    expect(card.textContent).toContain("NO RUNS LEFT");
+    expect(card.textContent).not.toContain("NO RUNS LEFT");
+    expect(card.textContent).toContain("NO LIMIT");
     click(card.querySelector("button") as HTMLElement);
-    await sleep(250);
-    // still on the home screen, and the budget was not overspent
-    expect(document.querySelector('[data-testid="hud"]')).toBeNull();
-    expect(saved().hardcoreUses).toBe(3);
+    await waitFor(() => document.querySelector('[data-testid="hud"]'), "hardcore battle HUD");
     noErrors();
   }, 20000);
 });

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import { deliverAutoBattleReport, hardcorePlaysLeft, loadSave, mailReady, persistSave, seasonReady, spendHardcorePlay, spendSuperHardcorePlay, superHardcorePlaysLeft, tasksReady, weekStr, type SaveData } from "./game/save";
+import { deliverAutoBattleReport, loadSave, mailReady, persistSave, seasonReady, spendHardcorePlay, spendSuperHardcorePlay, tasksReady, weekStr, type SaveData } from "./game/save";
 import { estimateAutoBattle } from "./game/autobattle";
 import { applyFont } from "./game/fonts";
-import { sfx, setSfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost, initAudio } from "./game/audio";
+import { sfx, setSfx, setVolume, setVolumeBoost, setSuperVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost, initAudio } from "./game/audio";
 import { loadSavedMusic, setMusicSettings } from "./game/music";
 import { useUiLanguage } from "./game/i18n";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
 import { ScreenStage } from "./components/ScreenStage";
+import { RecordingPill } from "./components/ScreenRecorder";
 import { LaunchIntro, LoadingScreen, Home, Specials, Guild, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
 import Towers from "./screens/Towers";
@@ -151,10 +152,11 @@ export default function App() {
     setSfx(save.sfx);
     setVolume(save.vol);
     setVolumeBoost(save.volBoost);
-    setAudioEQ(save.eqBass, save.eqMid, save.eqTreble);
+    setSuperVolumeBoost(save.superVolBoost);
+    setAudioEQ(save.eqBands);
     setBassBoost(save.bassBoost);
     setTrebleBoost(save.trebleBoost);
-  }, [save.sfx, save.vol, save.volBoost, save.eqBass, save.eqMid, save.eqTreble, save.bassBoost, save.trebleBoost]);
+  }, [save.sfx, save.vol, save.volBoost, save.superVolBoost, save.eqBands, save.bassBoost, save.trebleBoost]);
 
   useEffect(() => {
     setMusicSettings({ volume: save.musicVol, start: save.musicStart, end: save.musicEnd, rate: save.musicRate });
@@ -270,6 +272,7 @@ export default function App() {
     <>
     <div className={`app-bg flex h-full flex-col ${save.reducedMotion ? "calm" : ""} ${save.powerSaver ? "power-saver" : ""}`}>
       <Toasts toasts={toasts} />
+      <RecordingPill />
       {/* top bar — wraps on narrow screens so the settings button is never clipped */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-2 px-3 pt-2.5">
         {/* no title up here — the wordmark lives on the boot screens, which keeps
@@ -308,33 +311,21 @@ export default function App() {
             onSandbox={() => setScreen("sandbox")}
             onGemRush={() => setScreen("gemrush")}
             onHardcore={() => {
-              const left = hardcorePlaysLeft(save);
-              if (left <= 0) {
-                sfx.error();
-                push("HARDCORE LOCKED · 3 runs used today — resets at 07:00", "#ff315c");
-                return;
-              }
-              // the attempt is banked on entry, so leaving early still spends it
+              // attempts are counted for stats only; there is no daily limit
               mutate((s) => {
                 spendHardcorePlay(s);
               });
               sfx.boss();
-              push(`HARDCORE · run started · ${left - 1} left today`, "#ff315c");
+              push("HARDCORE · run started", "#ff315c");
               setScreen("hardcore");
             }}
             onSuperHardcore={() => {
-              const left = superHardcorePlaysLeft(save);
-              if (left <= 0) {
-                sfx.error();
-                push("SUPER HARDCORE LOCKED · 3 runs used this week — resets on Monday 07:00", "#ff315c");
-                return;
-              }
-              // the attempt is banked on entry, so leaving early still spends it
+              // attempts are counted for stats only; there is no weekly limit
               mutate((s) => {
                 spendSuperHardcorePlay(s);
               });
               sfx.boss();
-              push(`SUPER HARDCORE · run started · ${left - 1} left this week`, "#ff315c");
+              push("SUPER HARDCORE · run started", "#ff315c");
               sfx.superHardcoreStart();
               setScreen("superhardcore");
             }}

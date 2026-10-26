@@ -21,8 +21,6 @@ import {
   HERO_AWAKENING_MAX_TIER,
   heroAwakenCost,
   BATTLE_ROUNDS,
-  HARDCORE_DAILY_PLAYS,
-  SUPER_HARDCORE_WEEKLY_PLAYS,
   heroAwkSpec,
   MAIL,
   MAIL_BY_ID,
@@ -129,6 +127,32 @@ export const UI_THEMES = [
 ] as const;
 export type UiTheme = (typeof UI_THEMES)[number]["id"];
 
+/**
+ * Frame-interpolation methods. Each one reshapes how far the draw pass glides
+ * between the last two simulation steps (`renderAlpha`); `hermite` also uses a
+ * velocity-aware curve over three snapshots. Every shape keeps position continuous
+ * across step boundaries.
+ */
+export const INTERP_METHODS = [
+  "linear",
+  "smoothstep",
+  "hermite",
+  "extrapolate",
+  "cosine",
+  "quintic",
+  "ease-out",
+] as const;
+export type InterpMethod = (typeof INTERP_METHODS)[number];
+export const INTERP_LABELS: Record<InterpMethod, string> = {
+  linear: "Linear",
+  smoothstep: "Smoothstep",
+  hermite: "Hermite (velocity-aware)",
+  extrapolate: "Extrapolate (lowest latency)",
+  cosine: "Cosine (ease in-out)",
+  quintic: "Quintic (softest ease)",
+  "ease-out": "Ease-out (responsive)",
+};
+
 export interface SaveData {
   gold: number;
   gems: number;
@@ -140,7 +164,7 @@ export interface SaveData {
   scenes: string[];
   awn: Record<string, [number, number]>; // tower id -> [awk1Tier, awk2Tier] 0..5
   /** hero id -> [awk1Tier, awk2Tier], bought with Magic Tokens */
-  heroAwn: Record<string, [number, number]>;
+  heroAwn: Record<string, number[]>;
   hero: string; // selected hero id
   heroLv: Record<string, number>; // hero id -> level (1..HERO_MAX_LEVEL)
   /** hero id -> shards banked from Heroes Chests */
@@ -191,7 +215,7 @@ export interface SaveData {
   powerSaver: boolean;
   /** directional temporal smear during camera shake */
   motionBlur: boolean;
-  /** motion blur strength in percent, 0..200; above 100 the slider turns red */
+  /** motion blur strength in percent, 0..300; above 100 the slider turns red and warns */
   motionBlurAmt: number;
   /** one switch that cuts the heaviest effects and caps the arena at 60 FPS */
   superBoost: boolean;
@@ -203,10 +227,10 @@ export interface SaveData {
   bassBoost: boolean;
   /** boost high frequencies on the sound-effects mix */
   trebleBoost: boolean;
-  /** three-band SFX EQ in decibels (-12..12) */
-  eqBass: number;
-  eqMid: number;
-  eqTreble: number;
+  /** five-band equalizer in decibels (-12..12): 60 · 250 · 1k · 4k · 12k Hz; shapes effects and music */
+  eqBands: number[];
+  /** super volume booster: 500% for every sound and the personal music */
+  superVolBoost: boolean;
   /** independent music player settings; the track itself is stored in IndexedDB */
   musicVol: number;
   musicStart: number;
@@ -240,7 +264,7 @@ export interface SaveData {
   /** draw between sim steps for smoother motion */
   frameInterp: boolean;
   /** interpolation curve used between fixed-step updates */
-  interpolationMethod: "linear" | "smoothstep" | "hermite" | "extrapolate";
+  interpolationMethod: InterpMethod;
   /** effects budget: 0 = everything, 1 = reduced, 2 = minimal */
   fxq: number;
   /** camera shake on explosions */
@@ -349,9 +373,8 @@ export function defaultSave(): SaveData {
     hideWaveCleared: false,
     bassBoost: false,
     trebleBoost: false,
-    eqBass: 0,
-    eqMid: 0,
-    eqTreble: 0,
+    eqBands: [0, 0, 0, 0, 0],
+    superVolBoost: false,
     musicVol: 0.5,
     musicStart: 0,
     musicEnd: 0,
@@ -422,7 +445,7 @@ function normalise(s: SaveData): SaveData {
   s.volBoost = !!s.volBoost;
   s.powerSaver = !!s.powerSaver;
   s.motionBlur = !!s.motionBlur;
-  s.motionBlurAmt = Math.round(Math.min(200, Math.max(0, Number.isFinite(s.motionBlurAmt) ? s.motionBlurAmt : 100)));
+  s.motionBlurAmt = Math.round(Math.min(300, Math.max(0, Number.isFinite(s.motionBlurAmt) ? s.motionBlurAmt : 100)));
   s.superBoost = !!s.superBoost;
   s.frameInterp = s.frameInterp !== false;
   s.experimental = {
@@ -435,16 +458,23 @@ function normalise(s: SaveData): SaveData {
   s.bassBoost = !!s.bassBoost;
   s.trebleBoost = !!s.trebleBoost;
   const eq = (n: number) => Math.max(-12, Math.min(12, Number.isFinite(n) ? n : 0));
-  s.eqBass = eq(s.eqBass);
-  s.eqMid = eq(s.eqMid);
-  s.eqTreble = eq(s.eqTreble);
+  // five bands; older saves carried three (bass / mid / treble) — map them onto the outer and centre bands
+  const legacy = s as unknown as { eqBass?: number; eqMid?: number; eqTreble?: number };
+  const rawBands = Array.isArray(s.eqBands)
+    ? s.eqBands
+    : [legacy.eqBass ?? 0, 0, legacy.eqMid ?? 0, 0, legacy.eqTreble ?? 0];
+  s.eqBands = [0, 1, 2, 3, 4].map((i) => eq(rawBands[i]));
+  delete legacy.eqBass;
+  delete legacy.eqMid;
+  delete legacy.eqTreble;
+  s.superVolBoost = !!s.superVolBoost;
   s.musicVol = Math.max(0, Math.min(1, Number.isFinite(s.musicVol) ? s.musicVol : 0.5));
   s.musicStart = Math.max(0, Number.isFinite(s.musicStart) ? s.musicStart : 0);
   s.musicEnd = Math.max(0, Number.isFinite(s.musicEnd) ? s.musicEnd : 0);
   s.musicRate = Math.round(Math.max(0.5, Math.min(2, Number.isFinite(s.musicRate) ? s.musicRate : 1)) * 100) / 100;
   s.musicName = typeof s.musicName === "string" ? s.musicName.slice(0, 160) : "";
   s.font = typeof s.font === "string" && s.font ? s.font : "rajdhani";
-  s.interpolationMethod = (["linear", "smoothstep", "hermite", "extrapolate"] as const).includes(s.interpolationMethod) ? s.interpolationMethod : "smoothstep";
+  s.interpolationMethod = (INTERP_METHODS as readonly string[]).includes(s.interpolationMethod) ? s.interpolationMethod : "smoothstep";
   s.potions = Math.max(0, Number.isFinite(s.potions) ? Math.round(s.potions) : 0);
   s.crystals = s.crystals && typeof s.crystals === "object" ? s.crystals : {};
   for (const def of CRYSTALS) {
@@ -474,14 +504,13 @@ function normalise(s: SaveData): SaveData {
   if (!["fluorescent", "incandescent", "led", "halogen", "edison"].includes(s.toggleStyle)) s.toggleStyle = "led";
   s.autoSkipBossCut = s.autoSkipBossCut === true;
   s.heroAwn = s.heroAwn && typeof s.heroAwn === "object" ? s.heroAwn : {};
-  // clamp every hero awakening pair into 0..HERO_AWAKENING_MAX_TIER
+  // clamp every hero awakening track (up to three paths) into 0..HERO_AWAKENING_MAX_TIER
   for (const id of Object.keys(s.heroAwn)) {
     const pair = s.heroAwn[id];
     if (!Array.isArray(pair)) { delete s.heroAwn[id]; continue; }
-    s.heroAwn[id] = [
-      Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, Math.floor(Number(pair[0]) || 0))),
-      Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, Math.floor(Number(pair[1]) || 0))),
-    ];
+    s.heroAwn[id] = [0, 1, 2].map((i) =>
+      Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, Math.floor(Number(pair[i]) || 0)))
+    );
   }
   s.heroLv = s.heroLv && typeof s.heroLv === "object" ? s.heroLv : {};
   s.heroShards = s.heroShards && typeof s.heroShards === "object" ? s.heroShards : {};
@@ -493,14 +522,14 @@ function normalise(s: SaveData): SaveData {
   s.gauntletBest = Math.max(0, Math.floor(Number(s.gauntletBest) || 0));
   s.hardcoreBest = Math.max(0, Math.min(BATTLE_ROUNDS, Math.floor(Number(s.hardcoreBest) || 0)));
   s.hardcoreDay = typeof s.hardcoreDay === "string" ? s.hardcoreDay : "";
-  s.hardcoreUses = Math.max(0, Math.min(HARDCORE_DAILY_PLAYS, Math.floor(Number(s.hardcoreUses) || 0)));
+  s.hardcoreUses = Math.max(0, Math.floor(Number(s.hardcoreUses) || 0));
   // a stale day stamp retires yesterday's attempts
   if (s.hardcoreDay !== todayStr()) {
     s.hardcoreDay = todayStr();
     s.hardcoreUses = 0;
   }
   s.superHardcoreWeek = typeof s.superHardcoreWeek === "string" ? s.superHardcoreWeek : "";
-  s.superHardcoreUses = Math.max(0, Math.min(SUPER_HARDCORE_WEEKLY_PLAYS, Math.floor(Number(s.superHardcoreUses) || 0)));
+  s.superHardcoreUses = Math.max(0, Math.floor(Number(s.superHardcoreUses) || 0));
   // a stale week stamp retires last week's Super Hardcore attempts
   if (s.superHardcoreWeek !== weekStr()) {
     s.superHardcoreWeek = weekStr();
@@ -765,36 +794,32 @@ export function rollSeason(s: SaveData): boolean {
  * 06:59 and again at 07:01 counts as two different days — which is the whole
  * point of a 7 A.M. reset.
  */
-/** Hardcore attempts left today (0..3), reset with the 07:00 game-day */
-export function hardcorePlaysLeft(s: SaveData, day = todayStr()): number {
-  const used = s.hardcoreDay === day ? Math.max(0, Math.min(HARDCORE_DAILY_PLAYS, s.hardcoreUses || 0)) : 0;
-  return Math.max(0, HARDCORE_DAILY_PLAYS - used);
+/** Hardcore attempts left: unlimited (the daily cap was removed). */
+export function hardcorePlaysLeft(_s: SaveData, _day = todayStr()): number {
+  return Infinity;
 }
 
-/** Super Hardcore attempts left this week (0..3), reset with the weekly stamp */
-export function superHardcorePlaysLeft(s: SaveData, week = weekStr()): number {
-  const used = s.superHardcoreWeek === week ? Math.max(0, Math.min(SUPER_HARDCORE_WEEKLY_PLAYS, s.superHardcoreUses || 0)) : 0;
-  return Math.max(0, SUPER_HARDCORE_WEEKLY_PLAYS - used);
+/** Super Hardcore attempts left: unlimited (the weekly cap was removed). */
+export function superHardcorePlaysLeft(_s: SaveData, _week = weekStr()): number {
+  return Infinity;
 }
 
-/** Spend one Super Hardcore attempt. Returns false when the weekly budget is gone. */
+/** Count one Super Hardcore attempt for stats. Never refuses a run. */
 export function spendSuperHardcorePlay(s: SaveData, week = weekStr()): boolean {
   if (s.superHardcoreWeek !== week) {
     s.superHardcoreWeek = week;
     s.superHardcoreUses = 0;
   }
-  if ((s.superHardcoreUses || 0) >= SUPER_HARDCORE_WEEKLY_PLAYS) return false;
   s.superHardcoreUses = (s.superHardcoreUses || 0) + 1;
   return true;
 }
 
-/** Spend one Hardcore attempt. Returns false when the daily budget is gone. */
+/** Count one Hardcore attempt for stats. Never refuses a run. */
 export function spendHardcorePlay(s: SaveData, day = todayStr()): boolean {
   if (s.hardcoreDay !== day) {
     s.hardcoreDay = day;
     s.hardcoreUses = 0;
   }
-  if ((s.hardcoreUses || 0) >= HARDCORE_DAILY_PLAYS) return false;
   s.hardcoreUses = (s.hardcoreUses || 0) + 1;
   return true;
 }
@@ -878,7 +903,7 @@ export function levelHeroWithShards(s: SaveData, id: string): boolean {
 }
 
 /** hero awakening tier for one path (0 = not awakened) */
-export function heroAwkTier(s: SaveData, id: string, slot: 0 | 1): number {
+export function heroAwkTier(s: SaveData, id: string, slot: number): number {
   return Math.max(0, Math.min(HERO_AWAKENING_MAX_TIER, s.heroAwn?.[id]?.[slot] || 0));
 }
 
@@ -886,16 +911,16 @@ export function heroAwkTier(s: SaveData, id: string, slot: 0 | 1): number {
  * Buy one hero awakening tier with Magic Tokens. Returns the new tier, or 0
  * when the purchase was refused (no path, maxed, or not enough tokens).
  */
-export function awakenHero(s: SaveData, id: string, slot: 0 | 1): number {
+export function awakenHero(s: SaveData, id: string, slot: number): number {
   if (!heroAwkSpec(id, slot)) return 0;
   const cur = heroAwkTier(s, id, slot);
   if (cur >= HERO_AWAKENING_MAX_TIER) return 0;
   const cost = heroAwakenCost(cur + 1);
   if (s.tokens < cost) return 0;
   s.tokens -= cost;
-  const pair = s.heroAwn[id] || [0, 0];
-  pair[slot] = cur + 1;
-  s.heroAwn[id] = pair as [number, number];
+  const track = s.heroAwn[id] || [0, 0, 0];
+  track[slot] = cur + 1;
+  s.heroAwn[id] = track;
   return cur + 1;
 }
 

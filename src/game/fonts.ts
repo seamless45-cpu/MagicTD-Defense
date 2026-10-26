@@ -1,7 +1,7 @@
 /**
  * FONT CATALOG
  *
- * MagicTD ships eighty UI fonts. Half of them are display faces (Permanent
+ * MagicTD ships ninety-two UI fonts. Half of them are display faces (Permanent
  * Marker, EDO, Bungee, Press Start 2P …), the rest are clean readable text
  * faces for players who want the menus calmer. Every entry carries its own
  * fallback stack, so the game still renders correctly with no network at all.
@@ -122,6 +122,20 @@ export const FONTS: FontDef[] = [
   { id: "lexend", name: "Lexend", stack: '"Lexend", system-ui, sans-serif', google: "Lexend:wght@400;700", group: "text" },
   { id: "roboto-condensed", name: "Roboto Condensed", stack: '"Roboto Condensed", "Arial Narrow", sans-serif', google: "Roboto+Condensed:wght@400;700", group: "text" },
   { id: "work-sans", name: "Work Sans", stack: '"Work Sans", system-ui, sans-serif', google: "Work+Sans:wght@400;700", group: "text" },
+
+  // ---------- added this round: more display, text, mono and script faces ----------
+  { id: "teko", name: "Teko", stack: '"Teko", "Arial Narrow", sans-serif', google: "Teko:wght@400;600;700", group: "display" },
+  { id: "staatliches", name: "Staatliches", stack: '"Staatliches", Impact, sans-serif', google: "Staatliches", group: "display" },
+  { id: "bangers", name: "Bangers", stack: '"Bangers", Impact, cursive', google: "Bangers", group: "display" },
+  { id: "sigmar", name: "Sigmar One", stack: '"Sigmar One", Impact, sans-serif', google: "Sigmar+One", group: "display" },
+  { id: "rye", name: "Rye", stack: '"Rye", Georgia, serif', google: "Rye", group: "display" },
+  { id: "creepster", name: "Creepster", stack: '"Creepster", Impact, cursive', google: "Creepster", group: "display" },
+  { id: "syncopate", name: "Syncopate", stack: '"Syncopate", system-ui, sans-serif', google: "Syncopate:wght@400;700", group: "display" },
+  { id: "dela", name: "Dela Gothic One", stack: '"Dela Gothic One", system-ui, sans-serif', google: "Dela+Gothic+One", group: "display" },
+  { id: "lilita", name: "Lilita One", stack: '"Lilita One", system-ui, sans-serif', google: "Lilita+One", group: "display" },
+  { id: "titillium", name: "Titillium Web", stack: '"Titillium Web", system-ui, sans-serif', google: "Titillium+Web:wght@400;700", group: "text" },
+  { id: "play", name: "Play", stack: '"Play", system-ui, sans-serif', google: "Play:wght@400;700", group: "text" },
+  { id: "share-tech-mono", name: "Share Tech Mono", stack: '"Share Tech Mono", ui-monospace, monospace', google: "Share+Tech+Mono", group: "mono" },
 ];
 
 export const DEFAULT_FONT = "rajdhani";
