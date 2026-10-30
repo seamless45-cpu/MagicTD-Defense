@@ -1,4 +1,4 @@
-# MagicTD sound bank
+# MoonLightTD sound bank
 
 Every sound in the game is built from these short recordings. The synth engine
 in `src/game/audio.ts` is now only a fallback for browsers without Web Audio (or

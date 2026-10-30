@@ -73,7 +73,7 @@ export const SKILLS: Record<string, SkillSpec> = {
     mult: 2.2,
     radius: 120,
     hits: 3,
-    color: "#ffb324",
+    color: "#ffc457",
     desc: "Walks a line of explosive shells across the densest cluster of enemies.",
   },
   wildfire: {

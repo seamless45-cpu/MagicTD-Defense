@@ -114,11 +114,11 @@ export interface GuildState {
 }
 
 export const UI_THEMES = [
-  { id: "rift", name: "Rift", accent: "#b06bff", swatches: ["#0c0824", "#251454", "#b06bff"] },
-  { id: "ocean", name: "Ocean", accent: "#35e0ff", swatches: ["#061827", "#123b58", "#35e0ff"] },
+  { id: "moon", name: "Moonlight", accent: "#8ceaff", swatches: ["#04060f", "#1b2252", "#8ceaff"] },
+  { id: "ocean", name: "Ocean", accent: "#8ceaff", swatches: ["#061827", "#123b58", "#8ceaff"] },
   { id: "ember", name: "Ember", accent: "#ff8a3d", swatches: ["#210b12", "#4a1722", "#ff8a3d"] },
-  { id: "forest", name: "Forest", accent: "#3dff8e", swatches: ["#071a18", "#123c2d", "#3dff8e"] },
-  { id: "royal", name: "Royal", accent: "#ff4fd8", swatches: ["#130a2b", "#30205c", "#ff4fd8"] },
+  { id: "forest", name: "Forest", accent: "#5cffaa", swatches: ["#071a18", "#123c2d", "#5cffaa"] },
+  { id: "royal", name: "Royal", accent: "#b6a0ff", swatches: ["#130a2b", "#30205c", "#b6a0ff"] },
   { id: "aurora", name: "Aurora", accent: "#63ffe1", swatches: ["#04191d", "#0d3941", "#63ffe1"] },
   { id: "solar", name: "Solar Flare", accent: "#ff9f43", swatches: ["#241006", "#52210c", "#ff9f43"] },
   { id: "obsidian", name: "Obsidian", accent: "#a8b5d8", swatches: ["#080b14", "#171d2d", "#a8b5d8"] },
@@ -381,7 +381,7 @@ export function defaultSave(): SaveData {
     musicRate: 1,
     musicName: "",
     liquidGlass: false,
-    uiTheme: "rift",
+    uiTheme: "moon",
     language: "en",
     toggleStyle: "led",
     font: "rajdhani",
@@ -498,7 +498,7 @@ function normalise(s: SaveData): SaveData {
   s.bloomFx = s.bloomFx !== false;
   s.shadowFx = s.shadowFx !== false;
   s.antiAlias = s.antiAlias !== false;
-  if (!UI_THEMES.some((theme) => theme.id === s.uiTheme)) s.uiTheme = "rift";
+  if (s.uiTheme === ("rift" as UiTheme) || !UI_THEMES.some((theme) => theme.id === s.uiTheme)) s.uiTheme = "moon";
   // keep any supported language; anything unknown falls back to English
   s.language = (["en", "th", "es", "fr", "de", "ja", "ko", "zh", "fil", "ms", "id", "my", "lo"] as const).includes(s.language) ? s.language : "en";
   if (!["fluorescent", "incandescent", "led", "halogen", "edison"].includes(s.toggleStyle)) s.toggleStyle = "led";
@@ -710,7 +710,7 @@ export function deliverAutoBattleReport(
   s.mail.custom.push({
     id, kind: "reward", from: "Auto-Defense Command", subject: `${mode === "gauntlet" ? "Gauntlet" : "Endless"} expedition report`,
     body: `Your active run was ended. Your squad cleared ${count} simulated waves and was overwhelmed at wave ${brokenAt} (${minutes} minutes estimated). Rewards mirror the run's completed-wave wallet and end-of-run payout; enemy kill gold uses a deterministic expected composition. No cooldown applies. Weekly uses: ${s.mail.autoUses}/3.`,
-    color: mode === "gauntlet" ? "#3dff8e" : "#ff4fd8",
+    color: mode === "gauntlet" ? "#5cffaa" : "#b6a0ff",
     reward: { gold, gems, tokens, frags, potions }, age: "just now",
   });
   return id;
@@ -1043,9 +1043,9 @@ export function grantLoot(s: SaveData, loot: ChestLoot) {
 /** flatten loot into the animated lines the claim UI renders */
 export function lootLines(loot: ChestLoot): RewardLine[] {
   const out: RewardLine[] = [];
-  if (loot.gold) out.push({ kind: "gold", label: "Gold", n: loot.gold, color: "#ffcf4d" });
-  if (loot.gems) out.push({ kind: "gems", label: "Gems", n: loot.gems, color: "#35e0ff" });
-  if (loot.tokens) out.push({ kind: "tokens", label: "Magic Tokens", n: loot.tokens, color: "#ff4fd8" });
+  if (loot.gold) out.push({ kind: "gold", label: "Gold", n: loot.gold, color: "#ffd977" });
+  if (loot.gems) out.push({ kind: "gems", label: "Gems", n: loot.gems, color: "#8ceaff" });
+  if (loot.tokens) out.push({ kind: "tokens", label: "Magic Tokens", n: loot.tokens, color: "#b6a0ff" });
   if (loot.potions) out.push({ kind: "potions", label: "Crystal Potions", n: loot.potions, color: "#b98bff" });
   loot.frags.forEach((f) =>
     out.push({
@@ -1058,10 +1058,10 @@ export function lootLines(loot: ChestLoot): RewardLine[] {
   );
   (Object.keys(loot.chips) as ChipId[]).forEach((k) => {
     const n = loot.chips[k] || 0;
-    if (n > 0) out.push({ kind: "chip", id: k, label: `${k[0].toUpperCase()}${k.slice(1)} Chip Module`, n, color: k === "basic" ? "#8fe9ff" : k === "advanced" ? "#c44dff" : "#ffb324" });
+    if (n > 0) out.push({ kind: "chip", id: k, label: `${k[0].toUpperCase()}${k.slice(1)} Chip Module`, n, color: k === "basic" ? "#8fe9ff" : k === "advanced" ? "#c44dff" : "#ffc457" });
   });
   loot.heroShards.forEach((h) =>
-    out.push({ kind: "heroShard", id: h.id, label: `${HERO_BY_ID[h.id]?.name ?? h.id} shards`, n: h.n, color: HERO_BY_ID[h.id]?.color ?? "#ff4fd8" })
+    out.push({ kind: "heroShard", id: h.id, label: `${HERO_BY_ID[h.id]?.name ?? h.id} shards`, n: h.n, color: HERO_BY_ID[h.id]?.color ?? "#b6a0ff" })
   );
   return out;
 }
@@ -1258,9 +1258,9 @@ export function nextEventStreak(s: SaveData): number {
   return 1;
 }
 
-/** +10% loot for every day of the streak, capped at +60% */
+/** +15% loot for every day of the streak, capping at ×1.9 on day 7 */
 export function eventStreakMul(streak: number): number {
-  return 1 + 0.1 * Math.max(0, Math.min(7, streak) - 1);
+  return 1 + 0.15 * Math.max(0, Math.min(7, streak) - 1);
 }
 
 export function eventClaimable(s: SaveData): boolean {
@@ -1293,6 +1293,11 @@ export function claimEventBonus(s: SaveData): ChestLoot | null {
     case "mineshaft":
       loot.gold = 12000;
       break;
+    case "moonwell":
+      // Saturday pays the vault's cousin: magic tokens, scaled by the streak
+      loot.tokens = 4;
+      loot.gems = 220;
+      break;
     case "gemrush":
       // Sunday is an active survival mode, not a passive claim bonus.
       break;
@@ -1303,6 +1308,9 @@ export function claimEventBonus(s: SaveData): ChestLoot | null {
   loot.gems = Math.round(loot.gems * mul);
   loot.tokens = Math.round(loot.tokens * mul);
   loot.potions += streak;
+  // every fourth streak day also sparkles: a bonus potion once the chain is
+  // properly established (days 4 and 7 land on the same cadence)
+  if (streak >= 4 && streak % 3 === 1) loot.potions += 2;
   grantLoot(s, loot);
   s.lastEvent = todayStr();
   s.eventStreak = streak;
@@ -1389,7 +1397,14 @@ export function claimMonthTier(s: SaveData, idx: number): ChestLoot | null {
   const tiers = monthlyTiers(ev.id);
   const t = tiers[idx];
   if (!t || monthTierClaimed(s, idx) || monthPoints(s) < t.points) return null;
-  const loot: ChestLoot = { ...emptyLoot(), gold: t.gold, gems: t.gems, potions: t.potions, chips: { ...(t.chips || {}) } };
+  const loot: ChestLoot = {
+    ...emptyLoot(),
+    gold: t.gold,
+    gems: t.gems,
+    potions: t.potions,
+    tokens: t.tokens || 0,
+    chips: { ...(t.chips || {}) },
+  };
   grantLoot(s, loot);
   s.monthClaimed = [...s.monthClaimed, `${monthStamp()}-${idx}`];
   return loot;

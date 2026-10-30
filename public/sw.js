@@ -1,5 +1,5 @@
 /*
- * MagicTD Defense service worker.
+ * MoonLightTD Defense service worker.
  *
  * The whole game is one self-contained HTML file, so the install just needs the
  * shell plus the icons. Navigations go network-first (so a new deploy is picked
@@ -11,7 +11,7 @@
  * Bump CACHE when the sample files change, otherwise installed PWAs keep the
  * old clips (the filenames are stable).
  */
-const CACHE = "magictd-v8";
+const CACHE = "magictd-v9";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {

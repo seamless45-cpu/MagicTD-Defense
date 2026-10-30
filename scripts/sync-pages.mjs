@@ -22,7 +22,7 @@ if (!existsSync(built)) {
 let html = readFileSync(built, "utf8");
 
 // keep only the served entry name; everything is already inlined
-if (!html.includes("MagicTD")) {
+if (!html.includes("MoonLightTD")) {
   console.error("sync-pages: refusing to publish, app.html does not look like the built game");
   process.exit(1);
 }

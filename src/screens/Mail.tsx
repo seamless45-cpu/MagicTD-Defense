@@ -53,7 +53,7 @@ export default function Mail({
     const loot = claimMail(draft, id);
     if (!loot) {
       sfx.error();
-      return push("Nothing to collect here", "#ff4d5e");
+      return push("Nothing to collect here", "#ff5c70");
     }
     mutate((s) => {
       claimMail(s, id);
@@ -72,14 +72,14 @@ export default function Mail({
   const doClaimAll = () => {
     if (!ready.length) {
       sfx.error();
-      push("Nothing to collect", "#ff4d5e");
+      push("Nothing to collect", "#ff5c70");
       return;
     }
     const draft = cloneSave(save);
     const loot = claimAllMail(draft);
     if (!loot) {
       sfx.error();
-      return push("Nothing to collect", "#ff4d5e");
+      return push("Nothing to collect", "#ff5c70");
     }
     mutate((s) => {
       claimAllMail(s);
@@ -89,7 +89,7 @@ export default function Mail({
       title: "ALL ATTACHMENTS",
       subtitle: `${ready.length} message${ready.length === 1 ? "" : "s"} cleared`,
       lines: lootLines(loot),
-      color: "#ffcf4d",
+      color: "#ffd977",
     });
   };
 
@@ -105,9 +105,9 @@ export default function Mail({
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="panel flex shrink-0 flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderColor: "rgba(53,224,255,0.4)" }}>
+      <div className="panel flex shrink-0 flex-wrap items-center justify-between gap-3 px-4 py-3" style={{ borderColor: "rgba(140,234,255,0.4)" }}>
         <div className="min-w-0">
-          <div className="font-disp text-xl text-[#35e0ff]">MAILBOX</div>
+          <div className="font-disp text-xl text-[#8ceaff]">MAILBOX</div>
           <div className="text-[12px] font-semibold text-[var(--dim)]">
             <span className="num">{messages.length}</span> messages ·{" "}
             <span className="num" style={{ color: ready.length ? "#8effc4" : "var(--dim)" }}>
@@ -200,21 +200,21 @@ export default function Mail({
               </p>
 
               {cur.reward && (
-                <div className="mt-3 rounded-lg border border-[#ffcf4d55] bg-black/30 px-3 py-2">
-                  <div className="text-[10px] font-bold tracking-[0.24em] text-[#ffcf4d]">ATTACHED</div>
+                <div className="mt-3 rounded-lg border border-[#ffd97755] bg-black/30 px-3 py-2">
+                  <div className="text-[10px] font-bold tracking-[0.24em] text-[#ffd977]">ATTACHED</div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12.5px] font-bold">
                     {!!cur.reward.gold && (
-                      <span className="inline-flex items-center gap-1 text-[#ffcf4d]">
+                      <span className="inline-flex items-center gap-1 text-[#ffd977]">
                         <CoinIcon size={15} /> <span className="num">{cur.reward.gold}</span>
                       </span>
                     )}
                     {!!cur.reward.gems && (
-                      <span className="inline-flex items-center gap-1 text-[#35e0ff]">
+                      <span className="inline-flex items-center gap-1 text-[#8ceaff]">
                         <GemIcon size={15} /> <span className="num">{cur.reward.gems}</span>
                       </span>
                     )}
                     {!!cur.reward.tokens && (
-                      <span className="inline-flex items-center gap-1 text-[#ff4fd8]">
+                      <span className="inline-flex items-center gap-1 text-[#b6a0ff]">
                         <TokenIcon size={15} /> <span className="num">{cur.reward.tokens}</span>
                       </span>
                     )}

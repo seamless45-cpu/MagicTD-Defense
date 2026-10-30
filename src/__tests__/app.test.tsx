@@ -98,7 +98,7 @@ afterEach(() => {
   unmountApp();
 });
 
-describe("MagicTD app shell", () => {
+describe("MoonLightTD app shell", () => {
   it("boots from the loading screen and navigates every tab", async () => {
     await mountApp();
     expect(document.body.textContent).toContain("Command Center");
@@ -181,15 +181,15 @@ describe("Boot sequence", () => {
 
     // 1. the cold open: logo + animated title over pure black
     const intro = await waitFor(() => document.querySelector('[data-testid="launch-intro"]'), "launch intro");
-    expect(intro.textContent).toContain("MAGICTD");
+    expect(intro.textContent).toContain("MOONLIGHTTD");
     expect(intro.textContent).toContain("DEFENSE");
-    expect(document.querySelectorAll(".boot-letter").length).toBe("MAGICTD".length);
+    expect(document.querySelectorAll(".boot-letter").length).toBe("MOONLIGHTTD".length);
     expect(document.querySelector(".bt-core")).toBeTruthy();
 
     // 2. the loading screen: logo + title on top, one car on a track below
     await waitFor(() => document.querySelector('[data-testid="loading-screen"]'), "loading screen");
     expect(document.querySelector(".ld-emblem")).toBeTruthy();
-    expect(document.body.textContent).toContain("MagicTD");
+    expect(document.body.textContent).toContain("MoonLightTD");
     expect(document.body.textContent).toContain("DEFENSE");
     expect(document.querySelector('[data-testid="loading-car"]'), "loading car").toBeTruthy();
     expect(document.querySelector('[data-testid="loading-car"]')!.querySelectorAll("span").length).toBeGreaterThan(4);
@@ -714,11 +714,12 @@ describe("Heroes", () => {
 
 describe("Clone tower", () => {
   it("copies a dragged tower and never consumes the original", async () => {
-    // two Clones only: every drag then lands ON a clone, which is the copy path
+    // one Clone and one Arrow: every cross drag lands on the copy path
+    // (clone+clone would be the merge roulette, which is covered elsewhere)
     persistSave({
       ...defaultSave(),
-      lineup: ["clone"],
-      levels: { ...defaultSave().levels, clone: 1 },
+      lineup: ["clone", "arrow"],
+      levels: { ...defaultSave().levels, clone: 1, arrow: 1 },
     });
     await mountApp();
     startMode("Battle");
@@ -735,23 +736,31 @@ describe("Clone tower", () => {
 
     // drag one onto the other: the copy path fires and BOTH towers remain.
     // Summons land on random cells, so brute-force every ordered cell pair
-    // until the copy lands (both towers are clones, so any occupied target is
-    // a clone destination and points always match).
+    // until the copy lands — but stop at the first success so later pairs
+    // cannot run follow-up merges on the freshly copied board.
     const canvas = document.querySelector("canvas") as HTMLCanvasElement;
-    const cx = (c: number) => 185 + (c + 0.5) * 90;
-    const cy = (r: number) => 158 + (r + 0.5) * 90;
+    // arena geometry: OX=(1000-7*104)/2, OY=(580-4*104)/2+48, cell 104
+    const cx = (c: number) => 136 + (c + 0.5) * 104;
+    const cy = (r: number) => 130 + (r + 0.5) * 104;
     const cells: [number, number][] = [];
     for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([cx(c), cy(r)]);
+    let copied = false;
     for (const [x1, y1] of cells) {
       for (const [x2, y2] of cells) {
         if (x1 === x2 && y1 === y2) continue;
         pointer("pointerdown", canvas, x1, y1);
         pointer("pointermove", canvas, x2, y2);
         pointer("pointerup", canvas, x2, y2);
+        // let React flush the toast before trying the next pair
+        await sleep(6);
+        if (/cloned|SUPER CLONE/i.test(document.body.textContent || "")) {
+          copied = true;
+          break;
+        }
       }
+      if (copied) break;
     }
-    // the copy lands on the first real pair — the toast renders on React's next
-    // flush, so wait for it instead of reading the DOM in the same tick
+    // the copy lands on one of the real pairs — the toast renders on React's next flush
     await waitFor(() => /cloned|SUPER CLONE/i.test(document.body.textContent || ""), "clone toast", 6000);
     await waitFor(() => towersOnBoard() === 2, "the original was never consumed");
     noErrors();
@@ -815,14 +824,14 @@ describe("Towers", () => {
     expect(page, "tower page").toBeTruthy();
     expect(page.className).toContain("overflow-y-auto");
     // ...that is actually bounded by the app shell: the tab is h-full all the way
-    // up into the min-h-0 flex-1 content area, otherwise a 62-cell grid would
+    // up into the min-h-0 flex-1 content area, otherwise a 65-cell grid would
     // just push the nav bar off the bottom of the screen
     const chain: string[] = [];
     for (let el = page.parentElement; el && el !== document.body; el = el.parentElement) chain.push(el.className);
     expect(chain.some((c) => c.includes("min-h-0") && c.includes("flex-1")), `bounded ancestor: ${chain.join(" > ")}`).toBe(true);
     expect(chain.every((c) => !/overflow-(y-)?(auto|scroll|hidden)/.test(c)), "a second scroller between the tab and the shell").toBe(true);
 
-    // the 62-cell grid hangs directly off it: it used to live inside
+    // the 65-cell grid hangs directly off it: it used to live inside
     // `flex min-h-0 flex-1` with a pinned ASCENT ALL footer below, which capped
     // the box at a handful of rows and made the last groups unreachable
     const grid = document.querySelector('[data-testid="tower-grid"]') as HTMLElement;
@@ -836,10 +845,10 @@ describe("Towers", () => {
     );
     expect(nested, "nested scroll boxes inside the tab").toHaveLength(0);
 
-    // every tower is in that one grid: 64 cells + 5 rarity headers
-    expect(grid.children.length).toBe(69);
+    // every tower is in that one grid: 65 cells + 5 rarity headers
+    expect(grid.children.length).toBe(70);
     const towerCells = page.querySelectorAll(".tw-cell[data-tower]").length;
-    expect(towerCells).toBe(64);
+    expect(towerCells).toBe(65);
 
     // the rotation strip and the filters ride along on top of the scroll, so the
     // drag-to-rotation drop target never scrolls out of reach
@@ -894,9 +903,9 @@ describe("Towers", () => {
     );
     expect(saved().gold).toBe(before.gold - upgPrice);
     expect(saved().frags.arrow).toBe(before.frags.arrow - 1);
-    // the preview re-renders with the new level
+    // the preview re-renders with the new level (menu levels now cap at 25)
     await waitFor(
-      () => (document.querySelector('[data-testid="tower-preview"]') as HTMLElement).textContent?.includes("Lv 2/15"),
+      () => (document.querySelector('[data-testid="tower-preview"]') as HTMLElement).textContent?.includes("Lv 2/25"),
       "preview shows the new level"
     );
 
@@ -1622,7 +1631,7 @@ describe("Battle", () => {
     const spBefore = spNow();
 
     click(btn());
-    await waitFor(() => (card().textContent || "").includes("Lv 2/6"), "the tower type ascended");
+    await waitFor(() => (card().textContent || "").includes("Lv 2/25"), "the tower type ascended");
     expect(btn().textContent).toContain("200");
     expect(spNow()).toBeLessThan(spBefore);
 

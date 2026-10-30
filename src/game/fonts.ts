@@ -1,7 +1,7 @@
 /**
  * FONT CATALOG
  *
- * MagicTD ships ninety-two UI fonts. Half of them are display faces (Permanent
+ * MoonLightTD ships ninety-two UI fonts. Half of them are display faces (Permanent
  * Marker, EDO, Bungee, Press Start 2P …), the rest are clean readable text
  * faces for players who want the menus calmer. Every entry carries its own
  * fallback stack, so the game still renders correctly with no network at all.

@@ -65,7 +65,7 @@ describe("launch intro", () => {
     expect(intro(), "intro survives the audio-unlock tap").toBeTruthy();
 
     // the wordmark letters animate in on their own a beat later
-    await waitFor(() => document.querySelectorAll(".boot-letter.on").length === 7, "letters animate in");
+    await waitFor(() => document.querySelectorAll(".boot-letter.on").length === 11, "letters animate in");
     expect(intro(), "intro is still on screen while it animates").toBeTruthy();
 
     // and it hands itself over to the loading screen without any input

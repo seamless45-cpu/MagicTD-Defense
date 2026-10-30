@@ -1,12 +1,21 @@
 /**
- * EXTERNAL SAMPLE LAYER — the primary sound engine for MagicTD.
+ * EXTERNAL SAMPLE LAYER — the primary sound engine for MoonLightTD.
  *
  * Every cue below is built from short, real recordings from Kenney's CC0 sound
  * library (Interface Sounds, UI Audio, RPG Audio, Impact Sounds, Sci-Fi Sounds
  * and Music Jingles). The clips live in `public/sfx/` and are preloaded once
  * the first gesture unlocks audio. Each cue is layered like a sound designer
- * would layer it: a transient, a body and a tail, with a little random pitch
- * so repeated shots never sound machine-gunned.
+ * would layer it: a transient, a body and a tail.
+ *
+ * The 2026 mix pass added the studio stages on top of the layering:
+ *  - per-clip loudness normalisation measured at decode time, so the authored
+ *    layer balance is what actually reaches the speakers
+ *  - dual convolution space — a long hall for size, a short plate for air
+ *  - soft master saturation (tanh waveshaper) feeding a tighter limiter
+ *  - a synthesised sub-thump under every big impact
+ *  - round-robin detune ladders + 2-10 ms micro-timing, so repeats never
+ *    machine-gun the same pitch on the exact same grid
+ *  - sidechain-style music ducking on win/lose/ceremony stingers
  *
  * The engine is deliberately defensive:
  *  - no AudioContext (jsdom, old browser) -> initSamples() returns false and
@@ -639,7 +648,7 @@ function chestLootCue(n: number): SampleCue {
 // =====================================================================
 
 /** level of the sample bus at volume 100%, before the player's volume slider */
-const SAMPLE_MASTER = 0.52;
+const SAMPLE_MASTER = 0.56;
 
 type AudioContextCtor = new () => AudioContext;
 
@@ -666,9 +675,17 @@ interface SampleRack {
   musicIn: GainNode;
   buffers: Map<string, AudioBuffer>;
   loading: Map<string, Promise<AudioBuffer | null>>;
-  /** shared reverb bus; null when the browser has no ConvolverNode */
+  /**
+   * per-clip loudness gain, measured at decode time. Kenney's packs were
+   * mastered separately, so a glass tick can be 12 dB quieter than a bomb at
+   * the same authored gain — normalising here is what lets the cue table's
+   * layer balance actually mean what it says.
+   */
+  norms: Map<string, number>;
+  /** shared reverb buses: a long hall for big cues, a short plate for UI */
   verbIn: GainNode | null;
   verbReturn: GainNode | null;
+  verbPlate: GainNode | null;
   voices: number;
   maxVoices: number;
   ready: boolean;
@@ -797,6 +814,39 @@ function decodeAudio(ctx: AudioContext, bytes: ArrayBuffer): Promise<AudioBuffer
   });
 }
 
+/**
+ * Measure one decoded clip and return the gain that lands it at a consistent
+ * loudness: 70% of the weight on peak headroom (so nothing clips) and 30% on
+ * RMS (so a sparse tick is not punished for being sparse). This runs once per
+ * file at decode time — the scan is strided, so even the longest jingle costs
+ * well under a millisecond.
+ */
+function measureLoudness(buf: AudioBuffer): number {
+  try {
+    let peak = 0;
+    let sumSq = 0;
+    let samples = 0;
+    const step = Math.max(1, Math.floor(buf.length / 60000));
+    for (let c = 0; c < buf.numberOfChannels; c++) {
+      const data = buf.getChannelData(c);
+      for (let i = 0; i < data.length; i += step) {
+        const v = data[i] < 0 ? -data[i] : data[i];
+        if (v > peak) peak = v;
+        sumSq += v * v;
+        samples++;
+      }
+    }
+    if (peak < 0.0001 || samples === 0) return 1;
+    const rms = Math.sqrt(sumSq / samples);
+    const peakGain = 0.92 / peak;
+    const rmsGain = rms > 0.0001 ? 0.16 / rms : 1;
+    const gain = Math.pow(peakGain, 0.7) * Math.pow(Math.min(rmsGain, 8), 0.3);
+    return Math.max(0.2, Math.min(8, gain));
+  } catch {
+    return 1;
+  }
+}
+
 function loadOne(file: string): Promise<AudioBuffer | null> {
   if (!rack) return Promise.resolve(null);
   const cached = rack.buffers.get(file);
@@ -810,6 +860,7 @@ function loadOne(file: string): Promise<AudioBuffer | null> {
       const bytes = await res.arrayBuffer();
       const buffer = await decodeAudio(rack!.ctx, bytes);
       rack!.buffers.set(file, buffer);
+      rack!.norms.set(file, measureLoudness(buffer));
       return buffer;
     } catch {
       return null;
@@ -893,39 +944,76 @@ export function initSamples(fallback?: () => void): boolean {
     lowCut.connect(eq[0]);
     for (let i = 1; i < eq.length; i++) eq[i - 1].connect(eq[i]);
     musicIn.connect(lowCut);
+    // ---- master saturation: a soft tube-ish curve before the limiter ----
+    // It adds the harmonic density that makes layered samples read as "produced"
+    // instead of "triggered", and it acts as a gentle safety ceiling too.
+    let sat: WaveShaperNode | null = null;
+    try {
+      sat = ctx.createWaveShaper();
+      const n = 2048;
+      const curve = new Float32Array(n);
+      const k = 1.8;
+      const norm = Math.tanh(k);
+      for (let i = 0; i < n; i++) {
+        const x = (i / (n - 1)) * 2 - 1;
+        curve[i] = Math.tanh(k * x) / norm;
+      }
+      sat.curve = curve;
+      sat.oversample = "2x";
+      eq[eq.length - 1].connect(sat);
+    } catch {
+      // no WaveShaper: the raw EQ output feeds the limiter directly
+      sat = null;
+    }
+    const postEq: AudioNode = sat ?? eq[eq.length - 1];
     let comp: DynamicsCompressorNode | null = null;
     try {
       comp = ctx.createDynamicsCompressor();
-      comp.threshold.value = -15;
-      comp.knee.value = 22;
-      comp.ratio.value = 4.5;
-      comp.attack.value = 0.004;
-      comp.release.value = 0.2;
-      eq[eq.length - 1].connect(comp);
+      comp.threshold.value = -16;
+      comp.knee.value = 18;
+      comp.ratio.value = 5;
+      comp.attack.value = 0.003;
+      comp.release.value = 0.16;
+      postEq.connect(comp);
       comp.connect(ctx.destination);
     } catch {
       // no compressor node: the limiter-less path still works, just louder
-      eq[eq.length - 1].connect(ctx.destination);
+      postEq.connect(ctx.destination);
     }
-    // ---- reworked space: one shared convolution reverb on a send ----
+    // ---- dual convolution space: a long hall + a short bright plate ----
     let verbIn: GainNode | null = null;
     let verbReturn: GainNode | null = null;
+    let verbPlate: GainNode | null = null;
     const makeConvolver = (ctx as AudioContext & { createConvolver?: () => ConvolverNode }).createConvolver;
     if (typeof makeConvolver === "function") {
       try {
-        const convolver = makeConvolver.call(ctx);
-        const impulse = makeImpulse(ctx, 1.35, 2.8);
-        if (impulse) convolver.buffer = impulse;
+        const hall = makeConvolver.call(ctx);
+        const hallIR = makeImpulse(ctx, 1.6, 2.4);
+        if (hallIR) hall.buffer = hallIR;
         verbReturn = ctx.createGain();
         verbReturn.gain.value = 0.55;
         verbIn = ctx.createGain();
         verbIn.gain.value = 1;
-        verbIn.connect(convolver);
-        convolver.connect(verbReturn);
+        verbIn.connect(hall);
+        hall.connect(verbReturn);
         verbReturn.connect(master);
+
+        // the plate: shorter, brighter — UI clicks and coins get air without
+        // smearing into the hall tail the ceremonies use
+        const plate = makeConvolver.call(ctx);
+        const plateIR = makeImpulse(ctx, 0.42, 3.6);
+        if (plateIR) plate.buffer = plateIR;
+        const plateRet = ctx.createGain();
+        plateRet.gain.value = 0.4;
+        verbPlate = ctx.createGain();
+        verbPlate.gain.value = 1;
+        verbPlate.connect(plate);
+        plate.connect(plateRet);
+        plateRet.connect(master);
       } catch {
         verbIn = null;
         verbReturn = null;
+        verbPlate = null;
       }
     }
     rack = {
@@ -937,10 +1025,12 @@ export function initSamples(fallback?: () => void): boolean {
       musicIn,
       buffers: new Map(),
       loading: new Map(),
+      norms: new Map(),
       verbIn,
       verbReturn,
+      verbPlate,
       voices: 0,
-      maxVoices: 42,
+      maxVoices: 48,
       ready: false,
     };
     setSampleEQ(stateEq);
@@ -956,6 +1046,10 @@ export function initSamples(fallback?: () => void): boolean {
   }
 }
 
+/** per-cue round-robin counters: every layer identity steps its own ladder */
+const variationCounters: Record<string, number> = {};
+const keyOf = (layer: SampleLayer) => (Array.isArray(layer.file) ? layer.file.join("|") : layer.file) + "@" + (layer.pan ?? 0);
+
 function pickFile(file: FileSpec): string {
   return Array.isArray(file) ? file[Math.floor(Math.random() * file.length)] : file;
 }
@@ -969,8 +1063,10 @@ interface ReworkedSoundProfile {
   gain: number;
   pitch: number;
   stereoWidth: number;
-  /** reverb send level for this family, 0..1 */
+  /** long-hall send level for this family, 0..1 */
   verb: number;
+  /** short-plate send level for this family, 0..1 */
+  plate: number;
   /** per-voice tone shaping: high-pass / low-pass cutoff and Q */
   hp: number;
   lp: number;
@@ -986,14 +1082,15 @@ interface ReworkedSoundProfile {
  */
 function reworkedProfile(key: string): ReworkedSoundProfile {
   if (/^(eclipse|seraph|heavenly|demon|supervisor|doomsday|void|gravity)/.test(key))
-    return { gain: 0.95, pitch: 0.96, stereoWidth: 0.44, verb: 0.38, hp: 42, lp: 12000, q: 0.8, detune: 0.035 };
+    return { gain: 0.95, pitch: 0.96, stereoWidth: 0.44, verb: 0.38, plate: 0.1, hp: 42, lp: 12000, q: 0.8, detune: 0.035 };
   if (/^(shoot|zap|blast|superbolt|explosion|freeze|stun|crit|impact|meteor|leak|boss|hero)/.test(key))
-    return { gain: 0.92, pitch: 0.94, stereoWidth: 0.36, verb: 0.2, hp: 38, lp: 11500, q: 0.7, detune: 0.045 };
+    return { gain: 0.92, pitch: 0.94, stereoWidth: 0.36, verb: 0.22, plate: 0.1, hp: 38, lp: 11500, q: 0.7, detune: 0.045 };
   if (/^(win|lose|ceremony|rally|wave|ascend|awaken|chest)/.test(key))
-    return { gain: 0.88, pitch: 1.03, stereoWidth: 0.28, verb: 0.42, hp: 55, lp: 13500, q: 0.6, detune: 0.018 };
+    return { gain: 0.88, pitch: 1.03, stereoWidth: 0.28, verb: 0.42, plate: 0.16, hp: 55, lp: 13500, q: 0.6, detune: 0.018 };
   if (/^(coin|onKill|point|purchase|upgrade|merge|summon|place|towerDrop)/.test(key))
-    return { gain: 0.96, pitch: 1.06, stereoWidth: 0.2, verb: 0.16, hp: 70, lp: 15000, q: 0.7, detune: 0.02 };
-  return { gain: 0.92, pitch: 1.04, stereoWidth: 0.16, verb: 0.12, hp: 80, lp: 15500, q: 0.6, detune: 0.015 };
+    return { gain: 0.96, pitch: 1.06, stereoWidth: 0.2, verb: 0.08, plate: 0.2, hp: 70, lp: 15000, q: 0.7, detune: 0.02 };
+  // dry UI family: plate only — clicks stay tight, never cavernous
+  return { gain: 0.92, pitch: 1.04, stereoWidth: 0.16, verb: 0.04, plate: 0.16, hp: 80, lp: 15500, q: 0.6, detune: 0.015 };
 }
 
 function playLayer(layer: SampleLayer, profile: ReworkedSoundProfile, index: number, count: number): boolean {
@@ -1008,14 +1105,24 @@ function playLayer(layer: SampleLayer, profile: ReworkedSoundProfile, index: num
   }
   if (rack.voices >= rack.maxVoices) return true; // drop the voice, never fall back mid-storm
   const ctx = rack.ctx;
-  const gain = Math.max(0.0001, (layer.gain ?? 0.6) * profile.gain);
+  // measured loudness first, so the authored layer balance actually holds
+  const norm = rack.norms.get(file) ?? 1;
+  const gain = Math.max(0.0001, Math.min(1.4, (layer.gain ?? 0.6) * profile.gain * norm));
   const rate = rateValue(layer.rate) * profile.pitch;
-  const t0 = ctx.currentTime + Math.max(0, layer.delay ?? 0) + 0.003;
+  // micro-timing: a real player never triggers frames on the exact sample, and
+  // 2-10 ms of jitter is the difference between "sequenced" and "played"
+  const t0 = ctx.currentTime + Math.max(0, layer.delay ?? 0) + 0.002 + Math.random() * 0.008;
   const natural = buffer.duration / rate;
   const duration = Math.max(0.025, Math.min(natural, layer.dur ?? natural));
 
   const src = ctx.createBufferSource();
   src.buffer = buffer;
+  // round-robin variation: walk an 8-step golden-ratio detune ladder instead of
+  // rolling dice, so repeated shots cover the whole spread evenly and never
+  // machine-gun the same pitch twice in a row
+  const rr = ((variationCounters[keyOf(layer)] = (variationCounters[keyOf(layer)] ?? 0) + 1) % 8) / 7;
+  const rrDetune = 1 - profile.detune + rr * profile.detune * 2;
+  const jitter = 1 + (Math.random() - 0.5) * profile.detune * 0.5;
   if (Array.isArray(layer.rate)) {
     const variation = 0.92 + Math.random() * 0.16;
     const from = Math.max(0.25, layer.rate[0] * profile.pitch * variation);
@@ -1023,7 +1130,7 @@ function playLayer(layer: SampleLayer, profile: ReworkedSoundProfile, index: num
     src.playbackRate.setValueAtTime(from, t0);
     src.playbackRate.linearRampToValueAtTime(to, t0 + duration);
   } else {
-    src.playbackRate.value = rate * (1 - profile.detune + Math.random() * profile.detune * 2);
+    src.playbackRate.value = rate * rrDetune * jitter;
   }
 
   // Reworked envelope: a hard, click-free 3 ms transient, a short body and a
@@ -1074,8 +1181,9 @@ function playLayer(layer: SampleLayer, profile: ReworkedSoundProfile, index: num
   } else {
     out.connect(rack.master);
   }
-  // shared reverb send, per-family level
+  // dual reverb sends: long hall for size, short plate for air, per family
   let send: GainNode | null = null;
+  let plateSend: GainNode | null = null;
   if (rack.verbIn && profile.verb > 0) {
     try {
       send = ctx.createGain();
@@ -1084,6 +1192,16 @@ function playLayer(layer: SampleLayer, profile: ReworkedSoundProfile, index: num
       send.connect(rack.verbIn);
     } catch {
       send = null;
+    }
+  }
+  if (rack.verbPlate && profile.plate > 0) {
+    try {
+      plateSend = ctx.createGain();
+      plateSend.gain.value = profile.plate;
+      out.connect(plateSend);
+      plateSend.connect(rack.verbPlate);
+    } catch {
+      plateSend = null;
     }
   }
 
@@ -1096,6 +1214,7 @@ function playLayer(layer: SampleLayer, profile: ReworkedSoundProfile, index: num
       tone?.disconnect();
       panner?.disconnect();
       send?.disconnect();
+      plateSend?.disconnect();
     } catch {
       /* already gone */
     }
@@ -1110,12 +1229,82 @@ function playLayer(layer: SampleLayer, profile: ReworkedSoundProfile, index: num
   return true;
 }
 
+/**
+ * Synthesised sub thump — the weight layer no sample pack carries. Sines
+ * gliding 84 Hz → 38 Hz under the big impacts give the mix chest on desktop
+ * speakers while staying short enough never to muddy the low-mid range.
+ */
+function playSub(profile: ReworkedSoundProfile) {
+  if (!rack) return;
+  try {
+    const ctx = rack.ctx;
+    const t0 = ctx.currentTime + 0.003 + Math.random() * 0.007;
+    const dur = 0.24;
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    const f0 = 84 * Math.max(0.8, Math.min(1.2, profile.pitch));
+    osc.frequency.setValueAtTime(f0, t0);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(34, f0 * 0.45), t0 + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.linearRampToValueAtTime(0.42 * profile.gain, t0 + 0.007);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g);
+    g.connect(rack.master);
+    rack.voices++;
+    osc.onended = () => {
+      if (rack) rack.voices = Math.max(0, rack.voices - 1);
+      try {
+        osc.disconnect();
+        g.disconnect();
+      } catch {
+        /* already gone */
+      }
+    };
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.03);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** keys whose hits deserve the synth sub under them */
+const SUB_KEYS = /^(explosion|boss|lose|impact|meteor|superbolt|critBig|chestCrack|demon|void|gravity|doomsday|eclipse)/;
+
+/** stingers that duck the personal music for a beat so the moment lands */
+const DUCK_KEYS = new Set(["win", "lose", "ceremony", "awaken", "jackpot", "chestCrack", "superHardcoreStart", "boss"]);
+
+/**
+ * Sidechain-style music duck: every stinger pushes the personal-music bus down
+ * to 30% for about a second, then rides it back. This is the trick that makes
+ * win/lose moments feel produced instead of merely loud.
+ */
+export function duckMusic(key: string) {
+  if (!rack || !DUCK_KEYS.has(key)) return;
+  try {
+    const ctx = rack.ctx;
+    const now = ctx.currentTime;
+    const base = stateMul;
+    const gain = rack.musicIn.gain;
+    gain.cancelScheduledValues(now);
+    gain.setValueAtTime(Math.max(0.0001, gain.value), now);
+    gain.linearRampToValueAtTime(Math.max(0.0001, base * 0.3), now + 0.05);
+    gain.linearRampToValueAtTime(Math.max(0.0001, base), now + 1.1);
+  } catch {
+    /* ignore */
+  }
+}
+
 function playCue(cue: SampleCue | undefined, key: string): boolean {
   if (!stateOn || !rack || !cue?.length) return false;
   let played = false;
   const profile = reworkedProfile(key);
   for (let i = 0; i < cue.length; i++) {
     if (playLayer(cue[i], profile, i, cue.length)) played = true;
+  }
+  if (played) {
+    if (SUB_KEYS.test(key)) playSub(profile);
+    duckMusic(key);
   }
   return played;
 }

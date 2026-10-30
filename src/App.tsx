@@ -172,7 +172,7 @@ export default function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.uiGlass = save.liquidGlass ? "on" : "off";
-    root.dataset.uiTheme = save.uiTheme || "rift";
+    root.dataset.uiTheme = save.uiTheme || "moon";
     root.dataset.reducedMotion = save.reducedMotion ? "on" : "off";
     root.dataset.powerSaver = save.powerSaver ? "on" : "off";
     root.dataset.shadows = save.shadowFx ? "on" : "off";
@@ -259,7 +259,7 @@ export default function App() {
             mutate((s) => {
               deliverAutoBattleReport(s, mode, plan.waves, plan.minutes, walletGold, currentWave, plan.breaksAtWave, runGoldMul, boons);
             });
-            push(`RUN ENDED · ${plan.waves} waves simulated; overwhelmed at wave ${plan.breaksAtWave} · report sent to Mail`, mode === "gauntlet" ? "#3dff8e" : "#ff4fd8");
+            push(`RUN ENDED · ${plan.waves} waves simulated; overwhelmed at wave ${plan.breaksAtWave} · report sent to Mail`, mode === "gauntlet" ? "#5cffaa" : "#b6a0ff");
             setScreen("mail");
           }}
         />
@@ -275,8 +275,12 @@ export default function App() {
       <RecordingPill />
       {/* top bar — wraps on narrow screens so the settings button is never clipped */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-2 px-3 pt-2.5">
-        {/* no title up here — the wordmark lives on the boot screens, which keeps
-            this bar from wrapping on narrow phones */}
+        {/* compact wordmark — the full lockup lives on the boot screens, and this
+            chip stays hidden on narrow phones so the bar never wraps */}
+        <div className="brand-chip" aria-hidden="true">
+          <span className="brand-moon">☾</span>
+          MoonLight<b>TD</b>
+        </div>
         <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
           <CurrencyBar gold={save.gold} gems={save.gems} tokens={save.tokens} trophies={save.trophies} potions={save.potions} />
           <FullscreenButton compact />
@@ -342,7 +346,7 @@ export default function App() {
       </div>
 
       {/* bottom nav */}
-      <div className="shrink-0 border-t border-[var(--line)] bg-[#0a0724]/80 px-2 pb-2 pt-1.5">
+      <div className="shrink-0 border-t border-[var(--line)] bg-[#060a1e]/85 px-2 pb-2 pt-1.5 backdrop-blur-md" style={{ boxShadow: "0 -8px 24px rgba(4,6,15,0.55), inset 0 1px 0 rgba(223,231,255,0.06)" }}>
         <div className="mx-auto flex max-w-3xl items-center justify-around">
           {NAV.map((n) => {
             // unclaimed things surface as a badge on their tab

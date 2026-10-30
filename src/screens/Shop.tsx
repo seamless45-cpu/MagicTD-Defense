@@ -49,7 +49,7 @@ export default function Shop({
     const cost = priceOf(c);
     if (c.gem === 1 ? save.gems < cost : save.gold < cost) {
       sfx.error();
-      push(c.gem === 1 ? "Not enough gems" : "Not enough gold", "#ff4d5e");
+      push(c.gem === 1 ? "Not enough gems" : "Not enough gold", "#ff5c70");
       return;
     }
     sfx.chest();
@@ -69,7 +69,7 @@ export default function Shop({
   const buyFrags = () => {
     if (save.gold < fragCost) {
       sfx.error();
-      push(`Need ${fragCost} gold`, "#ff4d5e");
+      push(`Need ${fragCost} gold`, "#ff5c70");
       return;
     }
     sfx.buy();
@@ -85,22 +85,22 @@ export default function Shop({
   const GOLD_PER_GEM = 5;
   const exchangeGoldForGems = () => {
     const cost = GOLD_GEM_BATCH * GOLD_PER_GEM;
-    if (save.gold < cost) { sfx.error(); push(`Need ${cost.toLocaleString()} gold`, "#ff4d5e"); return; }
+    if (save.gold < cost) { sfx.error(); push(`Need ${cost.toLocaleString()} gold`, "#ff5c70"); return; }
     sfx.gem();
     mutate((s) => { s.gold -= cost; s.gems += GOLD_GEM_BATCH; bumpTask(s, "spend", cost); });
-    push(`Exchanged ${cost.toLocaleString()} gold for ${GOLD_GEM_BATCH} gems`, "#35e0ff");
+    push(`Exchanged ${cost.toLocaleString()} gold for ${GOLD_GEM_BATCH} gems`, "#8ceaff");
   };
   const exchangeGemsForGold = () => {
-    if (save.gems < GOLD_GEM_BATCH) { sfx.error(); push(`Need ${GOLD_GEM_BATCH} gems`, "#ff4d5e"); return; }
+    if (save.gems < GOLD_GEM_BATCH) { sfx.error(); push(`Need ${GOLD_GEM_BATCH} gems`, "#ff5c70"); return; }
     sfx.coin();
     mutate((s) => { s.gems -= GOLD_GEM_BATCH; s.gold += GOLD_GEM_BATCH * GOLD_PER_GEM; });
-    push(`Exchanged ${GOLD_GEM_BATCH} gems for ${(GOLD_GEM_BATCH * GOLD_PER_GEM).toLocaleString()} gold`, "#ffcf4d");
+    push(`Exchanged ${GOLD_GEM_BATCH} gems for ${(GOLD_GEM_BATCH * GOLD_PER_GEM).toLocaleString()} gold`, "#ffd977");
   };
 
   const buyTokens = (tokens: number, gems: number) => {
     if (save.gems < gems) {
       sfx.error();
-      push("Not enough gems", "#ff4d5e");
+      push("Not enough gems", "#ff5c70");
       return;
     }
     sfx.token();
@@ -108,7 +108,7 @@ export default function Shop({
       s.gems -= gems;
       s.tokens += tokens;
     });
-    push(`+${tokens} Magic Tokens`, "#ff4fd8");
+    push(`+${tokens} Magic Tokens`, "#b6a0ff");
   };
 
   /** roll + bank the chest, then hand the exact loot to the claim animation */
@@ -133,7 +133,7 @@ export default function Shop({
   return (
     <div className="mx-auto flex h-full max-w-4xl flex-col gap-5 overflow-y-auto scroll-thin pr-1">
       <div>
-        <div className="font-disp text-2xl text-[#ffcf4d]">Shop</div>
+        <div className="font-disp text-2xl text-[#ffd977]">Shop</div>
         <p className="text-sm font-semibold text-[var(--dim)]">
           Open chests for random rewards, trade gold for the fragments you actually need, or burn gems on Magic Tokens.
         </p>
@@ -149,7 +149,7 @@ export default function Shop({
           <div className="text-[11.5px] font-semibold text-[var(--dim)]">{ev.perk}</div>
         </div>
         {bonus.chestPriceMul < 1 && (
-          <span className="pill-dark text-[11px] text-[#3dff8e]">-{Math.round((1 - bonus.chestPriceMul) * 100)}% ON ALL CHESTS</span>
+          <span className="pill-dark text-[11px] text-[#5cffaa]">-{Math.round((1 - bonus.chestPriceMul) * 100)}% ON ALL CHESTS</span>
         )}
       </div>
 
@@ -168,7 +168,7 @@ export default function Shop({
                 data-chest={c.id}
               >
                 {discounted && (
-                  <span className="badge-num absolute -right-1.5 -top-1.5" style={{ borderColor: "#3dff8e", color: "#3dff8e" }}>
+                  <span className="badge-num absolute -right-1.5 -top-1.5" style={{ borderColor: "#5cffaa", color: "#5cffaa" }}>
                     SALE
                   </span>
                 )}
@@ -178,7 +178,7 @@ export default function Shop({
                 </div>
                 <div className="mt-0.5 text-center text-[11px] font-bold text-[var(--dim)]">{c.blurb}</div>
                 <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[10.5px] font-bold text-[var(--dim)]">
-                  {c.gold[1] > 0 && <span className="text-[#ffcf4d]">{c.gold[0]}–{c.gold[1]}g</span>}
+                  {c.gold[1] > 0 && <span className="text-[#ffd977]">{c.gold[0]}–{c.gold[1]}g</span>}
                   {c.special === "mystical" && <span className="text-[#ff315c]">65% · 5 Legendary / 35% · 1 Mystical</span>}
                   {c.frags[1] > 0 && (
                     <span>
@@ -289,7 +289,7 @@ export default function Shop({
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[12px] font-bold" style={{ color: rc.color }}>{t.name}</div>
                     <div className="text-[10px] font-bold text-[var(--dim)]">
-                      <span className="text-[#ffcf4d]">{FRAG_PRICE[t.rarity]}</span>g · have {save.frags[t.id] || 0}
+                      <span className="text-[#ffd977]">{FRAG_PRICE[t.rarity]}</span>g · have {save.frags[t.id] || 0}
                     </div>
                   </div>
                 </button>
@@ -324,11 +324,11 @@ export default function Shop({
         <div className="mb-2 text-sm font-bold tracking-[0.25em] text-[var(--cyan)]">GOLD ↔ GEM EXCHANGE</div>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="tile flex items-center justify-between gap-3 p-4">
-            <div><div className="font-disp text-base text-[#35e0ff]">1,000 Gems</div><div className="text-[11px] font-semibold text-[var(--dim)]">Trade 5,000 gold · 5 gold per gem</div></div>
+            <div><div className="font-disp text-base text-[#8ceaff]">1,000 Gems</div><div className="text-[11px] font-semibold text-[var(--dim)]">Trade 5,000 gold · 5 gold per gem</div></div>
             <button className={`btn flex items-center gap-1.5 px-3 py-2 text-xs ${save.gold >= 5000 ? "btn-cyan" : ""}`} disabled={save.gold < 5000} onClick={exchangeGoldForGems}><CoinIcon size={14} /> 5,000 → 1,000 <GemIcon size={14} /></button>
           </div>
           <div className="tile flex items-center justify-between gap-3 p-4">
-            <div><div className="font-disp text-base text-[#ffcf4d]">5,000 Gold</div><div className="text-[11px] font-semibold text-[var(--dim)]">Trade 1,000 gems · 5 gold per gem</div></div>
+            <div><div className="font-disp text-base text-[#ffd977]">5,000 Gold</div><div className="text-[11px] font-semibold text-[var(--dim)]">Trade 1,000 gems · 5 gold per gem</div></div>
             <button className={`btn flex items-center gap-1.5 px-3 py-2 text-xs ${save.gems >= 1000 ? "btn-gold" : ""}`} disabled={save.gems < 1000} onClick={exchangeGemsForGold}><GemIcon size={14} /> 1,000 → 5,000 <CoinIcon size={14} /></button>
           </div>
         </div>
@@ -345,7 +345,7 @@ export default function Shop({
                 <div className="flex items-center gap-2">
                   <TokenIcon size={30} />
                   <div>
-                    <div className="font-disp text-lg text-[#ff4fd8]">×{p.tokens}</div>
+                    <div className="font-disp text-lg text-[#b6a0ff]">×{p.tokens}</div>
                     <div className="text-[11px] font-bold text-[var(--dim)]">Magic Tokens</div>
                   </div>
                 </div>
@@ -372,7 +372,7 @@ export default function Shop({
           {legendaries.map((t) => (
             <div key={t.id} className="tile tile-hover flex flex-col items-center p-3" style={{ borderColor: RARITY.legendary.color + "55" }}>
               <TowerIcon def={t} size={64} locked={(save.levels[t.id] || 0) === 0} />
-              <div className="font-disp mt-1 text-center text-[14px] text-[#ffb324]">{t.name}</div>
+              <div className="font-disp mt-1 text-center text-[14px] text-[#ffc457]">{t.name}</div>
               <p className="mt-1 line-clamp-3 text-center text-[11px] font-semibold text-[var(--dim)]">{t.desc}</p>
               <div className="mt-2 text-[11px] font-bold text-[var(--dim)]">
                 {(save.levels[t.id] || 0) > 0 ? `OWNED · Lv ${save.levels[t.id]}` : `Needs ${t.unlockFrags} frags (${save.frags[t.id] || 0})`}
@@ -410,7 +410,7 @@ export default function Shop({
             setOpening(null);
             setLoot(null);
             sfx.coin();
-            if (loot) push(`Banked ${lootLines(loot).length} reward${lootLines(loot).length === 1 ? "" : "s"}`, chest?.color || "#ffcf4d");
+            if (loot) push(`Banked ${lootLines(loot).length} reward${lootLines(loot).length === 1 ? "" : "s"}`, chest?.color || "#ffd977");
           }}
         />
       )}

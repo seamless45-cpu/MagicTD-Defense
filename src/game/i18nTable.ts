@@ -88,7 +88,7 @@ const ROWS: Row[] = [
   ["TIP", "เคล็ดลับ", "CONSEJO", "ASTUCE", "TIPP", "ヒント", "팁", "提示"],
   ["WARNING", "คำเตือน", "AVISO", "AVERTISSEMENT", "WARNUNG", "警告", "경고", "警告"],
   ["READY", "พร้อม", "LISTO", "PRÊT", "BEREIT", "準備完了", "준비", "就绪"],
-  ["MagicTD", "MagicTD", "MagicTD", "MagicTD", "MagicTD", "MagicTD", "MagicTD", "MagicTD"],
+  ["MoonLightTD", "MoonLightTD", "MoonLightTD", "MoonLightTD", "MoonLightTD", "MoonLightTD", "MoonLightTD", "MoonLightTD"],
 
   // ---- settings ----
   ["AUDIO", "เสียง", "AUDIO", "AUDIO", "AUDIO", "オーディオ", "오디오", "音频"],
@@ -217,6 +217,13 @@ const ROWS: Row[] = [
   ["Ends in", "สิ้นสุดใน", "Termina en", "Se termine dans", "Endet in", "終了まで", "종료까지", "剩余"],
   ["MONTHLY EVENT", "กิจกรรมประจำเดือน", "EVENTO MENSUAL", "ÉVÉNEMENT DU MOIS", "MONATSEVENT", "月間イベント", "월간 이벤트", "月度活动"],
   ["MONTHLY TRACK", "สายรางวัลประจำเดือน", "RUTA MENSUAL", "PARCOURS DU MOIS", "MONATSPFAD", "月間トラック", "월간 트랙", "月度赛道"],
+  ["Moonwell", "บ่อน้ำจันทร์", "Pozo Lunar", "Puits de Lune", "Mondbrunnen", "月の泉", "달의 샘", "月井"],
+  ["MOONLIT CALENDAR", "ปฏิทินแสงจันทร์", "CALENDARIO LUNAR", "CALENDRIER LUNAIRE", "MONDKALENDER", "月光カレンダー", "월빛 달력", "月光日历"],
+  ["EVENT CACHE", "หีบกิจกรรม", "CAJA DEL EVENTO", "CACHE DE L'ÉVÉNEMENT", "EVENT-CACHE", "イベントキャッシュ", "이벤트 캐시", "活动储藏"],
+  ["MOON CRATE", "หีบจันทร์", "CAJA LUNAR", "COFFRE LUNAIRE", "MONDKISTE", "月の箱", "달 상자", "月箱"],
+  ["EVENT VAULT", "ตู้นิรภัยกิจกรรม", "ARCÓN DEL EVENTO", "COFFRE-FORT DE L'ÉVÉNEMENT", "EVENT-VAULT", "イベント金庫", "이벤트 금고", "活动宝库"],
+  ["RIFT HOARD", "คลังมิติ", "TESORO DEL RIFT", "TRÉSOR DU RIFT", "RIFT-HORT", "裂け目の貯蔵", "차원의 보물", "裂隙宝库"],
+  ["MOON CROWN", "มงกุฎจันทร์", "CORONA LUNAR", "COURONNE LUNAIRE", "MONDKRONE", "月の冠", "달의 왕관", "月冠"],
   ["EVENTS", "กิจกรรม", "EVENTOS", "ÉVÉNEMENTS", "EVENTS", "イベント", "이벤트", "活动"],
   ["WEEKLY ROTATION", "สลับประจำสัปดาห์", "ROTACIÓN SEMANAL", "ROTATION HEBDOMADAIRE", "WOCHENROTATION", "週間ローテーション", "주간 순환", "每周轮换"],
   ["COMPETITION", "การแข่งขัน", "COMPETICIÓN", "COMPÉTITION", "WETTBEWERB", "コンペ", "경쟁", "竞赛"],

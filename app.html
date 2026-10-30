@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>MagicTD Defense</title>
+    <title>MoonLightTD Defense</title>
     <!-- Base styles are inline so the page is themed even if the app's JS/CSS never runs. -->
     <style>
       html,
@@ -11,8 +11,8 @@
         margin: 0;
         padding: 0;
         height: 100%;
-        background: #07051a;
-        color: #eae6ff;
+        background: #04060f;
+        color: #eef1ff;
         font-family: var(--font-ui, "Rajdhani", system-ui, -apple-system, "Segoe UI", sans-serif);
       }
       /* The static splash mirrors the in-app loading screen so the hand-off is invisible. */
@@ -26,9 +26,9 @@
         gap: 14px;
         background:
           radial-gradient(1000px 500px at 15% -10%, rgba(84, 42, 190, 0.35), transparent 60%),
-          radial-gradient(900px 500px at 90% 110%, rgba(255, 79, 216, 0.14), transparent 60%),
-          radial-gradient(700px 400px at 70% 0%, rgba(53, 224, 255, 0.1), transparent 55%),
-          linear-gradient(180deg, #100a2e, #07051a 70%);
+          radial-gradient(900px 500px at 90% 110%, rgba(182, 160, 255, 0.14), transparent 60%),
+          radial-gradient(700px 400px at 70% 0%, rgba(140, 234, 255, 0.1), transparent 55%),
+          linear-gradient(180deg, #0a1030, #04060f 70%);
         z-index: 1;
       }
       #boot-splash .stage {
@@ -44,33 +44,33 @@
       }
       #boot-splash .ring.outer {
         inset: 0;
-        border: 2px dashed rgba(53, 224, 255, 0.32);
+        border: 2px dashed rgba(140, 234, 255, 0.32);
         animation: bootSpin 18s linear infinite;
       }
       #boot-splash .ring.inner {
         inset: 15px;
         border: 1px solid transparent;
-        border-top-color: rgba(255, 207, 77, 0.9);
-        border-right-color: rgba(255, 79, 216, 0.55);
+        border-top-color: rgba(255, 217, 119, 0.9);
+        border-right-color: rgba(182, 160, 255, 0.55);
         animation: bootSpin 7.5s linear infinite reverse;
       }
       #boot-splash .emblem {
         animation: bootFloat 2.6s ease-in-out infinite;
-        filter: drop-shadow(0 0 16px rgba(255, 179, 36, 0.55));
+        filter: drop-shadow(0 0 16px rgba(255, 196, 87, 0.55));
       }
       #boot-splash .name {
-        font-size: 38px;
+        font-size: clamp(26px, 8vw, 36px);
         font-weight: 700;
         letter-spacing: 0.03em;
         line-height: 1;
-        color: #ffb324;
-        text-shadow: 0 0 34px rgba(255, 179, 36, 0.5);
+        color: #ffe49b;
+        text-shadow: 0 0 34px rgba(255, 228, 155, 0.55);
       }
       #boot-splash .sub {
         font-size: 15px;
         font-weight: 700;
         letter-spacing: 0.45em;
-        color: #35e0ff;
+        color: #8ceaff;
         margin-top: -6px;
       }
       #boot-splash .segs {
@@ -94,7 +94,7 @@
         width: 30%;
         height: 100%;
         border-radius: 999px;
-        background: linear-gradient(90deg, #35e0ff, #ff4fd8, #ffb324);
+        background: linear-gradient(90deg, #8ceaff, #b6a0ff, #ffc457);
         animation: bootSlide 1.3s ease-in-out infinite;
       }
       #boot-splash .segs i:nth-child(2)::after {
@@ -118,10 +118,10 @@
         font-size: 11px;
         font-weight: 700;
         letter-spacing: 0.3em;
-        color: #9d93d6;
+        color: #98a4d0;
       }
       #boot-splash .status b {
-        color: #ffcf4d;
+        color: #ffd977;
       }
       @keyframes bootSlide {
         0% {
@@ -166,14 +166,14 @@
       onload="this.media='all'"
     />
     <!-- PWA: installable, with the MagicCloud-style icon set -->
-    <meta name="theme-color" content="#100a2e" />
+    <meta name="theme-color" content="#0a1030" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="MagicTD" />
+    <meta name="apple-mobile-web-app-title" content="MoonLightTD" />
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M18 2 6 18h7l-2 12L26 13h-8l3-11z' fill='%23ffb324'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M18 2 6 18h7l-2 12L26 13h-8l3-11z' fill='%23ffc457'/%3E%3C/svg%3E"
     />
     <!--
       The manifest / icon links are attached from script on purpose: the bundler
@@ -234,19 +234,19 @@
         <div class="ring outer"></div>
         <div class="ring inner"></div>
         <svg class="emblem" viewBox="0 0 100 100" width="104" height="104" aria-hidden="true">
-          <path d="M50 6 88 26v34L50 94 12 60V26z" fill="none" stroke="#ffb324" stroke-width="3" opacity="0.7" />
-          <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="#ffb324" />
+          <path d="M50 6 88 26v34L50 94 12 60V26z" fill="none" stroke="#ffc457" stroke-width="3" opacity="0.7" />
+          <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="#ffc457" />
           <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="none" stroke="#fff2b0" stroke-width="1.5" opacity="0.6" />
         </svg>
       </div>
-      <div class="name">MagicTD</div>
+      <div class="name">MoonLightTD</div>
       <div class="sub">DEFENSE</div>
       <div class="segs" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
       <div class="status"><span>LOADING</span><b>···</b></div>
     </div>
     <div id="root"></div>
     <noscript>
-      <div style="font-weight: 600; color: #eae6ff; padding: 24px">MagicTD Defense needs JavaScript enabled.</div>
+      <div style="font-weight: 600; color: #eef1ff; padding: 24px">MoonLightTD Defense needs JavaScript enabled.</div>
     </noscript>
     <!--
       Boot guard: the app paints its own CSS from JS, so a failed script would otherwise
@@ -271,12 +271,12 @@
           root.innerHTML =
             '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px">' +
             '<div style="max-width:640px">' +
-            '<div style="font-size:22px;font-weight:700;color:#ffb324;margin-bottom:8px">MagicTD could not start</div>' +
-            '<p style="margin:0 0 10px;color:#9d93d6">The game&rsquo;s script did not run. Details:</p>' +
+            '<div style="font-size:22px;font-weight:700;color:#ffc457;margin-bottom:8px">MoonLightTD could not start</div>' +
+            '<p style="margin:0 0 10px;color:#98a4d0">The game&rsquo;s script did not run. Details:</p>' +
             '<ul style="margin:0;padding-left:18px;color:#ff8f9a">' +
             (rows || "<li>No error was reported &mdash; the script file may have been blocked or failed to load.</li>") +
             "</ul>" +
-            '<p style="margin:12px 0 0;color:#9d93d6">Check the browser console / network tab, then reload.</p>' +
+            '<p style="margin:12px 0 0;color:#98a4d0">Check the browser console / network tab, then reload.</p>' +
             "</div></div>";
           if (splash) splash.style.display = "none";
         }
