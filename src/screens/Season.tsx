@@ -54,13 +54,13 @@ export default function Season({
     if (!t) return;
     if (save.season.number !== num) {
       sfx.error();
-      push("That season has closed", "#ff4d5e");
+      push("That season has closed", "#ff5c70");
       return;
     }
     const claimed = save.season.claimed.includes(idx);
     if (claimed || idx > tier) {
       sfx.error();
-      push(claimed ? "Tier already collected" : "Tier not reached yet", "#ff4d5e");
+      push(claimed ? "Tier already collected" : "Tier not reached yet", "#ff5c70");
       return;
     }
     // roll on a draft so the crate's contents are ready for the reward card,
@@ -69,7 +69,7 @@ export default function Season({
     const loot = claimSeasonTier(draft, idx);
     if (!loot) {
       sfx.error();
-      return push("Those rewards are already banked", "#ff4d5e");
+      return push("Those rewards are already banked", "#ff5c70");
     }
     mutate((s) => {
       claimSeasonTier(s, idx);
@@ -88,7 +88,7 @@ export default function Season({
   const takeAll = () => {
     if (!ready) {
       sfx.error();
-      push("No crates ready", "#ff4d5e");
+      push("No crates ready", "#ff5c70");
       return;
     }
     const draft = cloneSave(save);
@@ -98,26 +98,26 @@ export default function Season({
       for (let i = 0; i <= tier; i++) claimSeasonTier(s, i);
     });
     sfx.chestCrack();
-    push(`${n} season crate${n === 1 ? "" : "s"} collected`, "#ffcf4d");
+    push(`${n} season crate${n === 1 ? "" : "s"} collected`, "#ffd977");
   };
 
   return (
     <div className="flex h-full flex-col gap-3">
       {/* ---- header: season number, countdown, progress ---- */}
-      <div className="panel shrink-0 p-4" style={{ borderColor: "rgba(255,79,216,0.45)" }}>
+      <div className="panel shrink-0 p-4" style={{ borderColor: "rgba(182,160,255,0.45)" }}>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[10px] font-bold tracking-[0.32em] text-[#ff9be9]">RIFT SEASON</div>
-            <div className="font-disp text-3xl leading-none text-[#ff4fd8]" style={{ textShadow: "0 0 24px rgba(255,79,216,.5)" }}>
+            <div className="text-[10px] font-bold tracking-[0.32em] text-[#d9c9ff]">RIFT SEASON</div>
+            <div className="font-disp text-3xl leading-none text-[#b6a0ff]" style={{ textShadow: "0 0 24px rgba(182,160,255,.5)" }}>
               SEASON <span className="num">{num}</span>
             </div>
             <div className="mt-1 text-[12px] font-semibold text-[var(--dim)]">
-              Ends in <b className="num text-[#ffcf4d]">{clock.d}d {clock.h}h {clock.m}m</b> · trophies and wins feed the track
+              Ends in <b className="num text-[#ffd977]">{clock.d}d {clock.h}h {clock.m}m</b> · trophies and wins feed the track
             </div>
           </div>
           <div className="text-right">
             <div className="text-[10px] font-bold tracking-[0.24em] text-[var(--dim)]">SEASON POINTS</div>
-            <div className="font-disp text-3xl leading-none text-[#35e0ff]" data-testid="season-points">
+            <div className="font-disp text-3xl leading-none text-[#8ceaff]" data-testid="season-points">
               <span className="num">{points.toLocaleString("en-US")}</span>
             </div>
             <div className="text-[11px] font-semibold text-[var(--dim)]">
@@ -190,17 +190,17 @@ export default function Season({
               </div>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11.5px] font-bold">
                 {!!t.gold && (
-                  <span className="inline-flex items-center gap-1 text-[#ffcf4d]">
+                  <span className="inline-flex items-center gap-1 text-[#ffd977]">
                     <CoinIcon size={13} /> <span className="num">{t.gold.toLocaleString("en-US")}</span>
                   </span>
                 )}
                 {!!t.gems && (
-                  <span className="inline-flex items-center gap-1 text-[#35e0ff]">
+                  <span className="inline-flex items-center gap-1 text-[#8ceaff]">
                     <GemIcon size={13} /> <span className="num">{t.gems}</span>
                   </span>
                 )}
                 {!!t.tokens && (
-                  <span className="inline-flex items-center gap-1 text-[#ff4fd8]">
+                  <span className="inline-flex items-center gap-1 text-[#b6a0ff]">
                     <TokenIcon size={13} /> <span className="num">{t.tokens}</span>
                   </span>
                 )}

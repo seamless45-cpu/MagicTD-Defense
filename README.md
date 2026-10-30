@@ -1,4 +1,4 @@
-# MagicTD Defense
+# MoonLightTD Defense
 
 A 2D browser tower defense / merge game built with React 19, TypeScript, Tailwind CSS 4 and Vite.
 Everything — menus, engine, audio, art and particles — is code. The only binary assets are the
@@ -404,7 +404,7 @@ unlocked. A new season clears the claim state and banks your best points as a re
 
 ## PWA
 
-MagicTD is installable. `public/manifest.webmanifest` + `public/sw.js` + the icon set are mirrored
+MoonLightTD is installable. `public/manifest.webmanifest` + `public/sw.js` + the icon set are mirrored
 to the repo root by `npm run build` (Pages serves the branch root), the service worker caches the
 shell for offline play, and **Settings → APP → Install** is wired to the browser's install prompt.
 The favicon/app icons are the pastel MagicCloud artwork (cloud mascot, wizard hat, castle) —

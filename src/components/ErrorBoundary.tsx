@@ -19,7 +19,7 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
     // keep the detail available for debugging
     (window as unknown as { __magictdLastError?: string }).__magictdLastError =
       `${error.message}\n${info.componentStack ?? ""}`;
-    console.error("MagicTD crashed:", error, info);
+    console.error("MoonLightTD crashed:", error, info);
   }
 
   render() {
@@ -28,7 +28,7 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
     return (
       <div className="app-bg flex h-full items-center justify-center p-6">
         <div className="panel anim-pop w-full max-w-xl p-6 text-center">
-          <div className="font-disp text-3xl text-[#ff4d5e]">Something broke</div>
+          <div className="font-disp text-3xl text-[#ff5c70]">Something broke</div>
           <p className="mt-2 text-[15px] font-semibold text-[var(--dim)]">
             The game hit an unexpected error. Your progress is saved in this browser.
           </p>

@@ -54,6 +54,7 @@ import {
   SP_COST_STEP,
   ascSpCost,
   killSp,
+  BASE_EVENT_BONUS,
   MONTHLY_EVENTS,
   monthlyEventForDate,
   monthlyEventBonus,
@@ -1040,6 +1041,8 @@ describe("weekday events", () => {
   it("covers all seven days exactly once", () => {
     const days = EVENTS.flatMap((e) => e.days).sort();
     expect(days).toEqual([0, 1, 2, 3, 4, 5, 6]);
+    // seven unique events: no weekday shares its event with another
+    expect(EVENTS).toHaveLength(7);
   });
 
   it("maps each weekday to the right event", () => {
@@ -1050,7 +1053,8 @@ describe("weekday events", () => {
     expect(on(3)).toBe("Trophy Competition");
     expect(on(4)).toBe("Items Finding");
     expect(on(5)).toBe("Mineshaft");
-    expect(on(6)).toBe("Mineshaft");
+    // the rework splits Friday/Saturday: Saturday is its own Moonwell night
+    expect(on(6)).toBe("Moonwell");
   });
 
   it("defines the Sunday Gem Rush survival challenge and tiered kill rewards", () => {
@@ -1070,8 +1074,12 @@ describe("weekday events", () => {
     expect(eventBonus("trophy").trophyWin).toBe(30);
     expect(eventBonus("items").chipDrop).toEqual({ basic: 2 });
     expect(eventBonus("mineshaft").goldMul).toBeGreaterThan(1);
+    expect(eventBonus("moonwell").spMul).toBeGreaterThan(1);
+    expect(eventBonus("moonwell").hpMul).toBeLessThan(1);
     expect(eventBonus("gemrush").gemMul).toBe(1);
     expect(eventBonus("gemrush").hpMul).toBe(1);
+    // every day stacks against the same neutral baseline
+    expect(BASE_EVENT_BONUS.spMul).toBe(1);
   });
 
   it("pays the event bonus once per game-day", () => {
@@ -1846,7 +1854,10 @@ describe("gauntlet mode", () => {
     const legacy = importSave(JSON.stringify({ gold: 5 }));
     expect(legacy.gauntletBest).toBe(0);
     expect(legacy.font).toBe(DEFAULT_FONT);
-    expect(legacy.uiTheme).toBe("rift");
+    expect(legacy.uiTheme).toBe("moon");
+    // saves from the old Rift-branded build land on the Moonlight default
+    const oldRift = importSave(JSON.stringify({ gold: 5, uiTheme: "rift" }));
+    expect(oldRift.uiTheme).toBe("moon");
     // junk normalises instead of crashing
     const junk = importSave(JSON.stringify({ gauntletBest: -9, font: "" }));
     expect(junk.gauntletBest).toBe(0);

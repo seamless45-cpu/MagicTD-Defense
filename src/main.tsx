@@ -5,10 +5,10 @@ import App from "./App";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 // last-resort inline CSS so a JS crash can never leave a stark white page
-document.documentElement.style.background = "#07051a";
+document.documentElement.style.background = "#04060f";
 if (document.body) {
   document.body.style.margin = "0";
-  document.body.style.background = "#07051a";
+  document.body.style.background = "#04060f";
 }
 
 // index.html loads the font stylesheet non-blocking (media="print"); apply it here as well

@@ -6,6 +6,8 @@ import {
   crystalBonus,
   crystalBuffText,
   crystalUpgradeCost,
+  monthPhase,
+  monthPhaseMul,
   monthlyTiers,
   monthlyEventForDate,
   runShopCost,
@@ -142,17 +144,26 @@ describe("reworked daily events", () => {
 });
 
 describe("reworked monthly events", () => {
-  it("gives every month a three-tier track", () => {
+  it("gives every month a five-crate track across four weekly phases", async () => {
     const ev = monthlyEventForDate();
     const tiers = monthlyTiers(ev.id);
-    expect(tiers).toHaveLength(3);
-    expect(tiers[0].points).toBeLessThan(tiers[1].points);
-    expect(tiers[1].points).toBeLessThan(tiers[2].points);
+    expect(tiers).toHaveLength(5);
+    for (let i = 1; i < tiers.length; i++) {
+      expect(tiers[i].points).toBeGreaterThan(tiers[i - 1].points);
+    }
     for (const t of tiers) {
       expect(t.gold).toBeGreaterThan(0);
       expect(t.gems).toBeGreaterThan(0);
       expect(t.potions).toBeGreaterThan(0);
     }
+    // the two grand crates also pay magic tokens
+    expect(tiers[3].tokens).toBeGreaterThan(0);
+    expect(tiers[4].tokens).toBeGreaterThan(tiers[3].tokens!);
+    // weekly phases escalate the point curve (week 1 is the baseline)
+    expect(monthPhaseMul(new Date(2026, 0, 3))).toBe(1);
+    expect(monthPhaseMul(new Date(2026, 0, 10))).toBeGreaterThan(1);
+    expect(monthPhaseMul(new Date(2026, 0, 30))).toBeGreaterThan(monthPhaseMul(new Date(2026, 0, 10)));
+    expect(monthPhase(new Date(2026, 0, 31))).toBe(4);
   });
 
   it("rips the track when a new month starts", () => {

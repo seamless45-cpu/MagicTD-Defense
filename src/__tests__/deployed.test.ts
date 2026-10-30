@@ -30,7 +30,7 @@ describe("published build (index.html)", () => {
     expect(html).toContain('"serviceWorker" in navigator');
     // the worker and icon set are published next to the page
     const manifest = JSON.parse(readFileSync("manifest.webmanifest", "utf8"));
-    expect(manifest.name).toBe("MagicTD Defense");
+    expect(manifest.name).toBe("MoonLightTD Defense");
     expect(manifest.icons.map((i: { sizes: string }) => i.sizes)).toContain("512x512");
     for (const icon of manifest.icons) {
       expect(existsSync(icon.src.replace("./", "")), icon.src).toBe(true);
@@ -40,7 +40,7 @@ describe("published build (index.html)", () => {
   });
 
   it("is self-contained: no external script or local stylesheet references", () => {
-    expect(html).toContain("MagicTD");
+    expect(html).toContain("MoonLightTD");
     const externalScript = html.match(/<script[^>]+\bsrc="[^"]*"/i);
     expect(externalScript?.[0] ?? null, "published file must not load an external script").toBeNull();
     const localCss = html.match(/<link[^>]+\bhref="\/(?!\/)[^"]*"/i);

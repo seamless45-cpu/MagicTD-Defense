@@ -4,7 +4,7 @@ export const RARITY: Record<Rarity, { name: string; color: string; glow: string 
   normal: { name: "Normal", color: "#9fb4c7", glow: "rgba(159,180,199,0.4)" },
   decent: { name: "Decent", color: "#3fb6ff", glow: "rgba(63,182,255,0.5)" },
   epic: { name: "Epic", color: "#c44dff", glow: "rgba(196,77,255,0.55)" },
-  legendary: { name: "Legendary", color: "#ffb324", glow: "rgba(255,179,36,0.6)" },
+  legendary: { name: "Legendary", color: "#ffc457", glow: "rgba(255,196,87,0.6)" },
   mystical: { name: "Mystical", color: "#ff315c", glow: "rgba(255,49,92,0.72)" },
 };
 
@@ -580,7 +580,7 @@ export const TOWERS: TowerDef[] = [
     awk2: awking("Thermite", "burn",
       "The shell leaves a burning crater behind", [0.25, 0.8], [0.6, 2.4]),  },
   {
-    id: "laser", name: "Laser Cutter", rarity: "epic", kind: "laser", art: "beam", accent: "#ff4fd8",
+    id: "laser", name: "Laser Cutter", rarity: "epic", kind: "laser", art: "beam", accent: "#b6a0ff",
     target: "front",
     desc: "Sustained beam that arcs to two more enemies. Fires four times a second.",
     dmg: 58, upDmg: 12, ascDmg: 0, rate: 0.25, upRate: 0.006, ascRate: 0,
@@ -623,7 +623,7 @@ export const TOWERS: TowerDef[] = [
     },
   },
   {
-    id: "sun", name: "Sunforge", rarity: "legendary", kind: "sun", art: "beam", accent: "#ffb324",
+    id: "sun", name: "Sunforge", rarity: "legendary", kind: "sun", art: "beam", accent: "#ffc457",
     target: "all",
     desc: "Calls a solar flare down on every enemy at once and sets the field alight.",
     dmg: 300, upDmg: 0, ascDmg: 0, rate: 0.6, upRate: 0.02, ascRate: 0,
@@ -900,7 +900,7 @@ export const TOWERS: TowerDef[] = [
     awk2: awking("Twin Fangs", "volley", "Chance to loose an extra blade at another enemy.", [0.25, 1], [1, 3]),
   },
   {
-    id: "bombardment", name: "Thousand-Pounder", rarity: "legendary", kind: "bombardment", art: "howitzer", accent: "#ffb324",
+    id: "bombardment", name: "Thousand-Pounder", rarity: "legendary", kind: "bombardment", art: "howitzer", accent: "#ffc457",
     target: "front", exotic: true, unlockFrags: 1, skill: "bombardment",
     desc: "A siege legend. Its shells flatten clusters, and its skill walks bombardment across the horde.",
     dmg: 520, upDmg: 14, ascDmg: 18, rate: 1.35, upRate: 0.025, ascRate: 0.03,
@@ -1451,14 +1451,14 @@ export interface GauntletBoon {
  * but the waves never stop coming and the run ends with your last life.
  */
 export const GAUNTLET_BOONS: GauntletBoon[] = [
-  { id: "power", name: "Rift Forged", desc: "+18% tower damage for the rest of the run", color: "#ff4d5e", glyph: "⚔" },
-  { id: "haste", name: "Quickening", desc: "+12% attack speed for the rest of the run", color: "#35e0ff", glyph: "≫" },
+  { id: "power", name: "Rift Forged", desc: "+18% tower damage for the rest of the run", color: "#ff5c70", glyph: "⚔" },
+  { id: "haste", name: "Quickening", desc: "+12% attack speed for the rest of the run", color: "#8ceaff", glyph: "≫" },
   { id: "edge", name: "Killing Edge", desc: "+8% crit chance and +35% crit damage", color: "#ffd23f", glyph: "✦" },
   { id: "greed", name: "Deep Pockets", desc: "+25% run gold from every payout", color: "#ffb020", glyph: "◈" },
   { id: "mana", name: "Mana Font", desc: "+20% SP from kills and wave clears", color: "#b06bff", glyph: "❋" },
   { id: "ward", name: "Bulwark", desc: "+4 lives, right now", color: "#8fb0ff", glyph: "⛨" },
-  { id: "barrage", name: "Barrage", desc: "+2 points on three random towers", color: "#ff4fd8", glyph: "⁂" },
-  { id: "ascension", name: "Rift Surge", desc: "Ascend a random tower one battle level", color: "#3dff8e", glyph: "▲" },
+  { id: "barrage", name: "Barrage", desc: "+2 points on three random towers", color: "#b6a0ff", glyph: "⁂" },
+  { id: "ascension", name: "Rift Surge", desc: "Ascend a random tower one battle level", color: "#5cffaa", glyph: "▲" },
   { id: "bounty", name: "War Chest", desc: "Instantly bank 500 run gold", color: "#ffe9a8", glyph: "▣" },
 ];
 
@@ -1503,15 +1503,15 @@ export const POTION_BASE_COST = 3;
 export const POTION_COST_STEP = 1.22;
 
 export const CRYSTALS: CrystalDef[] = [
-  { id: "ruby", name: "Ruby", desc: "Molten core shards ground into every tower's ammunition.", stat: "Tower ATK", perLevel: 0.02, max: CRYSTAL_MAX_LEVEL, color: "#ff4d5e" },
+  { id: "ruby", name: "Ruby", desc: "Molten core shards ground into every tower's ammunition.", stat: "Tower ATK", perLevel: 0.02, max: CRYSTAL_MAX_LEVEL, color: "#ff5c70" },
   { id: "sapphire", name: "Sapphire", desc: "A calm blue lattice that sharpens every critical read.", stat: "Crit Chance", perLevel: 0.015, max: CRYSTAL_MAX_LEVEL, color: "#3fb6ff" },
-  { id: "emerald", name: "Emerald", desc: "Rift sap that makes every kill spill more spell power.", stat: "SP Gain", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#3dff8e" },
-  { id: "topaz", name: "Topaz", desc: "Sun-baked amber that draws extra gold out of the wreck.", stat: "Run Gold", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#ffcf4d" },
+  { id: "emerald", name: "Emerald", desc: "Rift sap that makes every kill spill more spell power.", stat: "SP Gain", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#5cffaa" },
+  { id: "topaz", name: "Topaz", desc: "Sun-baked amber that draws extra gold out of the wreck.", stat: "Run Gold", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#ffd977" },
   { id: "amethyst", name: "Amethyst", desc: "A humming shard that speeds up every firing mechanism.", stat: "ATK Speed", perLevel: 0.02, max: CRYSTAL_MAX_LEVEL, color: "#c44dff" },
   { id: "diamond", name: "Diamond", desc: "A flawless ward crystal. Each level adds a starting life.", stat: "Start Lives", perLevel: 1, max: 10, color: "#9fe8ff", flat: true },
   { id: "magicianKing", name: "Magician King", desc: "A royal super crystal: +25% tower ATK and ATK speed at level 1, then +5% each level, capped at +75%.", stat: "ATK + Speed", base: 0.25, perLevel: 0.05, max: 11, maxValue: 0.75, color: "#ffd76a" },
   { id: "superbolt", name: "Superbolt", desc: "Raises the damage of lightning-type towers by +10% per level, up to +100%; lightning strikes chain behind their targets.", stat: "Lightning ATK", base: 0.1, perLevel: 0.1, max: 10, maxValue: 1, color: "#ffef77" },
-  { id: "superCrit", name: "Super Crit", desc: "At level 1: +150% crit damage and +7.5% crit chance. Each later level adds +50% damage and +0.5% chance, capped at +850% and +22.5%.", stat: "Crit DMG + Chance", base: 1.5, perLevel: 0.5, max: 31, maxValue: 8.5, secondaryBase: 0.075, secondaryPerLevel: 0.005, secondaryMax: 0.225, color: "#ff4fd8" },
+  { id: "superCrit", name: "Super Crit", desc: "At level 1: +150% crit damage and +7.5% crit chance. Each later level adds +50% damage and +0.5% chance, capped at +850% and +22.5%.", stat: "Crit DMG + Chance", base: 1.5, perLevel: 0.5, max: 31, maxValue: 8.5, secondaryBase: 0.075, secondaryPerLevel: 0.005, secondaryMax: 0.225, color: "#b6a0ff" },
 ];
 
 export const CRYSTAL_BY_ID: Record<CrystalId, CrystalDef> = Object.fromEntries(
@@ -1890,14 +1890,14 @@ export interface BossSkillRow {
  */
 export const BOSS_SKILLS: BossSkillRow[] = [
   { id: "summon", name: "Rift Call", tell: "calls minions through the rift", color: "#c44dff", glyph: "❖" },
-  { id: "blink", name: "Void Step", tell: "blinks down the path", color: "#35e0ff", glyph: "➤" },
+  { id: "blink", name: "Void Step", tell: "blinks down the path", color: "#8ceaff", glyph: "➤" },
   { id: "ward", name: "Bulwark", tell: "shields itself for a moment", color: "#8fb0ff", glyph: "⬢" },
-  { id: "enrage", name: "Blood Frenzy", tell: "enrages below 45% health", color: "#ff4d5e", glyph: "✚" },
+  { id: "enrage", name: "Blood Frenzy", tell: "enrages below 45% health", color: "#ff5c70", glyph: "✚" },
   { id: "nullfield", name: "Null Field", tell: "hexes the towers around it", color: "#b06bff", glyph: "⊗" },
   { id: "devour", name: "Soul Devour", tell: "eats its own minions to heal", color: "#ff8c3d", glyph: "✷" },
   { id: "meteor", name: "Meteor Fall", tell: "drops burning rocks on the grid", color: "#ff7a3d", glyph: "☄" },
   { id: "chains", name: "Rift Chains", tell: "shields every minion beside it", color: "#4de8ff", glyph: "⛓" },
-  { id: "warp", name: "Warp Surge", tell: "wrenches the whole horde forward", color: "#ff4fd8", glyph: "⇉" },
+  { id: "warp", name: "Warp Surge", tell: "wrenches the whole horde forward", color: "#b6a0ff", glyph: "⇉" },
   { id: "warcry", name: "War Cry", tell: "drives every nearby minion into a frenzy", color: "#ff9d4d", glyph: "♫" },
   { id: "cleave", name: "Shield Cleave", tell: "hacks the nearest tower offline", color: "#ff5d5d", glyph: "⚔" },
   { id: "banner", name: "Iron Banner", tell: "plates itself in living iron", color: "#ffd23f", glyph: "⚑" },
@@ -2120,7 +2120,7 @@ export const HEROES: HeroDef[] = [
   {
     id: "nova",
     name: "Nova",
-    color: "#ff4fd8",
+    color: "#b6a0ff",
     color2: "#9d4bff",
     cd: 25,
     kind: "nuke",
@@ -2143,7 +2143,7 @@ export const HEROES: HeroDef[] = [
   {
     id: "glacier",
     name: "Glacier",
-    color: "#35e0ff",
+    color: "#8ceaff",
     color2: "#b9f4ff",
     cd: 30,
     kind: "freeze",
@@ -2189,7 +2189,7 @@ export const HEROES: HeroDef[] = [
   {
     id: "overdrive",
     name: "Overdrive",
-    color: "#3dff8e",
+    color: "#5cffaa",
     color2: "#8effc4",
     cd: 35,
     kind: "overdrive",
@@ -2362,7 +2362,7 @@ export interface ChipDef {
 export const CHIPS: ChipDef[] = [
   { id: "basic", name: "Basic Chip Module", short: "Basic", color: "#8fe9ff", desc: "Standard arcane circuitry. Feeds tower ascension and guild crafting." },
   { id: "advanced", name: "Advanced Chip Module", short: "Advanced", color: "#c44dff", desc: "Refined lattice core. Worth five basic modules at the exchange." },
-  { id: "elite", name: "Elite Chip Module", short: "Elite", color: "#ffb324", desc: "Competition-only module stamped by the arena marshals." },
+  { id: "elite", name: "Elite Chip Module", short: "Elite", color: "#ffc457", desc: "Competition-only module stamped by the arena marshals." },
 ];
 
 export const CHIP_BY_ID: Record<ChipId, ChipDef> = Object.fromEntries(CHIPS.map((c) => [c.id, c])) as Record<ChipId, ChipDef>;
@@ -2400,13 +2400,13 @@ export interface DailyReward {
  * Miss a day and the streak restarts from day 1.
  */
 export const DAILY_REWARDS: DailyReward[] = [
-  { gems: 1200, label: "1,200 gems", icon: "gem", accent: "#35e0ff" },
+  { gems: 1200, label: "1,200 gems", icon: "gem", accent: "#8ceaff" },
   { chests: [{ id: "silver", n: 1 }], label: "Silver Chest", icon: "chest", accent: "#cfd8e6" },
-  { chests: [{ id: "legendary", n: 1 }], potions: 2, label: "Legendary Chest + 2 potions", icon: "chest", accent: "#ffb324" },
-  { frags: 5, rarity: "legendary", label: "×5 legendary tower fragments", icon: "frag", accent: "#ffb324" },
-  { gold: 25000, gems: 900, label: "25,000 gold + 900 gems", icon: "gold", accent: "#ffcf4d" },
+  { chests: [{ id: "legendary", n: 1 }], potions: 2, label: "Legendary Chest + 2 potions", icon: "chest", accent: "#ffc457" },
+  { frags: 5, rarity: "legendary", label: "×5 legendary tower fragments", icon: "frag", accent: "#ffc457" },
+  { gold: 25000, gems: 900, label: "25,000 gold + 900 gems", icon: "gold", accent: "#ffd977" },
   { chips: { basic: 5, advanced: 2 }, label: "×5 basic + ×2 advanced chips", icon: "chip", accent: "#c44dff" },
-  { chests: [{ id: "legendary", n: 3 }], potions: 3, label: "×3 Legendary Chests + 3 potions", icon: "chest", accent: "#ffb324" },
+  { chests: [{ id: "legendary", n: 3 }], potions: 3, label: "×3 Legendary Chests + 3 potions", icon: "chest", accent: "#ffc457" },
 ];
 
 // ---------- daily tasks ----------
@@ -2432,13 +2432,13 @@ export interface DailyTask {
 export const DAILY_TASKS: DailyTask[] = [
   // task gold/gems are scaled by 0.9 (balance patch: task rewards -10%)
   { id: "play", name: "Answer the Call", desc: "Finish any run", need: 3, points: 10, gold: 2250, gems: 36, color: "#8fb0ff" },
-  { id: "win", name: "Hold the Line", desc: "Win a Battle run", need: 2, points: 20, gold: 5400, gems: 108, color: "#3dff8e" },
-  { id: "waves", name: "Wave Breaker", desc: "Clear waves", need: 20, points: 15, gold: 3600, gems: 63, color: "#35e0ff" },
-  { id: "kills", name: "Cull the Rift", desc: "Destroy enemies", need: 150, points: 15, gold: 4050, gems: 72, color: "#ff4d5e" },
-  { id: "skill", name: "Hero's Moment", desc: "Unleash hero skills", need: 5, points: 10, gold: 1800, gems: 45, color: "#ff4fd8" },
-  { id: "upgrade", name: "Arsenal Work", desc: "Upgrade towers or heroes", need: 4, points: 10, gold: 2700, gems: 54, color: "#ffcf4d" },
+  { id: "win", name: "Hold the Line", desc: "Win a Battle run", need: 2, points: 20, gold: 5400, gems: 108, color: "#5cffaa" },
+  { id: "waves", name: "Wave Breaker", desc: "Clear waves", need: 20, points: 15, gold: 3600, gems: 63, color: "#8ceaff" },
+  { id: "kills", name: "Cull the Rift", desc: "Destroy enemies", need: 150, points: 15, gold: 4050, gems: 72, color: "#ff5c70" },
+  { id: "skill", name: "Hero's Moment", desc: "Unleash hero skills", need: 5, points: 10, gold: 1800, gems: 45, color: "#b6a0ff" },
+  { id: "upgrade", name: "Arsenal Work", desc: "Upgrade towers or heroes", need: 4, points: 10, gold: 2700, gems: 54, color: "#ffd977" },
   { id: "chests", name: "Lockbreaker", desc: "Open chests", need: 3, points: 10, gold: 2250, gems: 50, color: "#c44dff" },
-  { id: "spend", name: "Big Spender", desc: "Spend gold", need: 20000, points: 10, gold: 1350, gems: 81, color: "#ffb324" },
+  { id: "spend", name: "Big Spender", desc: "Spend gold", need: 20000, points: 10, gold: 1350, gems: 81, color: "#ffc457" },
 ];
 
 export const TASK_BY_ID: Record<TaskId, DailyTask> = Object.fromEntries(DAILY_TASKS.map((t) => [t.id, t])) as Record<
@@ -2463,11 +2463,11 @@ export interface TaskMilestone {
 export const TASK_MILESTONES: TaskMilestone[] = [
   { points: 30, label: "Supply Cache", color: "#8fe9ff", chests: [{ id: "silver", n: 1 }], gems: 150, chips: { basic: 2 }, potions: 2 },
   { points: 60, label: "War Cache", color: "#c44dff", chests: [{ id: "support", n: 1 }, { id: "epic", n: 1 }], gems: 400, chips: { basic: 3, advanced: 1 }, potions: 4 },
-  { points: TASK_POINTS_TOTAL, label: "Perfect Day", color: "#ffb324", chests: [{ id: "legendary", n: 2 }], gems: 1000, chips: { advanced: 3, elite: 1 }, potions: 8 },
+  { points: TASK_POINTS_TOTAL, label: "Perfect Day", color: "#ffc457", chests: [{ id: "legendary", n: 2 }], gems: 1000, chips: { advanced: 3, elite: 1 }, potions: 8 },
 ];
 
 // ---------- weekly event rotation ----------
-export type EventId = "luck" | "chestbox" | "trophy" | "items" | "mineshaft" | "gemrush";
+export type EventId = "luck" | "chestbox" | "trophy" | "items" | "mineshaft" | "moonwell" | "gemrush";
 
 export interface GameEvent {
   id: EventId;
@@ -2494,7 +2494,7 @@ export const EVENTS: GameEvent[] = [
     tagline: "Monday",
     desc: "The rift leaks fortune. Fragment rolls lean rare and every chest rolls one extra fragment.",
     perk: "+1 chest fragment · fragment rarity bias +0.25",
-    color: "#3dff8e",
+    color: "#5cffaa",
     icon: "luck",
   },
   {
@@ -2504,7 +2504,7 @@ export const EVENTS: GameEvent[] = [
     tagline: "Tuesday",
     desc: "The quartermaster is in a giving mood — every chest in the Shop is discounted.",
     perk: "-25% chest price · free Common Chest each day",
-    color: "#ffcf4d",
+    color: "#ffd977",
     icon: "chestbox",
   },
   {
@@ -2514,7 +2514,7 @@ export const EVENTS: GameEvent[] = [
     tagline: "Wednesday",
     desc: "Ladder day. Victories are worth more trophies and defeats cost you less.",
     perk: "+30 trophies on a win · defeats only cost 10",
-    color: "#ff4fd8",
+    color: "#b6a0ff",
     icon: "trophy",
   },
   {
@@ -2530,12 +2530,22 @@ export const EVENTS: GameEvent[] = [
   {
     id: "mineshaft",
     name: "Mineshaft",
-    days: [5, 6],
-    tagline: "Friday & Saturday",
+    days: [5],
+    tagline: "Friday",
     desc: "The old gold seams under the arena are open. Everything you bank is worth more.",
     perk: "+60% gold from every run",
-    color: "#ffb324",
+    color: "#ffc457",
     icon: "mineshaft",
+  },
+  {
+    id: "moonwell",
+    name: "Moonwell",
+    days: [6],
+    tagline: "Saturday",
+    desc: "The moonwell spills silver light over the grid. Every kill feeds more spell power and the horde walks weakened beneath the glow.",
+    perk: "+45% SP per kill · enemy HP -6%",
+    color: "#b6a0ff",
+    icon: "moonwell",
   },
   {
     id: "gemrush",
@@ -2544,7 +2554,7 @@ export const EVENTS: GameEvent[] = [
     tagline: "Sunday",
     desc: "Hold the arena for five minutes. Each ordinary kill earns 50 gems; elites pay 5× and bosses 10×. Monsters have 12× health and move 50% faster.",
     perk: "5-minute survival · 50 gems per kill · elites ×5 · bosses ×10",
-    color: "#35e0ff",
+    color: "#8ceaff",
     icon: "gemrush",
   },
 ];
@@ -2563,6 +2573,8 @@ export function eventForDate(d: Date = new Date()): GameEvent {
 export interface EventBonus {
   goldMul: number;
   gemMul: number;
+  /** spell power earned per kill — the Moonwell's signature modifier */
+  spMul: number;
   fragBias: number;
   chestFragBonus: number;
   chestPriceMul: number;
@@ -2585,6 +2597,7 @@ export function gemRushKillGems(elite: boolean, boss: boolean): number {
 export const BASE_EVENT_BONUS: EventBonus = {
   goldMul: 1,
   gemMul: 1,
+  spMul: 1,
   fragBias: 0,
   chestFragBonus: 0,
   chestPriceMul: 1,
@@ -2607,6 +2620,8 @@ export function eventBonus(id: EventId): EventBonus {
       return { ...BASE_EVENT_BONUS, chipDrop: { basic: 2 } };
     case "mineshaft":
       return { ...BASE_EVENT_BONUS, goldMul: 1.6 };
+    case "moonwell":
+      return { ...BASE_EVENT_BONUS, spMul: 1.45, hpMul: 0.94 };
     case "gemrush":
       return BASE_EVENT_BONUS;
   }
@@ -2686,7 +2701,7 @@ export const MONTHLY_EVENTS: MonthlyEvent[] = [
     tagline: "May",
     desc: "Gold blooms across the arena floor. Everything you bank is worth half again as much.",
     perk: "+55% gold from every run",
-    color: "#ffcf4d",
+    color: "#ffd977",
   },
   {
     id: "gemrain",
@@ -2695,7 +2710,7 @@ export const MONTHLY_EVENTS: MonthlyEvent[] = [
     tagline: "June",
     desc: "The sky crystallises. Gem payouts from runs nearly double.",
     perk: "+90% gems from every run",
-    color: "#35e0ff",
+    color: "#8ceaff",
   },
   {
     id: "siege",
@@ -2704,7 +2719,7 @@ export const MONTHLY_EVENTS: MonthlyEvent[] = [
     tagline: "July",
     desc: "The horde tests the walls early — they hit harder, but spill far more spell power.",
     perk: "+45% SP per kill · enemy HP +8%",
-    color: "#ff4d5e",
+    color: "#ff5c70",
   },
   {
     id: "festival",
@@ -2722,7 +2737,7 @@ export const MONTHLY_EVENTS: MonthlyEvent[] = [
     tagline: "September",
     desc: "The marshals post bounties on the whole horde. Kills pay in gold and spell power.",
     perk: "+40% gold · +25% SP per kill",
-    color: "#ffb324",
+    color: "#ffc457",
   },
   {
     id: "nightfall",
@@ -2784,11 +2799,15 @@ export const BASE_MONTHLY_BONUS: MonthlyBonus = {
 };
 
 /**
- * Monthly events are a three-tier reward track now. Every run banks event
- * points (waves cleared + a clear bonus), and each monthly event pays out at
- * 120 / 300 / 600 points. The tiers are deliberately front-loaded so a player
- * who only plays a little still gets something, while the 600-point cap takes
- * a couple of weeks of steady runs.
+ * REWORKED monthly events — a five-crate reward track split across four weekly
+ * phases. Every run banks event points (waves cleared + a clear bonus) and each
+ * monthly event pays out at 90 / 240 / 450 / 720 / 1000 points. The early
+ * tiers stay front-loaded so a light player still collects, while the Moon
+ * Crown at the top takes steady runs into the last week.
+ *
+ * Weekly phases keep the whole month live: points earned in week 2 land at
+ * ×1.15, week 3 at ×1.3 and the final week at ×1.5, so catching up late in the
+ * month is always possible.
  */
 export interface MonthlyTier {
   points: number;
@@ -2797,11 +2816,13 @@ export interface MonthlyTier {
   gems: number;
   potions: number;
   chips?: ChipBag;
+  /** magic tokens — only the grand crates carry them */
+  tokens?: number;
 }
 
-export const MONTHLY_TIER_POINTS = [120, 300, 600] as const;
+export const MONTHLY_TIER_POINTS = [90, 240, 450, 720, 1000] as const;
 
-/** the three reward crates for a month's event, coloured by the event itself */
+/** the five reward crates for a month's event, coloured by the event itself */
 export function monthlyTiers(id: MonthId): MonthlyTier[] {
   const ev = MONTH_BY_ID[id] || MONTHLY_EVENTS[0];
   const idx = MONTHLY_EVENTS.indexOf(ev);
@@ -2817,21 +2838,54 @@ export function monthlyTiers(id: MonthId): MonthlyTier[] {
     },
     {
       points: MONTHLY_TIER_POINTS[1],
-      label: "Event Vault",
-      gold: Math.round(16000 * mul),
-      gems: Math.round(240 * mul),
-      potions: 8,
-      chips: { basic: 6, advanced: 2 },
+      label: "Moon Crate",
+      gold: Math.round(12000 * mul),
+      gems: Math.round(190 * mul),
+      potions: 7,
+      chips: { basic: 5 },
     },
     {
       points: MONTHLY_TIER_POINTS[2],
-      label: "Month Crown",
-      gold: Math.round(36000 * mul),
-      gems: Math.round(520 * mul),
-      potions: 16,
-      chips: { advanced: 4, elite: 1 },
+      label: "Event Vault",
+      gold: Math.round(20000 * mul),
+      gems: Math.round(320 * mul),
+      potions: 10,
+      chips: { basic: 6, advanced: 2 },
+    },
+    {
+      points: MONTHLY_TIER_POINTS[3],
+      label: "Rift Hoard",
+      gold: Math.round(28000 * mul),
+      gems: Math.round(450 * mul),
+      potions: 14,
+      chips: { advanced: 3, elite: 1 },
+      tokens: 25,
+    },
+    {
+      points: MONTHLY_TIER_POINTS[4],
+      label: "Moon Crown",
+      gold: Math.round(40000 * mul),
+      gems: Math.round(680 * mul),
+      potions: 20,
+      chips: { advanced: 4, elite: 2 },
+      tokens: 60,
     },
   ];
+}
+
+/**
+ * Weekly phase of the live month: 1 through 4. Week 1 is days 1-7, and the
+ * last phase always catches the tail of the month whatever its length.
+ */
+export function monthPhase(d: Date = new Date()): number {
+  return Math.min(4, Math.floor((d.getDate() - 1) / 7) + 1);
+}
+
+/** points multiplier of the live phase — the late-month comeback curve */
+export const MONTH_PHASE_MUL = [1, 1.15, 1.3, 1.5] as const;
+
+export function monthPhaseMul(d: Date = new Date()): number {
+  return MONTH_PHASE_MUL[Math.min(4, monthPhase(d)) - 1] ?? 1;
 }
 
 /** numeric modifiers for the monthly event — the single source of truth for its perk */
@@ -2879,11 +2933,11 @@ export const LEAGUES: League[] = [
   { name: "Copper", min: 0, color: "#c98b5e" },
   { name: "Iron", min: 350, color: "#9fb4c7" },
   { name: "Silver", min: 900, color: "#cfd8e6" },
-  { name: "Gold", min: 1700, color: "#ffcf4d" },
-  { name: "Crystal", min: 2800, color: "#35e0ff" },
+  { name: "Gold", min: 1700, color: "#ffd977" },
+  { name: "Crystal", min: 2800, color: "#8ceaff" },
   { name: "Arcane", min: 4200, color: "#c44dff" },
-  { name: "Mythic", min: 6000, color: "#ff4fd8" },
-  { name: "Rift Legend", min: 8500, color: "#ffb324" },
+  { name: "Mythic", min: 6000, color: "#b6a0ff" },
+  { name: "Rift Legend", min: 8500, color: "#ffc457" },
 ];
 
 export function leagueFor(trophies: number): League {
@@ -2915,7 +2969,7 @@ export interface CompetitionTier {
 
 /** Weekly competition payout table, read top-down until the rank fits. */
 export const COMPETITION_TIERS: CompetitionTier[] = [
-  { rank: 1, label: "Champion", gems: 2500, gold: 40000, chips: { elite: 3, advanced: 5 }, color: "#ffb324" },
+  { rank: 1, label: "Champion", gems: 2500, gold: 40000, chips: { elite: 3, advanced: 5 }, color: "#ffc457" },
   { rank: 3, label: "Top 3", gems: 1400, gold: 24000, chips: { elite: 1, advanced: 3 }, color: "#cfd8e6" },
   { rank: 10, label: "Top 10", gems: 700, gold: 12000, chips: { advanced: 2, basic: 6 }, color: "#c98b5e" },
   { rank: 25, label: "Top 25", gems: 300, gold: 5000, chips: { basic: 4 }, color: "#8fe9ff" },
@@ -3007,7 +3061,7 @@ export const CHESTS: ChestDef[] = [
     name: "Support Chest",
     cost: 900,
     gem: 0,
-    color: "#3dff8e",
+    color: "#5cffaa",
     gold: [120, 260],
     frags: [1, 3],
     chips: [
@@ -3022,7 +3076,7 @@ export const CHESTS: ChestDef[] = [
     name: "Heroes Chest",
     cost: 500,
     gem: 1,
-    color: "#ff4fd8",
+    color: "#b6a0ff",
     gold: [60, 150],
     frags: [0, 1],
     heroShards: [4, 9],
@@ -3030,7 +3084,7 @@ export const CHESTS: ChestDef[] = [
     blurb: "Hero shards — level heroes for free.",
   },
   { id: "epic", name: "Epic Chest", cost: 800, gem: 1, color: "#c44dff", gold: [60, 140], frags: [5, 8], bias: 0.45, blurb: "Epic-leaning fragments." },
-  { id: "legendary", name: "Legendary Chest", cost: 2000, gem: 1, color: "#ffb324", gold: [150, 320], frags: [8, 12], bias: 1, blurb: "Best odds at a legendary." },
+  { id: "legendary", name: "Legendary Chest", cost: 2000, gem: 1, color: "#ffc457", gold: [150, 320], frags: [8, 12], bias: 1, blurb: "Best odds at a legendary." },
   { id: "mystical", name: "Mystical Chest", cost: 4000, gem: 1, color: "#ff315c", gold: [0, 0], frags: [0, 0], bias: 1, special: "mystical", blurb: "65%: five legendary fragments · 35%: one mystical fragment — Supervisor, Eclipse Oracle or Astral Seraph." },
 ];
 
@@ -3061,7 +3115,7 @@ export const GUILDS: GuildDef[] = [
     members: 84,
     power: 12480,
     trophyReq: 0,
-    color: "#ffb324",
+    color: "#ffc457",
     motto: "Hold the line, then move it forward.",
     perk: "+10% gold from Battle runs",
   },
@@ -3072,7 +3126,7 @@ export const GUILDS: GuildDef[] = [
     members: 61,
     power: 9310,
     trophyReq: 400,
-    color: "#35e0ff",
+    color: "#8ceaff",
     motto: "Thunder answers to us.",
     perk: "+1 gem per completed wave bracket",
   },
@@ -3083,7 +3137,7 @@ export const GUILDS: GuildDef[] = [
     members: 47,
     power: 7050,
     trophyReq: 900,
-    color: "#ff4d5e",
+    color: "#ff5c70",
     motto: "Burn bright, burn everything.",
     perk: "+15% trophies on win streaks",
   },
@@ -3143,11 +3197,11 @@ export interface GuildShopItem {
 }
 
 export const GUILD_SHOP: GuildShopItem[] = [
-  { id: "gcoin-gold", name: "Bullion Crate", coins: 80, desc: "8,000 gold straight into the vault.", color: "#ffcf4d", grant: { gold: 8000 } },
-  { id: "gcoin-gem", name: "Gem Pouch", coins: 150, desc: "450 gems from the guild treasury.", color: "#35e0ff", grant: { gems: 450 } },
+  { id: "gcoin-gold", name: "Bullion Crate", coins: 80, desc: "8,000 gold straight into the vault.", color: "#ffd977", grant: { gold: 8000 } },
+  { id: "gcoin-gem", name: "Gem Pouch", coins: 150, desc: "450 gems from the guild treasury.", color: "#8ceaff", grant: { gems: 450 } },
   { id: "gcoin-chip", name: "Workshop Pallet", coins: 220, desc: "6 basic and 2 advanced chip modules.", color: "#c44dff", grant: { chips: { basic: 6, advanced: 2 } } },
-  { id: "gcoin-frag", name: "Relic Shard Case", coins: 400, desc: "4 legendary tower fragments.", color: "#ffb324", grant: { frags: { n: 4, rarity: "legendary" } } },
-  { id: "gcoin-token", name: "Token Satchel", coins: 260, desc: "12 Magic Tokens for awakenings.", color: "#ff4fd8", grant: { tokens: 12 } },
+  { id: "gcoin-frag", name: "Relic Shard Case", coins: 400, desc: "4 legendary tower fragments.", color: "#ffc457", grant: { frags: { n: 4, rarity: "legendary" } } },
+  { id: "gcoin-token", name: "Token Satchel", coins: 260, desc: "12 Magic Tokens for awakenings.", color: "#b6a0ff", grant: { tokens: 12 } },
 ];
 
 export interface GuildQuest {
@@ -3191,10 +3245,10 @@ export interface MailItem {
 
 export const MAIL_KIND: Record<MailKind, { label: string; color: string; glyph: string }> = {
   system: { label: "SYSTEM", color: "#8fb0ff", glyph: "⚙" },
-  reward: { label: "REWARD", color: "#ffcf4d", glyph: "★" },
-  season: { label: "SEASON", color: "#ff4fd8", glyph: "◈" },
-  guild: { label: "GUILD", color: "#3dff8e", glyph: "✉" },
-  gift: { label: "GIFT", color: "#35e0ff", glyph: "✦" },
+  reward: { label: "REWARD", color: "#ffd977", glyph: "★" },
+  season: { label: "SEASON", color: "#b6a0ff", glyph: "◈" },
+  guild: { label: "GUILD", color: "#5cffaa", glyph: "✉" },
+  gift: { label: "GIFT", color: "#8ceaff", glyph: "✦" },
 };
 
 export const MAIL: MailItem[] = [
@@ -3204,7 +3258,7 @@ export const MAIL: MailItem[] = [
     from: "The Rift Watch",
     subject: "Welcome to the Watch",
     body: "Your first squad is paid for. Take these supplies and hold the line — the rift does not sleep.",
-    color: "#35e0ff",
+    color: "#8ceaff",
     reward: { gold: 4000, gems: 150, chips: 4 },
     age: "day 1",
   },
@@ -3214,7 +3268,7 @@ export const MAIL: MailItem[] = [
     from: "Season Command",
     subject: "Season 1 has begun",
     body: "Trophies now feed the season track. Every tier you pass hands over a crate — see Specials → Season.",
-    color: "#ff4fd8",
+    color: "#b6a0ff",
     reward: { tokens: 5, gems: 100 },
     age: "day 1",
   },
@@ -3234,7 +3288,7 @@ export const MAIL: MailItem[] = [
     from: "Awakened Council",
     subject: "Every tower can awaken",
     body: "Two awakenings per tower, six tiers each. Tier VI pushes each effect beyond its former limit. Spend Magic Tokens at the Towers screen to grow stronger.",
-    color: "#ffcf4d",
+    color: "#ffd977",
     reward: { tokens: 8 },
     age: "day 3",
   },
@@ -3275,15 +3329,15 @@ export interface SeasonTier {
 
 export const SEASON_TIERS: SeasonTier[] = [
   { at: 0, name: "Scout", color: "#8fb0ff", gold: 1500, gems: 40 },
-  { at: 120, name: "Ranger", color: "#35e0ff", gold: 3000, gems: 60, chips: 1 },
-  { at: 300, name: "Warden", color: "#3dff8e", gold: 5000, gems: 90, chips: 2 },
-  { at: 560, name: "Captain", color: "#ffcf4d", gold: 8000, gems: 140, tokens: 3 },
-  { at: 900, name: "Commander", color: "#ffb324", gold: 12000, gems: 200, chips: 3 },
+  { at: 120, name: "Ranger", color: "#8ceaff", gold: 3000, gems: 60, chips: 1 },
+  { at: 300, name: "Warden", color: "#5cffaa", gold: 5000, gems: 90, chips: 2 },
+  { at: 560, name: "Captain", color: "#ffd977", gold: 8000, gems: 140, tokens: 3 },
+  { at: 900, name: "Commander", color: "#ffc457", gold: 12000, gems: 200, chips: 3 },
   { at: 1350, name: "Champion", color: "#ff8c3d", gold: 18000, gems: 280, tokens: 6 },
-  { at: 1900, name: "Warlord", color: "#ff4fd8", gold: 26000, gems: 380, chips: 5 },
+  { at: 1900, name: "Warlord", color: "#b6a0ff", gold: 26000, gems: 380, chips: 5 },
   { at: 2600, name: "Ascendant", color: "#c44dff", gold: 36000, gems: 500, tokens: 10 },
-  { at: 3500, name: "Mythic", color: "#ff4fd8", gold: 50000, gems: 700, frags: 8 },
-  { at: 4600, name: "Rift Sovereign", color: "#ffcf4d", gold: 75000, gems: 1000, tokens: 20, frags: 12 },
+  { at: 3500, name: "Mythic", color: "#b6a0ff", gold: 50000, gems: 700, frags: 8 },
+  { at: 4600, name: "Rift Sovereign", color: "#ffd977", gold: 75000, gems: 1000, tokens: 20, frags: 12 },
 ];
 
 /** which season we are in, counted from the epoch in 30-day blocks */

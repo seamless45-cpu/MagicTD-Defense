@@ -1,5 +1,5 @@
 /**
- * MagicTD's audio engine — a **sample-first** mixer with a Tone.js fallback.
+ * MoonLightTD's audio engine — a **sample-first** mixer with a Tone.js fallback.
  *
  * PRIMARY LAYER (`game/sfxSamples.ts`)
  *   Every cue is built from short, real recordings — Kenney's CC0 interface,
@@ -22,7 +22,7 @@
  * sample layer has nothing to play.
  */
 import * as Tone from "tone";
-import { initSamples, playSample, setSampleState, setSampleEQ, EQ_LAYOUT } from "./sfxSamples";
+import { duckMusic, initSamples, playSample, setSampleState, setSampleEQ, EQ_LAYOUT } from "./sfxSamples";
 
 let rack: {
   master: Tone.Gain;
@@ -587,6 +587,7 @@ const synthSfx = {
     noise(0.32, 0.12, 4200, { type: "highpass", sweep: 0.3, verb: 0.8 });
   },
   ceremony: () => {
+    duckMusic("ceremony");
     stab([392, 523, 659, 784], 0.5, 0.16, 0, "triangle");
     stab([523, 659, 784, 1046], 0.55, 0.13, 0.22, "triangle");
     clang(1046, 0.5, 0.07, 0.24, 0.9);
@@ -788,6 +789,7 @@ const synthSfx = {
   },
   // Super Hardcore run starts: an ominous low sweep with a metallic hit
   superHardcoreStart: () => {
+    duckMusic("superHardcoreStart");
     noise(0.9, 0.22, 900, { type: "lowpass", sweep: 0.2, q: 1.2, verb: 0.7, noiseType: "brown" });
     tone(56, 0.95, "sawtooth", 0.24, -26, 0, { sub: true, cutoff: 200 });
     stab([110, 165, 233], 0.5, 0.14, 0.12, "square");
@@ -891,12 +893,14 @@ const synthSfx = {
     impact(0.32, 1.2);
   },
   boss: () => {
+    duckMusic("boss");
     impact(0.34, 1.5);
     tone(70, 1, "sawtooth", 0.3, 30, 0, { sub: true, detune: 0.006, verb: 0.8 });
     stab([146, 174, 220], 0.9, 0.14, 0.1, "sawtooth");
     noise(0.9, 0.16, 400, { sweep: 0.4, verb: 0.9, noiseType: "brown" });
   },
   win: () => {
+    duckMusic("win");
     stab([523, 659, 784], 0.34, 0.18, 0, "triangle");
     stab([659, 784, 1046], 0.34, 0.17, 0.16, "triangle");
     stab([784, 1046, 1318], 0.7, 0.16, 0.32, "triangle");
@@ -904,6 +908,7 @@ const synthSfx = {
     noise(0.9, 0.1, 6000, { type: "bandpass", q: 2, sweep: 0.3, verb: 0.9 });
   },
   lose: () => {
+    duckMusic("lose");
     [392, 330, 262, 196].forEach((f, i) => tone(f, 0.4, "sawtooth", 0.2, -30, i * 0.16, { sub: true, q: 4, verb: 0.6 }));
     tone(98, 1, "sine", 0.24, -20, 0.5, { sub: true });
   },

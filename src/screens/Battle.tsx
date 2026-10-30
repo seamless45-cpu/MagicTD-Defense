@@ -37,6 +37,7 @@ import {
   ASC_BASE_COST,
   ascSpCost,
   killSp,
+  monthPhaseMul,
   monthlyEventForDate,
   monthlyEventBonus,
   type MonthlyBonus,
@@ -809,11 +810,11 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
 }
 
 function ptColor(p: number) {
-  if (p >= MAX_POINTS) return "#ff4fd8";
-  if (p >= 7) return "#ff4d5e";
+  if (p >= MAX_POINTS) return "#b6a0ff";
+  if (p >= 7) return "#ff5c70";
   if (p >= 5) return "#ff8c3d";
   if (p >= 3) return "#ffd23f";
-  if (p >= 1) return "#3dff8e";
+  if (p >= 1) return "#5cffaa";
   return "#5a6b8a";
 }
 
@@ -1865,7 +1866,7 @@ function paintEnemyStatus(ctx: CanvasRenderingContext2D, e: Enemy, et: EnemyType
     // enraged: embers rising off the boss
     if (e.enraged) {
       ctx.globalAlpha = 0.7;
-      ctx.fillStyle = "#ff4d5e";
+      ctx.fillStyle = "#ff5c70";
       for (let i = 0; i < 3; i++) {
         const t2 = (now / 400 + i / 3) % 1;
         ctx.beginPath();
@@ -1876,7 +1877,7 @@ function paintEnemyStatus(ctx: CanvasRenderingContext2D, e: Enemy, et: EnemyType
     }
     if (e.cast > 0) {
       ctx.globalAlpha = Math.min(0.6, e.cast);
-      ctx.strokeStyle = "#ffcf4d";
+      ctx.strokeStyle = "#ffd977";
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(0, 0, et.r + 18 * (1 - e.cast / 1.2), 0, Math.PI * 2);
@@ -2307,16 +2308,16 @@ export default function Battle({
           const isOccupied = occupied.has(c + "," + r);
           let face = "rgba(31,22,74,0.72)";
           let edge = "rgba(96,76,190,0.5)";
-          let inner = "rgba(53,224,255,0.07)";
+          let inner = "rgba(140,234,255,0.07)";
           if (hover) {
             const over = hover.x >= x && hover.x < x + C && hover.y >= y && hover.y < y + C;
             if (over) {
-              face = isOccupied ? "rgba(255,77,94,0.3)" : "rgba(61,255,142,0.28)";
-              edge = isOccupied ? "rgba(255,77,94,0.9)" : "rgba(61,255,142,0.95)";
-              inner = isOccupied ? "rgba(255,77,94,0.2)" : "rgba(61,255,142,0.22)";
+              face = isOccupied ? "rgba(255,92,112,0.3)" : "rgba(92,255,170,0.28)";
+              edge = isOccupied ? "rgba(255,92,112,0.9)" : "rgba(92,255,170,0.95)";
+              inner = isOccupied ? "rgba(255,92,112,0.2)" : "rgba(92,255,170,0.22)";
             } else {
               face = "rgba(31,22,74,0.55)";
-              inner = "rgba(53,224,255,0.1)";
+              inner = "rgba(140,234,255,0.1)";
             }
           }
           const pxs = x + 4;
@@ -2427,8 +2428,8 @@ export default function Battle({
         const ny = H * (0.3 + i * 0.35);
         const nr = Math.min(W, H) * (0.5 + i * 0.12);
         const ng = bg.createRadialGradient(nx, ny, 0, nx, ny, nr);
-        ng.addColorStop(0, starfall ? (i ? "rgba(53,224,255,0.20)" : "rgba(255,207,77,0.12)") : i ? "rgba(53,110,255,0.16)" : "rgba(160,60,255,0.17)");
-        ng.addColorStop(0.5, starfall ? (i ? "rgba(53,224,255,0.07)" : "rgba(255,207,77,0.04)") : i ? "rgba(53,110,255,0.05)" : "rgba(160,60,255,0.05)");
+        ng.addColorStop(0, starfall ? (i ? "rgba(140,234,255,0.20)" : "rgba(255,217,119,0.12)") : i ? "rgba(53,110,255,0.16)" : "rgba(160,60,255,0.17)");
+        ng.addColorStop(0.5, starfall ? (i ? "rgba(140,234,255,0.07)" : "rgba(255,217,119,0.04)") : i ? "rgba(53,110,255,0.05)" : "rgba(160,60,255,0.05)");
         ng.addColorStop(1, "transparent");
         bg.fillStyle = ng;
         bg.fillRect(nx - nr, ny - nr, nr * 2, nr * 2);
@@ -2466,7 +2467,7 @@ export default function Battle({
       bg.strokeStyle = "rgba(120,96,255,0.5)";
       bg.lineWidth = 2.5;
       bg.stroke();
-      bg.strokeStyle = "rgba(53,224,255,0.16)";
+      bg.strokeStyle = "rgba(140,234,255,0.16)";
       bg.lineWidth = 1;
       bg.beginPath();
       bg.roundRect(padX + 5, padY + 5, padW - 10, padH - 10, 20);
@@ -2478,7 +2479,7 @@ export default function Battle({
       for (let i = 0; i < 7; i++) {
         const f = i / 7;
         bg.globalAlpha = 0.16;
-        bg.strokeStyle = "#35e0ff";
+        bg.strokeStyle = "#8ceaff";
         bg.lineWidth = 1;
         const yy = padY + f * padH;
         bg.beginPath();
@@ -2992,7 +2993,7 @@ export default function Battle({
         chips,
         gauntlet: gauntletPay ? { boons: g.boons.length, record: gauntletPay.record } : undefined,
       };
-      if (mode === "gemrush") toastRef.current(`GEM RUSH OVER · ${g.gemRushGems.toLocaleString()} GEMS READY TO CLAIM`, "#35e0ff");
+      if (mode === "gemrush") toastRef.current(`GEM RUSH OVER · ${g.gemRushGems.toLocaleString()} GEMS READY TO CLAIM`, "#8ceaff");
       if (won) sfx.win();
       else sfx.lose();
     };
@@ -3177,13 +3178,13 @@ export default function Battle({
         const size = crit ? 24 + critTier * 6 : 15;
         addText(p.x + (Math.random() - 0.5) * 18, p.y - 26, String(Math.round(dmg)), crit ? (critTier >= 3 ? "#fff6c4" : "#ffd23f") : "#ffffff", size, crit);
         if (crit && (fxQ() >= 1 || critTier >= 3)) addText(p.x, p.y - 54 - critTier * 5, CRIT_LABEL[critTier] || "CRIT!", "#ff8c3d", 12 + critTier * 2, true);
-        if (crit && critTier >= 3) addText(p.x, p.y - 74 - critTier * 5, `×${runCritMul.toFixed(2)} CRIT DMG`, "#ffb324", 12, true);
+        if (crit && critTier >= 3) addText(p.x, p.y - 74 - critTier * 5, `×${runCritMul.toFixed(2)} CRIT DMG`, "#ffc457", 12, true);
       }
       if (crit) {
         g.crits++;
         if (dmg > g.bestHit) g.bestHit = Math.round(dmg);
       }
-      burst(p.x, p.y, opt.color || "#ffcf4d", crit ? 5 : 2);
+      burst(p.x, p.y, opt.color || "#ffd977", crit ? 5 : 2);
       if (e.hp <= 0) {
         if (opt.tw && (opt.tw.def.id === "hellstorm" || opt.tw.def.killStack)) opt.tw.streak++;
         // Soul Siphon + the SP-type awakenings pay the grid on every kill
@@ -3211,7 +3212,7 @@ export default function Battle({
           if (goldMul > 0) {
             const extra = runGold(Math.round(e.gold * goldMul * g.goldMul * rewardMul));
             g.gold += extra;
-            addText(p.x, p.y - 34, `+${extra}`, "#ffcf4d", 12, false);
+            addText(p.x, p.y - 34, `+${extra}`, "#ffd977", 12, false);
           }
           // onKill skill family: pay-out triggers on the kill
           if (sp > 0 || goldMul > 0) {
@@ -3545,7 +3546,7 @@ export default function Battle({
       const tier2 = saveRef.current.awn["sun"]?.[1] || 0;
       const nova = tier1 > 0 && Math.random() < t.def.awk1!.chance[tier1 - 1];
       const power = nova ? 1 + t.def.awk1!.mult[tier1 - 1] : 1;
-      ring(p.x, p.y, "#ffb324", 200);
+      ring(p.x, p.y, "#ffc457", 200);
       burst(p.x, p.y, "#ffd76a", 22, 260);
       g.shake = fxShake(6);
       sfx.explosion();
@@ -3555,7 +3556,7 @@ export default function Battle({
         if (e.dead) return;
         const ep = enemyPos(e);
         ring(ep.x, ep.y, nova ? "#ffffff" : "#ffd76a", 40);
-        dealDamage(e, dmg * power, { alwaysCrit: nova, tw: t, color: "#ffb324" });
+        dealDamage(e, dmg * power, { alwaysCrit: nova, tw: t, color: "#ffc457" });
         if (!e.dead) {
           e.burnDps = Math.max(e.burnDps, dmg * burn * (1 + extra));
           e.burnT = Math.max(e.burnT, t.def.burnDur || 4);
@@ -4100,7 +4101,7 @@ export default function Battle({
           });
           // the gate itself flares open behind the shell
           ring(p.x, p.y, "#ff7a3d", 60 + wide * 40);
-          glow(p.x, p.y, "#ffb324", 90, 0.4);
+          glow(p.x, p.y, "#ffc457", 90, 0.4);
           if (wide > 0) addText(ep.x, ep.y - 46, "GATES UNDONE", "#ff7a3d", 14, true);
           break;
         }
@@ -4189,7 +4190,7 @@ export default function Battle({
       if (pr.fireball !== undefined) {
         const radius = pr.blast ?? 170;
         ring(pos.x, pos.y, "#ff7a3d", radius);
-        burst(pos.x, pos.y, "#ffb324", 22, 260);
+        burst(pos.x, pos.y, "#ffc457", 22, 260);
         sfx.explosion();
         g.shake = fxShake(5);
         g.enemies.forEach((e) => {
@@ -4210,7 +4211,7 @@ export default function Battle({
         const tier = saveRef.current.awn["meteor"]?.[0] || 0;
         const asteroid = tier > 0 && Math.random() < (pr.asteroidChance || 0);
         const radius = asteroid ? 9000 * (1 + (pr.tw.def.awk1!.mult[tier - 1] - 1) * 0.2) : 150;
-        g.meteors.push({ x: pos.x, y: pos.y, t: 0.65, total: 0.65, uid: pr.tw.uid, color: asteroid ? "#ff7a24" : "#ffb324", dmg: pr.dmg * (asteroid ? 8 : 1.8), blast: radius, tw: pr.tw, ...(asteroid ? { asteroid: true, directId: target.id } : {}) });
+        g.meteors.push({ x: pos.x, y: pos.y, t: 0.65, total: 0.65, uid: pr.tw.uid, color: asteroid ? "#ff7a24" : "#ffc457", dmg: pr.dmg * (asteroid ? 8 : 1.8), blast: radius, tw: pr.tw, ...(asteroid ? { asteroid: true, directId: target.id } : {}) });
         if (asteroid) addText(pos.x, pos.y - 58, "ASTEROID DROP", "#ff7a24", 18, true);
       }
       if (pr.tw && isLightningTower(pr.tw.def) && g.lightningBonus > 0) {
@@ -4395,8 +4396,8 @@ export default function Battle({
           const wide = rollAwk(t2, awkSpec(t2, 0)?.fx === "splash" ? 0 : 1);
           if (wide > 0) {
             pr.blast *= 1 + wide;
-            ring(pos.x, pos.y, "#ffb324", pr.blast);
-            burst(pos.x, pos.y, "#ffb324", 14, 220);
+            ring(pos.x, pos.y, "#ffc457", pr.blast);
+            burst(pos.x, pos.y, "#ffc457", 14, 220);
           }
         }
         // Execute: reap a target that is already badly wounded
@@ -4486,8 +4487,8 @@ export default function Battle({
         target.stun = Math.max(target.stun, pr.stunS);
         target.d = Math.max(0, target.d - (pr.push || 0));
         sfx.stun();
-        ring(pos.x, pos.y, "#35e0ff", 44);
-        addText(pos.x, pos.y - 40, `STUN ${pr.stunS.toFixed(1)}s`, "#35e0ff", 12, false);
+        ring(pos.x, pos.y, "#8ceaff", 44);
+        addText(pos.x, pos.y - 40, `STUN ${pr.stunS.toFixed(1)}s`, "#8ceaff", 12, false);
       }
       if (pr.icicle !== undefined) {
         const cut = target.hp * pr.icicle;
@@ -4526,7 +4527,7 @@ export default function Battle({
       const superClone = !!spec1 && Math.random() < spec1.chance[t1 - 1];
       if (a.points !== b.points && !superClone) {
         sfx.error();
-        toastRef.current(`Points must match to clone (${a.points} vs ${b.points})`, "#ff4d5e");
+        toastRef.current(`Points must match to clone (${a.points} vs ${b.points})`, "#ff5c70");
         return;
       }
       const t2 = saveRef.current.awn["clone"]?.[1] || 0;
@@ -4593,7 +4594,7 @@ export default function Battle({
       if (wanted <= b.points) {
         // nothing to gain: never eat a tower for nothing
         sfx.error();
-        toastRef.current(`${b.def.name} is already at ${MAX_POINTS} points`, "#ff4d5e");
+        toastRef.current(`${b.def.name} is already at ${MAX_POINTS} points`, "#ff5c70");
         return;
       }
 
@@ -4832,13 +4833,13 @@ export default function Battle({
       const bought = g.shopBought[item.id] || 0;
       if (bought >= item.max) {
         sfx.error();
-        toastRef.current(`${item.name} is sold out this run`, "#ff4d5e");
+        toastRef.current(`${item.name} is sold out this run`, "#ff5c70");
         return;
       }
       const price = runShopCost(item, bought);
       if (g.gold < price) {
         sfx.error();
-        toastRef.current(`Need ${price} gold`, "#ff4d5e");
+        toastRef.current(`Need ${price} gold`, "#ff5c70");
         return;
       }
       g.gold -= price;
@@ -4888,8 +4889,8 @@ export default function Battle({
             t.bLv++;
             if (t.cell) {
               const p = cellCenter(t.cell.c, t.cell.r);
-              ring(p.x, p.y, "#35e0ff", 48);
-              addText(p.x, p.y - 44, `ASCENT Lv${t.bLv}`, "#35e0ff", 14, true);
+              ring(p.x, p.y, "#8ceaff", 48);
+              addText(p.x, p.y - 44, `ASCENT Lv${t.bLv}`, "#8ceaff", 14, true);
             }
           }
           break;
@@ -4901,13 +4902,13 @@ export default function Battle({
           g.enemies.forEach((e) => {
             if (e.dead) return;
             const p = enemyPos(e);
-            ring(p.x, p.y, "#ffb324", 60);
+            ring(p.x, p.y, "#ffc457", 60);
             dealDamage(e, e.max * 0.25, { color: "#ff9d4d" });
           });
           break;
         }
       }
-      toastRef.current(`${item.name} bought · ${price} gold`, "#ffcf4d");
+      toastRef.current(`${item.name} bought · ${price} gold`, "#ffd977");
     };
     shopRef.current = buyShopItem;
 
@@ -5338,7 +5339,7 @@ export default function Battle({
       const cost = summonCost();
       if (g.sp < cost) {
         sfx.error();
-        toastRef.current("Not enough SP", "#ff4d5e");
+        toastRef.current("Not enough SP", "#ff5c70");
         return;
       }
       const unlocked = Object.keys(saveRef.current.levels).filter((id) => saveRef.current.levels[id] > 0);
@@ -5347,7 +5348,7 @@ export default function Battle({
       const cell = randFreeCell(g);
       if (!cell) {
         sfx.error();
-        toastRef.current("Board full — merge two towers to free a cell", "#ff4d5e");
+        toastRef.current("Board full — merge two towers to free a cell", "#ff5c70");
         return;
       }
 
@@ -5357,7 +5358,7 @@ export default function Battle({
       const lineup = saveRef.current.lineup.filter((id) => saveRef.current.levels[id] > 0 && TOWER_BY_ID[id]);
       if (!lineup.length) {
         sfx.error();
-        toastRef.current("Set your summon rotation in the Towers tab first", "#ff4d5e");
+        toastRef.current("Set your summon rotation in the Towers tab first", "#ff5c70");
         return;
       }
       const pool0 = lineup;
@@ -5394,19 +5395,19 @@ export default function Battle({
       const open = family.filter((x) => x.bLv < MAX_BATTLE_LEVEL);
       if (!open.length) return;
       const cost = ascCost(src.bLv);
-      if (g.sp < cost) { sfx.error(); toastRef.current("Not enough SP", "#ff4d5e"); return; }
+      if (g.sp < cost) { sfx.error(); toastRef.current("Not enough SP", "#ff5c70"); return; }
       g.sp -= cost;
       const lv = Math.min(MAX_BATTLE_LEVEL, src.bLv + 1);
       // every copy of the tower stays in lockstep
       for (const t of family) t.bLv = lv;
       sfx.ascend();
       // One simultaneous ascent flash: every copy's lightning lands together.
-      flash("#35e0ff", 0.22);
+      flash("#8ceaff", 0.22);
       hitStop(0.045);
       open.forEach((t) => {
         if (!t.cell) return;
         const p = cellCenter(t.cell.c, t.cell.r);
-        levelFlourish(p.x, p.y, "#35e0ff", `ASCENT ${ROMAN[lv] || lv}`, lv >= MAX_BATTLE_LEVEL ? 3 : 2);
+        levelFlourish(p.x, p.y, "#8ceaff", `ASCENT ${ROMAN[lv] || lv}`, lv >= MAX_BATTLE_LEVEL ? 3 : 2);
         g.strikes.push({ x: p.x, y: p.y, life: 0.38, max: 0.38, width: 14, color: "#b9f4ff", seed: Math.random() * 100, forks: 3, top: -220 });
         g.strikes.push({ x: p.x, y: p.y, life: 0.26, max: 0.26, width: 5, color: "#ffffff", seed: Math.random() * 100, top: -220 });
         sparkAt(p.x, p.y, 18, 220);
@@ -5415,7 +5416,7 @@ export default function Battle({
         open.length > 1
           ? `All ${open.length} ${src.def.name} towers ascended to Lv ${lv}`
           : `${src.def.name} ascended to Lv ${lv}`,
-        "#35e0ff"
+        "#8ceaff"
       );
     };
     ascendRef.current = ascend;
@@ -5597,7 +5598,7 @@ export default function Battle({
             id: eidC++, d: fromGateB ? GATE_B_D : 0, hp, max: hp, speed: et.speed * ENEMY_SPEED_MUL * (1 + g.round * 0.012) * (elite ? 1.08 : 1) * (mode === "gemrush" ? GEM_RUSH_SPEED_MUL : modeSpeedMul(mode)) * (mode === "sandbox" ? sandboxCfgRef.current.speed : 1), type: s.type,
             elite,
             frozen: 0, stun: 0, armor: mode === "sandbox" ? sandboxCfgRef.current.shield : et.armor, lives: et.lives, gold: (et.gold + Math.floor(g.round / 2)) * (elite ? 2 : 1),
-            spv: Math.round(killSp(elite, boss) * MONTH_BONUS.spMul), dead: false, wob: Math.random() * 7,
+            spv: Math.round(killSp(elite, boss) * EV_BONUS.spMul * MONTH_BONUS.spMul), dead: false, wob: Math.random() * 7,
             slow: 0, slowT: 0, burnT: 0, burnDps: 0,
             summonCd: BOSS_SUMMON_CD, blinkCd: BOSS_BLINK_CD, wardCd: BOSS_WARD_CD, ward: 0,
             nullCd: BOSS_NULL_CD, devourCd: BOSS_DEVOUR_CD, meteorCd: BOSS_METEOR_CD,
@@ -5671,13 +5672,13 @@ export default function Battle({
               applyBoon(GAUNTLET_BOONS[Math.floor(Math.random() * GAUNTLET_BOONS.length)]);
             }
             sfx.coin();
-            if (!saveRef.current.hideWaveCleared) { sfx.waveCleared(); toastRef.current(`Wave ${g.round} cleared · choose a boon`, "#3dff8e"); }
+            if (!saveRef.current.hideWaveCleared) { sfx.waveCleared(); toastRef.current(`Wave ${g.round} cleared · choose a boon`, "#5cffaa"); }
             if (g.round % 5 === 0) {
               mutateRef.current((s) => {
                 s.tokens += 1;
               });
               sfx.token();
-              toastRef.current(`Gauntlet wave ${g.round}: +1 Magic Token`, "#ff4fd8");
+              toastRef.current(`Gauntlet wave ${g.round}: +1 Magic Token`, "#b6a0ff");
             }
           } else {
             g.phase = "inter";
@@ -5685,13 +5686,13 @@ export default function Battle({
             sfx.coin();
             if (!saveRef.current.hideWaveCleared) toastRef.current(
               `${mode === "endless" ? "Wave" : "Round"} ${g.round} cleared · +${spGain(bonus)} SP`,
-              "#3dff8e"
+              "#5cffaa"
             );
             if (mode === "endless" && g.round % 5 === 0) {
               // every 5 waves an endless run hands out tokens
               mutateRef.current((s) => { s.tokens += 1; });
               sfx.token();
-              toastRef.current(`Endless wave ${g.round}: +1 Magic Token`, "#ff4fd8");
+              toastRef.current(`Endless wave ${g.round}: +1 Magic Token`, "#b6a0ff");
             }
           }
         }
@@ -5739,8 +5740,8 @@ export default function Battle({
             e.speed *= 1.45;
             e.ward = Math.max(e.ward, 1.2);
             castSkill("enrage");
-            burst(ep0.x, ep0.y, "#ff4d5e", 22, 240);
-            shock(ep0.x, ep0.y, "#ff4d5e", 90, 0.6);
+            burst(ep0.x, ep0.y, "#ff5c70", 22, 240);
+            shock(ep0.x, ep0.y, "#ff5c70", 90, 0.6);
             sfx.leak();
           }
 
@@ -5799,7 +5800,7 @@ export default function Battle({
                 g.enemies.push({
                   id: eidC++, d: back, hp, max: hp, speed: et0.speed * ENEMY_SPEED_MUL * (1 + g.round * 0.012) * 1.25 * modeSpeedMul(mode), type: 0,
                   frozen: 0, stun: 0, armor: 0, lives: 1, gold: et0.gold + Math.floor(g.round / 4),
-                  spv: killSp(false, false), dead: false, wob: Math.random() * 7,
+                  spv: Math.round(killSp(false, false) * EV_BONUS.spMul * MONTH_BONUS.spMul), dead: false, wob: Math.random() * 7,
                   slow: 0, slowT: 0, burnT: 0, burnDps: 0,
                   summonCd: 0, blinkCd: 0, wardCd: 0, ward: 0,
                   nullCd: 0, devourCd: 0, meteorCd: 0, chainsCd: 0, warpCd: 0, link: 0, exCd: [0, 0, 0],
@@ -5841,18 +5842,18 @@ export default function Battle({
               for (const m of g.enemies) {
                 if (m.dead || isBossType(m.type)) continue;
                 const before = enemyPos(m);
-                ring(before.x, before.y, "#ff4fd8", 26);
+                ring(before.x, before.y, "#b6a0ff", 26);
                 m.d = Math.min(m.d + BOSS_WARP_DIST, PATH_LEN - 4);
                 m.pd = m.d;
                 const after = enemyPos(m);
-                ring(after.x, after.y, "#ff4fd8", 30);
-                burst(after.x, after.y, "#ff4fd8", 6, 140);
+                ring(after.x, after.y, "#b6a0ff", 30);
+                burst(after.x, after.y, "#b6a0ff", 6, 140);
                 moved++;
               }
               if (moved) {
                 castSkill("warp", `${NAME} warps ${moved} enem${moved > 1 ? "ies" : "y"} forward`);
                 g.shake = fxShake(6);
-                flash("#ff4fd8", 0.18);
+                flash("#b6a0ff", 0.18);
                 sfx.summon();
               }
             }
@@ -6041,7 +6042,7 @@ export default function Battle({
             e.oy += (dy / dist) * pull;
             if (Math.random() < dt * 8) {
               const sp2 = enemyPos(e);
-              pushPart({ x: sp2.x, y: sp2.y, vx: (dx / dist) * 120, vy: (dy / dist) * 120, life: 0.3, max: 0.3, size: 3, color: "#ff4fd8", kind: "glow", add: true });
+              pushPart({ x: sp2.x, y: sp2.y, vx: (dx / dist) * 120, vy: (dy / dist) * 120, life: 0.3, max: 0.3, size: 3, color: "#b6a0ff", kind: "glow", add: true });
             }
           }
           if (e.pulled <= 0) e.pulled = 0;
@@ -6545,7 +6546,7 @@ export default function Battle({
                 });
               }
               shock(m.x, m.y, m.asteroid ? "#ff7a24" : "#ffd23f", blast, 0.55);
-              burst(m.x, m.y, "#ffb324", 20, 260);
+              burst(m.x, m.y, "#ffc457", 20, 260);
               shards(m.x, m.y, "#ffd23f", 10, 240);
               embers(m.x, m.y, "#ffd23f", 10);
               addZone({ kind: "rift", x: m.x, y: m.y, r: blast, life: 0.3, max: 0.3, dps: 0, slow: 0, color: "#ffd23f" });
@@ -6563,7 +6564,7 @@ export default function Battle({
                 tw2.flash = 0.3;
               }
               shock(m.x, m.y, "#ff7a3d", 96, 0.6);
-              burst(m.x, m.y, "#ffb324", 22, 280);
+              burst(m.x, m.y, "#ffc457", 22, 280);
               shards(m.x, m.y, "#ff7a3d", 12, 260);
               embers(m.x, m.y, "#ffd23f", 10);
               flash("#ff7a3d", 0.14);
@@ -6737,12 +6738,12 @@ export default function Battle({
       if (t.def.aura) {
         const rr = (t.def.id === "plant" ? 72 : 60) + Math.sin(now / (t.def.id === "plant" ? 210 : 300)) * 4;
         ctx.globalAlpha *= 0.9;
-        ctx.fillStyle = t.def.id === "plant" ? "rgba(61,255,142,0.10)" : "rgba(53,224,255,0.10)";
+        ctx.fillStyle = t.def.id === "plant" ? "rgba(92,255,170,0.10)" : "rgba(140,234,255,0.10)";
         ctx.beginPath();
         ctx.arc(x, y, rr, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 0.55;
-        ctx.strokeStyle = t.def.id === "plant" ? "#3dff8e" : "#35e0ff";
+        ctx.strokeStyle = t.def.id === "plant" ? "#5cffaa" : "#8ceaff";
         ctx.lineWidth = 1.5;
         const auraArcs = t.def.id === "plant" ? 6 : 4;
         for (let i = 0; i < auraArcs; i++) {
@@ -6846,7 +6847,7 @@ export default function Battle({
           ctx.fillRect(-14 - rec, -12, 30, 24);
           ctx.fillStyle = "#8a6a1a";
           ctx.fillRect(-6 - rec, -8, 38, 16);
-          ctx.fillStyle = "#ffb324";
+          ctx.fillStyle = "#ffc457";
           ctx.beginPath();
           ctx.arc(30 - rec, 0, 7, 0, Math.PI * 2);
           ctx.fill();
@@ -7030,7 +7031,7 @@ export default function Battle({
           ctx.beginPath();
           ctx.arc(0, 0, 17, 0, Math.PI * 2);
           ctx.fill();
-          ctx.fillStyle = "#ffb324";
+          ctx.fillStyle = "#ffc457";
           ctx.beginPath();
           ctx.arc(24 - rec, 0, 5, 0, Math.PI * 2);
           ctx.fill();
@@ -7107,13 +7108,13 @@ export default function Battle({
         case "core": {
           const pl = 10 + Math.sin(now / 180) * 2.5;
           ctx.fillStyle = "#0c2d5c";
-          ctx.strokeStyle = "#35e0ff";
+          ctx.strokeStyle = "#8ceaff";
           ctx.lineWidth = 3;
           ctx.beginPath();
           ctx.arc(0, 0, 15, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
-          ctx.fillStyle = "#35e0ff";
+          ctx.fillStyle = "#8ceaff";
           ctx.beginPath();
           ctx.arc(0, 0, pl * 0.55, 0, Math.PI * 2);
           ctx.fill();
@@ -7128,7 +7129,7 @@ export default function Battle({
           break;
         }
         case "lightning":
-          ctx.fillStyle = "#ffb324";
+          ctx.fillStyle = "#ffc457";
           ctx.strokeStyle = "#8a5200";
           ctx.lineWidth = 1.5;
           ctx.beginPath();
@@ -7213,7 +7214,7 @@ export default function Battle({
         }
         case "chrono": {
           ctx.fillStyle = "#0d1f3a";
-          ctx.strokeStyle = "#35e0ff";
+          ctx.strokeStyle = "#8ceaff";
           ctx.lineWidth = 3;
           ctx.beginPath();
           ctx.arc(0, 0, 16, 0, Math.PI * 2);
@@ -7284,7 +7285,7 @@ export default function Battle({
         }
         case "plant":
           ctx.fillStyle = "#153024";
-          ctx.strokeStyle = "#3dff8e";
+          ctx.strokeStyle = "#5cffaa";
           ctx.lineWidth = 2.5;
           ctx.beginPath();
           for (let i = 0; i < 6; i++) {
@@ -7297,7 +7298,7 @@ export default function Battle({
           ctx.closePath();
           ctx.fill();
           ctx.stroke();
-          ctx.fillStyle = "#3dff8e";
+          ctx.fillStyle = "#5cffaa";
           ctx.beginPath();
           ctx.arc(0, 0, 6 + Math.sin(now / 250) * 1.5, 0, Math.PI * 2);
           ctx.fill();
@@ -7736,7 +7737,7 @@ export default function Battle({
             ctx.fillRect(26 - kick, off - 5, 4, 10);
           });
           ctx.restore();
-          ctx.fillStyle = "#ffcf4d";
+          ctx.fillStyle = "#ffd977";
           for (let i = 0; i < 3; i++) ctx.fillRect(-18 + i * 7, 12, 4, 4);
           break;
         }
@@ -7844,7 +7845,7 @@ export default function Battle({
           ctx.strokeStyle = "#8a5a00";
           ctx.lineWidth = 1.6;
           ctx.stroke();
-          ctx.fillStyle = "#ff4fd8";
+          ctx.fillStyle = "#b6a0ff";
           ctx.beginPath();
           ctx.arc(0, -2, 3, 0, Math.PI * 2);
           ctx.fill();
@@ -8060,7 +8061,7 @@ export default function Battle({
       ctx.restore();
       // battle level pips
       for (let i = 0; i < t.bLv; i++) {
-        ctx.fillStyle = "#35e0ff";
+        ctx.fillStyle = "#8ceaff";
         ctx.fillRect(x - 30 + i * 5, y - 40, 3, 3);
       }
       // tower name plates are dropped on big boards / low quality frames
@@ -8305,7 +8306,7 @@ export default function Battle({
       ctx.beginPath();
       ctx.roundRect(p.x - w3 / 2 - 1, by - 1, w3 + 2, bh + 2, 3);
       ctx.fill();
-      const hpCol = hpPct > 0.5 ? "#3dff8e" : hpPct > 0.25 ? "#ffd23f" : "#ff4d5e";
+      const hpCol = hpPct > 0.5 ? "#5cffaa" : hpPct > 0.25 ? "#ffd23f" : "#ff5c70";
       if (dense) {
         // a flat colour on packed boards: one gradient object per enemy per
         // frame is exactly the kind of allocation that shows up in a profile
@@ -8444,7 +8445,7 @@ export default function Battle({
           ctx.moveTo(-10, 0);
           ctx.lineTo(10, 0);
           ctx.stroke();
-          ctx.fillStyle = "#ffcf4d";
+          ctx.fillStyle = "#ffd977";
           ctx.beginPath();
           ctx.moveTo(14, 0);
           ctx.lineTo(6, -4);
@@ -8456,7 +8457,7 @@ export default function Battle({
           ctx.beginPath();
           ctx.arc(0, 0, 8, 0, Math.PI * 2);
           ctx.fill();
-          ctx.strokeStyle = "#ffb324";
+          ctx.strokeStyle = "#ffc457";
           ctx.lineWidth = 1.5;
           ctx.stroke();
           break;
@@ -8482,7 +8483,7 @@ export default function Battle({
           ctx.stroke();
           break;
         case "chrono":
-          ctx.fillStyle = "rgba(53,224,255,0.85)";
+          ctx.fillStyle = "rgba(140,234,255,0.85)";
           ctx.beginPath();
           ctx.arc(0, 0, 6.5, 0, Math.PI * 2);
           ctx.fill();
@@ -8554,7 +8555,7 @@ export default function Battle({
           break;
         }
         case "core":
-          ctx.fillStyle = "#35e0ff";
+          ctx.fillStyle = "#8ceaff";
           ctx.beginPath();
           ctx.arc(0, 0, 7, 0, Math.PI * 2);
           ctx.fill();
@@ -8700,7 +8701,7 @@ export default function Battle({
       ctx.lineWidth = 12;
       ctx.setLineDash([]);
       pathStrokeLive();
-      ctx.strokeStyle = "rgba(53,224,255,0.3)";
+      ctx.strokeStyle = "rgba(140,234,255,0.3)";
       ctx.lineWidth = 3.5;
       pathStrokeLive();
       // energy pulses flowing from spawn toward the exit
@@ -8733,7 +8734,7 @@ export default function Battle({
         const mx = padX + hx * padW + Math.sin(T * 0.4 + i) * 14;
         const my = padY + ((hy * padH - T * sp) % padH + padH) % padH;
         ctx.globalAlpha = 0.1 + 0.18 * Math.abs(Math.sin(T * 0.9 + i * 1.7));
-        ctx.fillStyle = i % 4 === 0 ? "#ffcf4d" : "#7fd8ff";
+        ctx.fillStyle = i % 4 === 0 ? "#ffd977" : "#7fd8ff";
         ctx.beginPath();
         ctx.arc(mx, my, 1 + (i % 3) * 0.7, 0, Math.PI * 2);
         ctx.fill();
@@ -8744,7 +8745,7 @@ export default function Battle({
 
       drawPortal(WPX[0].x, WPX[0].y, "#c44dff", "SPAWN");
       if (mode !== "sandbox" && hasSecondGate(mode)) drawPortal(GATE_B.x, GATE_B.y, "#c44dff", "SPAWN");
-      drawPortal(WPX[WPX.length - 1].x, WPX[WPX.length - 1].y, "#ff4d5e", "EXIT");
+      drawPortal(WPX[WPX.length - 1].x, WPX[WPX.length - 1].y, "#ff5c70", "EXIT");
 
       // energy guides: one arena-wide field boundary plus a faint tether from
       // every tower to the front of the horde, which is what "range" means now
@@ -8752,7 +8753,7 @@ export default function Battle({
         ctx.save();
         ctx.setLineDash([7, 9]);
         ctx.lineWidth = 1.5;
-        ctx.strokeStyle = "rgba(53,224,255,0.16)";
+        ctx.strokeStyle = "rgba(140,234,255,0.16)";
         ctx.beginPath();
         ctx.arc(W / 2, H / 2, Math.max(W, H) * 0.66, 0, Math.PI * 2);
         ctx.stroke();
@@ -8765,7 +8766,7 @@ export default function Battle({
           for (const t of g.towers) {
             if (!t.cell) continue;
             const p = cellCenter(t.cell.c, t.cell.r);
-            ctx.strokeStyle = t.owner === "you" ? "rgba(53,224,255,0.14)" : t.owner + "33";
+            ctx.strokeStyle = t.owner === "you" ? "rgba(140,234,255,0.14)" : t.owner + "33";
             ctx.beginPath();
             ctx.moveTo(p.x, p.y);
             ctx.lineTo(fp.x, fp.y);
@@ -9950,14 +9951,14 @@ export default function Battle({
       if (occ) {
         if (src.def.id === "clone" && occ.def.id === "clone") {
           if (src.points === occ.points) mergeTowers(src, occ);
-          else { sfx.error(); toastRef.current(`Points must match to merge (${src.points} vs ${occ.points})`, "#ff4d5e"); }
+          else { sfx.error(); toastRef.current(`Points must match to merge (${src.points} vs ${occ.points})`, "#ff5c70"); }
         } else if (occ.def.id === "clone") {
           cloneTower(src, occ);
         } else if (src.def.id === "clone") {
           cloneTower(occ, src);
         } else if (occ.points >= MAX_POINTS) {
           sfx.error();
-          toastRef.current(`${occ.def.name} is already at ${MAX_POINTS} points`, "#ff4d5e");
+          toastRef.current(`${occ.def.name} is already at ${MAX_POINTS} points`, "#ff5c70");
         } else if (occ.def.id === src.def.id && occ.points === src.points) {
           // only the same tower at the same points may merge
           mergeTowers(src, occ);
@@ -9967,7 +9968,7 @@ export default function Battle({
             occ.def.id !== src.def.id
               ? `${src.def.name} only merges with another ${src.def.name} at the same points`
               : `Points must match to merge (${src.points} vs ${occ.points})`,
-            "#ff4d5e",
+            "#ff5c70",
           );
         }
         return;
@@ -10020,13 +10021,13 @@ export default function Battle({
     const open = family.filter((x) => x.bLv < MAX_BATTLE_LEVEL);
     if (!open.length) {
       sfx.error();
-      push(`${t.def.name} is already at battle level ${MAX_BATTLE_LEVEL}`, "#ff4d5e");
+      push(`${t.def.name} is already at battle level ${MAX_BATTLE_LEVEL}`, "#ff5c70");
       return;
     }
     const cost = ascSpCost(Math.max(0, t.bLv - 1));
     if (gg.sp < cost) {
       sfx.error();
-      push("Not enough SP", "#ff4d5e");
+      push("Not enough SP", "#ff5c70");
       return;
     }
     ascendRef.current(uid);
@@ -10040,9 +10041,9 @@ export default function Battle({
    */
   const endRows = (f: NonNullable<G["final"]>) => {
     const rows: { icon: React.ReactNode; label: string; val: string; color: string }[] = [];
-    if (f.gold) rows.push({ icon: <CoinIcon size={16} />, label: "Gold", val: f.gold.toLocaleString("en-US"), color: "#ffcf4d" });
-    if (f.gems) rows.push({ icon: <GemIcon size={16} />, label: "Gems", val: f.gems.toLocaleString("en-US"), color: "#35e0ff" });
-    if (f.tokens) rows.push({ icon: <TokenIcon size={16} />, label: "Magic Tokens", val: String(f.tokens), color: "#ff4fd8" });
+    if (f.gold) rows.push({ icon: <CoinIcon size={16} />, label: "Gold", val: f.gold.toLocaleString("en-US"), color: "#ffd977" });
+    if (f.gems) rows.push({ icon: <GemIcon size={16} />, label: "Gems", val: f.gems.toLocaleString("en-US"), color: "#8ceaff" });
+    if (f.tokens) rows.push({ icon: <TokenIcon size={16} />, label: "Magic Tokens", val: String(f.tokens), color: "#b6a0ff" });
     if (f.potions) rows.push({ icon: <PotionIcon size={16} />, label: "Crystal Potions", val: String(f.potions), color: "#b98bff" });
     f.frags.forEach((fr) => {
       const def = TOWER_BY_ID[fr.id];
@@ -10058,7 +10059,7 @@ export default function Battle({
         icon: <span className="text-[14px]">~</span>,
         label: "Waves survived",
         val: String(f.rounds),
-        color: mode === "gauntlet" ? "#3dff8e" : "#ff9be9",
+        color: mode === "gauntlet" ? "#5cffaa" : "#d9c9ff",
       });
     if (f.gauntlet) {
       rows.push({ icon: <span className="text-[14px]">✦</span>, label: "Boons taken", val: String(f.gauntlet.boons), color: "#b06bff" });
@@ -10077,7 +10078,7 @@ export default function Battle({
         icon: <TrophyIcon size={16} />,
         label: f.won ? "Trophies won" : "Trophies lost",
         val: (f.won ? "+" : "") + Math.abs(trophyDelta(f.won, EV_BONUS, saveRef.current.streak)),
-        color: f.won ? "#3dff8e" : "#ff8f9a",
+        color: f.won ? "#5cffaa" : "#ff8f9a",
       });
     return rows;
   };
@@ -10091,8 +10092,9 @@ export default function Battle({
       s.gems += f.gems;
       s.tokens += f.tokens;
       s.potions += f.potions;
-      // every finished run banks monthly event points: waves + a clear bonus
-      addMonthPoints(s, f.rounds * 8 + (f.won ? 40 : 0));
+      // every finished run banks monthly event points: waves + a clear bonus,
+      // multiplied by the live weekly phase so late-month runs catch up faster
+      addMonthPoints(s, Math.round((f.rounds * 8 + (f.won ? 40 : 0)) * monthPhaseMul()));
       f.frags.forEach((fr) => {
         s.frags[fr.id] = (s.frags[fr.id] || 0) + fr.n;
       });
@@ -10186,11 +10188,11 @@ export default function Battle({
                 <b className="num">{Math.floor(g.sp)}</b>
                 <em>SP</em>
               </span>
-              <span className="hud-pill" style={{ color: "#ffcf4d" }}>
+              <span className="hud-pill" style={{ color: "#ffd977" }}>
                 <CoinIcon size={14} />
                 <b className="num">{Math.floor(g.gold)}</b>
               </span>
-              <span className="hud-pill" data-testid="hud-lives" style={{ color: g.lives <= 5 ? "#ff4d5e" : "#ff8f9a" }}>
+              <span className="hud-pill" data-testid="hud-lives" style={{ color: g.lives <= 5 ? "#ff5c70" : "#ff8f9a" }}>
                 <svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true">
                   <path
                     d="M10 17S2 11.5 2 6.6C2 4 4 2.5 6 2.5c1.6 0 3 .8 4 2.2 1-1.4 2.4-2.2 4-2.2 2 0 4 1.5 4 4.1C18 11.5 10 17 10 17z"
@@ -10203,7 +10205,7 @@ export default function Battle({
                 <b className="num">{g.enemies.length + g.spawnQ.length}</b>
                 <em>left</em>
               </span>
-              {mode === "gemrush" && <span className="hud-pill" style={{ color: "#35e0ff" }} data-testid="gem-rush-earned"><GemIcon size={14} /><b className="num">{g.gemRushGems.toLocaleString()}</b><em>earned</em></span>}
+              {mode === "gemrush" && <span className="hud-pill" style={{ color: "#8ceaff" }} data-testid="gem-rush-earned"><GemIcon size={14} /><b className="num">{g.gemRushGems.toLocaleString()}</b><em>earned</em></span>}
               {(mode === "hardcore" || mode === "superhardcore") && (
                 <span className="hud-pill hud-hardcore" data-testid="hardcore-plays" title={`${mode === "superhardcore" ? "Super Hardcore" : "Hardcore"} · no attempt limit · best round ${save.hardcoreBest}`}>
                   <b className="num">∞</b>
@@ -10229,14 +10231,14 @@ export default function Battle({
                 style={{
                   color:
                     mode === "gauntlet"
-                      ? "#3dff8e"
+                      ? "#5cffaa"
                       : mode === "endless"
-                        ? "#ff9be9"
+                        ? "#d9c9ff"
                         : mode === "gemrush"
-                          ? "#35e0ff"
+                          ? "#8ceaff"
                           : mode === "hardcore"
                             ? "#ff315c"
-                            : "#ffcf4d",
+                            : "#ffd977",
                 }}
                 title={
                   mode === "gauntlet"
@@ -10252,7 +10254,7 @@ export default function Battle({
                 <em>{isRunMode(mode) ? (mode === "hardcore" ? "hardcore" : "round") : mode === "gauntlet" ? "gauntlet" : mode === "gemrush" ? "remaining" : "endless"}</em>
               </span>
               {mode === "gauntlet" && (
-                <span className="hud-pill hud-dim" style={{ color: "#3dff8e" }} data-testid="gauntlet-boons" title="Boons taken this run">
+                <span className="hud-pill hud-dim" style={{ color: "#5cffaa" }} data-testid="gauntlet-boons" title="Boons taken this run">
                   <b className="num">{g.boons.length}</b>
                   <em>boons</em>
                 </span>
@@ -10319,7 +10321,7 @@ export default function Battle({
           <span className="wave-strip-label">
             {isRunMode(mode) ? "ROUND" : "WAVE"} <b className="num">{g.round}</b>
             {g.phase === "boon" ? (
-              <> · <span style={{ color: "#3dff8e" }}>BOON READY</span></>
+              <> · <span style={{ color: "#5cffaa" }}>BOON READY</span></>
             ) : g.phase === "wave" ? (
               save.hideWaveCleared ? null : <> · <span className="num">{Math.max(0, g.waveTotal - g.spawnQ.length - g.enemies.filter((e) => !e.dead).length)}</span>/<span className="num">{g.waveTotal}</span> CLEARED</>
             ) : g.phase === "deploy" ? (
@@ -10378,7 +10380,7 @@ export default function Battle({
               const splashFactor = t.def.splash ? Math.min(1.6, 1 + t.def.splash / 180) : 1;
               return sum + damage / rate * targetFactor * chainFactor * splashFactor;
             }, 0);
-            return <button type="button" disabled={!!g.final || uses >= 3} className="ml-auto rounded-md border border-[#ff4fd8]/50 bg-black/70 px-2 py-1 text-[10px] font-bold text-[#ff9be9] disabled:opacity-40" data-testid="auto-resolve" onClick={() => onAutoBattle?.(mode, dps, deployed.length, g.phase === "inter" || g.phase === "boon" ? g.round + 1 : g.round, g.gold, g.goldMul, g.boons.length)}>{uses >= 3 ? "AUTO LIMIT · 3/3" : `AUTO-RESOLVE · ${Math.max(0, 3 - uses)}/3`}</button>;
+            return <button type="button" disabled={!!g.final || uses >= 3} className="ml-auto rounded-md border border-[#b6a0ff]/50 bg-black/70 px-2 py-1 text-[10px] font-bold text-[#d9c9ff] disabled:opacity-40" data-testid="auto-resolve" onClick={() => onAutoBattle?.(mode, dps, deployed.length, g.phase === "inter" || g.phase === "boon" ? g.round + 1 : g.round, g.gold, g.goldMul, g.boons.length)}>{uses >= 3 ? "AUTO LIMIT · 3/3" : `AUTO-RESOLVE · ${Math.max(0, 3 - uses)}/3`}</button>;
           })()}
         </div>
       )}
@@ -10422,7 +10424,7 @@ export default function Battle({
         {g && (g.phase === "deploy" || g.phase === "inter") && (
           <div className="pointer-events-none absolute left-1/2 top-[8%] -translate-x-1/2 text-center">
             {(g.phase === "deploy" || !save.hideWaveCleared) && (
-            <div className="font-disp text-4xl text-[#ffcf4d]" style={{ textShadow: "0 0 26px rgba(255,179,36,.7)" }}>
+            <div className="font-disp text-4xl text-[#ffd977]" style={{ textShadow: "0 0 26px rgba(255,196,87,.7)" }}>
               {g.phase === "deploy"
                 ? "DEPLOY TOWERS"
                 : `${isRunMode(mode) ? "ROUND" : "WAVE"} ${g.round} CLEARED`}
@@ -10431,7 +10433,7 @@ export default function Battle({
             <div className="mt-1 text-base font-bold tracking-[0.25em] text-[var(--txt)]">
               {g.phase === "deploy" ? "PRESS SUMMON — TOWERS DROP STRAIGHT ONTO THE GRID" : `NEXT WAVE IN ${Math.ceil(g.phaseT)}`}
             </div>
-            <div className="mt-1 text-[13px] font-bold tracking-[0.2em] text-[#ff9be9]">
+            <div className="mt-1 text-[13px] font-bold tracking-[0.2em] text-[#d9c9ff]">
               WAVE {g.phase === "deploy" ? g.round : g.round + 1} · ENEMY HP ×{Math.pow(HP_GROWTH, g.phase === "deploy" ? g.round - 1 : g.round).toFixed(1)}
             </div>
             {(() => {
@@ -10454,7 +10456,7 @@ export default function Battle({
               );
             })()}
             {(g.phase === "deploy" ? g.round : g.round + 1) % 4 === 0 && (
-              <div className="boss-warning mt-1 text-[11px] font-bold tracking-[0.25em] text-[#ff4d5e]">
+              <div className="boss-warning mt-1 text-[11px] font-bold tracking-[0.25em] text-[#ff5c70]">
                 ⚠ BOSS WAVE INCOMING
               </div>
             )}
@@ -10498,7 +10500,7 @@ export default function Battle({
                   <span className="font-disp truncate text-[11.5px] leading-none" style={{ color: et.color }}>
                     {et.name.toUpperCase()}
                   </span>
-                  {e.enraged && <span className="boss-hud-tag" style={{ background: "#ff4d5e", color: "#180008" }}>RAGE</span>}
+                  {e.enraged && <span className="boss-hud-tag" style={{ background: "#ff5c70", color: "#180008" }}>RAGE</span>}
                   {e.ward > 0 && <span className="boss-hud-tag" style={{ background: "#8fb0ff", color: "#080f22" }}>WARD</span>}
                   {(e.plating || 0) > 0 && <span className="boss-hud-tag" style={{ background: "#ffd23f", color: "#1a1200" }}>PLATE</span>}
                   {(e.shieldCutT || 0) > 0 && <span className="boss-hud-tag" style={{ background: "#7ce7ff", color: "#001a20" }}>STRIPPED</span>}
@@ -10509,7 +10511,7 @@ export default function Battle({
                 <div className="mt-1 h-2 overflow-hidden rounded-full border border-black/60 bg-black/70">
                   <div
                     className={`h-full rounded-full ${e.enraged ? "boss-bar-rage" : "boss-bar"}`}
-                    style={{ width: `${frac * 100}%`, background: `linear-gradient(90deg, ${et.color}, #ffcf4d)` }}
+                    style={{ width: `${frac * 100}%`, background: `linear-gradient(90deg, ${et.color}, #ffd977)` }}
                   />
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-1" data-testid="boss-kit">
@@ -10556,10 +10558,10 @@ export default function Battle({
 
         {g && g.phase === "wave" && (
           <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 text-center">
-            <div className="font-disp text-xl text-[#ff4fd8]" style={{ textShadow: "0 0 18px rgba(255,79,216,.6)" }}>
+            <div className="font-disp text-xl text-[#b6a0ff]" style={{ textShadow: "0 0 18px rgba(182,160,255,.6)" }}>
               {isRunMode(mode) ? "ROUND" : "WAVE"} {g.round}
             </div>
-            <div className="text-[11px] font-bold tracking-[0.2em] text-[#ff9be9]/80">
+            <div className="text-[11px] font-bold tracking-[0.2em] text-[#d9c9ff]/80">
               ENEMY HP ×{Math.pow(HP_GROWTH, g.round - 1).toFixed(1)} · +{Math.round((HP_GROWTH - 1) * 100)}% PER WAVE
             </div>
           </div>
@@ -10595,12 +10597,12 @@ export default function Battle({
                     cy="38"
                     r={R}
                     fill="none"
-                    stroke={heroReady ? "#3dff8e" : heroDef.color}
+                    stroke={heroReady ? "#5cffaa" : heroDef.color}
                     strokeWidth="5"
                     strokeLinecap="round"
                     strokeDasharray={CIRC}
                     strokeDashoffset={heroReady ? 0 : CIRC * frac}
-                    style={{ transition: "stroke-dashoffset 120ms linear", filter: heroReady ? "drop-shadow(0 0 6px #3dff8e)" : "none" }}
+                    style={{ transition: "stroke-dashoffset 120ms linear", filter: heroReady ? "drop-shadow(0 0 6px #5cffaa)" : "none" }}
                   />
                 </svg>
                 <span
@@ -10638,7 +10640,7 @@ export default function Battle({
               {!heroReady ? (
                 <span className="text-[10px] font-bold leading-tight tracking-wider text-[var(--dim)]">COOLDOWN</span>
               ) : (
-                <span className="text-[11px] font-bold leading-tight text-[#3dff8e]">READY — TAP</span>
+                <span className="text-[11px] font-bold leading-tight text-[#5cffaa]">READY — TAP</span>
               )}
             </button>
           );
@@ -10663,7 +10665,7 @@ export default function Battle({
           >
             −
           </button>
-          <span className="min-w-[46px] text-center text-[12px] font-bold text-[#ffcf4d]" data-testid="zoom">
+          <span className="min-w-[46px] text-center text-[12px] font-bold text-[#ffd977]" data-testid="zoom">
             ZOOM {Math.round(zoom * 100)}%
           </span>
           <button
@@ -10691,12 +10693,12 @@ export default function Battle({
           pick, and the next wave rolls the instant it lands */}
       {g && g.phase === "boon" && g.boonOffer && (
         <div className="battle-pause absolute inset-0 z-[75] flex items-center justify-center p-4" data-testid="boon-overlay">
-          <div className="panel anim-pop w-[600px] max-w-full p-5" style={{ borderColor: "#3dff8e88" }}>
+          <div className="panel anim-pop w-[600px] max-w-full p-5" style={{ borderColor: "#5cffaa88" }}>
             <div className="text-center">
-              <div className="text-[10px] font-bold tracking-[0.3em] text-[#3dff8e]">
+              <div className="text-[10px] font-bold tracking-[0.3em] text-[#5cffaa]">
                 {save.hideWaveCleared ? <>GAUNTLET · NEXT BOON</> : <>WAVE <span className="num">{g.round}</span> CLEARED · GAUNTLET</>}
               </div>
-              <div className="font-disp text-3xl text-[#3dff8e]">CHOOSE A BOON</div>
+              <div className="font-disp text-3xl text-[#5cffaa]">CHOOSE A BOON</div>
               <div className="mt-1 text-[11.5px] font-semibold text-[var(--dim)]">
                 <span className="num">{g.boons.length}</span> banked this run · the next wave starts the moment you pick
               </div>
@@ -10744,8 +10746,8 @@ export default function Battle({
       {/* PAUSE — the sim is held, the arena stays visible behind a light scrim */}
       {paused && g && !g.final && (
         <div className="battle-pause absolute inset-0 z-[80] flex items-center justify-center p-4" data-testid="pause-overlay">
-          <div className="panel anim-pop w-[380px] max-w-full p-5 text-center" style={{ borderColor: "#35e0ff88" }}>
-            <div className="font-disp text-3xl text-[#35e0ff]">PAUSED</div>
+          <div className="panel anim-pop w-[380px] max-w-full p-5 text-center" style={{ borderColor: "#8ceaff88" }}>
+            <div className="font-disp text-3xl text-[#8ceaff]">PAUSED</div>
             <div className="mt-1 text-[12px] font-semibold text-[var(--dim)]">
               {mode === "gauntlet" ? "GAUNTLET" : mode === "endless" ? "ENDLESS" : mode === "hardcore" ? "HARDCORE" : mode === "superhardcore" ? "SUPER HARDCORE" : "BATTLE"} ·{" "}
               {isRunMode(mode) ? "ROUND" : "WAVE"} {g.round} ·{" "}
@@ -10826,12 +10828,12 @@ export default function Battle({
                   onClick={() => {
                     if (!lead) {
                       sfx.error();
-                      push(`${def.name} isn't on the board yet`, "#ff4d5e");
+                      push(`${def.name} isn't on the board yet`, "#ff5c70");
                       return;
                     }
                     if (!canAscend) {
                       sfx.error();
-                      push(maxed ? `${def.name} is already maxed` : "Not enough SP", "#ff4d5e");
+                      push(maxed ? `${def.name} is already maxed` : "Not enough SP", "#ff5c70");
                       return;
                     }
                     ascendTower(lead.uid);
@@ -10941,8 +10943,8 @@ export default function Battle({
               </div>
               <div className="relative min-w-0 flex-1 text-left">
                 <div className="flex items-center gap-2">
-                  <span className="boss-cut-warn text-[10px] font-bold tracking-[0.42em] text-[#ffcf4d]">WARNING</span>
-                  <span className="h-px flex-1 bg-gradient-to-r from-[#ffcf4d88] to-transparent" />
+                  <span className="boss-cut-warn text-[10px] font-bold tracking-[0.42em] text-[#ffd977]">WARNING</span>
+                  <span className="h-px flex-1 bg-gradient-to-r from-[#ffd97788] to-transparent" />
                   <span className="boss-cut-count boss-cut-count-sm" aria-hidden="true">
                     {g.cut.locked ? "!" : Math.max(1, Math.ceil(g.cut.t))}
                   </span>
@@ -10954,15 +10956,15 @@ export default function Battle({
                 >
                   {g.cut.name.toUpperCase()}
                 </div>
-                <div className="boss-cut-title truncate text-[10.5px] font-bold tracking-[0.22em] text-[#ff9be9]">
+                <div className="boss-cut-title truncate text-[10.5px] font-bold tracking-[0.22em] text-[#d9c9ff]">
                   {ENEMY_TYPES[g.cut.type].title.toUpperCase()} · {g.cut.sub}
                 </div>
                 {/* live stat readout, compacted into one line */}
                 <div className="boss-cut-stats mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] font-bold">
                   <span className="text-[var(--dim)]">HEALTH <span className="num" style={{ color: "#ff8f9a" }}>×{(ENEMY_TYPES[g.cut.type].hpMul * BOSS_HP_MUL).toFixed(1)}</span></span>
                   <span className="text-[var(--dim)]">ARMOUR <span className="num text-[#8fb0ff]">{Math.round(ENEMY_TYPES[g.cut.type].armor * 100)}%</span></span>
-                  <span className="text-[var(--dim)]">LIVES <span className="num text-[#ff4d5e]">{ENEMY_TYPES[g.cut.type].lives}</span></span>
-                  <span className="text-[var(--dim)]">BOUNTY <span className="num text-[#ffcf4d]">{ENEMY_TYPES[g.cut.type].gold}</span></span>
+                  <span className="text-[var(--dim)]">LIVES <span className="num text-[#ff5c70]">{ENEMY_TYPES[g.cut.type].lives}</span></span>
+                  <span className="text-[var(--dim)]">BOUNTY <span className="num text-[#ffd977]">{ENEMY_TYPES[g.cut.type].gold}</span></span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-1">
                   {bossKit(g.cut.type).map((id, i) => {
@@ -11002,7 +11004,7 @@ export default function Battle({
                     ALWAYS SKIP
                   </button>
                   <span className="ml-auto text-[10px] font-bold tracking-[0.2em] text-[var(--dim)]">
-                    {g.cut.locked ? <b style={{ color: "#ff4d5e" }}>ENGAGED</b> : "CUTSCENE"}
+                    {g.cut.locked ? <b style={{ color: "#ff5c70" }}>ENGAGED</b> : "CUTSCENE"}
                   </span>
                 </div>
               </div>
@@ -11123,7 +11125,7 @@ function RunShop({
               Gold earned this run — whatever you don't spend is paid out when the run ends.
             </div>
           </div>
-          <span className="chip text-[15px] text-[#ffcf4d]">
+          <span className="chip text-[15px] text-[#ffd977]">
             <CoinIcon size={16} /> {Math.floor(gold)}
           </span>
         </div>

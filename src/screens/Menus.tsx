@@ -114,6 +114,8 @@ import {
   competitionTier,
   eventBonus,
   eventForDate,
+  monthPhase,
+  monthPhaseMul,
   monthlyEventBonus,
   monthlyEventForDate,
   monthlyTiers,
@@ -211,11 +213,11 @@ export function LaunchIntro({ onDone }: { onDone: () => void }) {
     };
   }, [finish]);
 
-  const TITLE = "MAGICTD";
+  const TITLE = "MOONLIGHTTD";
   /** the system checks that tick in under the tagline, like a machine coming online */
   const CHECKS = ["LINK ESTABLISHED", "RENDERER ONLINE", "AUDIO ARMED"];
   return (
-    <div className="boot-root bt-root" data-testid="launch-intro" aria-label="MagicTD Defense boot sequence">
+    <div className="boot-root bt-root" data-testid="launch-intro" aria-label="MoonLightTD Defense boot sequence">
       <div className="bt-grid" aria-hidden="true" />
       <div className={`bt-sweep ${beat >= 1 ? "on" : ""}`} aria-hidden="true" />
       <div className={`bt-flash ${beat >= 2 ? "on" : ""}`} aria-hidden="true" />
@@ -287,11 +289,15 @@ function loadTasks(): { w: number; run: () => Promise<unknown> }[] {
       return path;
     }
   };
-  const fetchBytes = (path: string) =>
-    fetch(url(path), { cache: "force-cache" }).then((r) => {
+  const fetchBytes = (path: string) => {
+    // environments without fetch (jsdom, very old browsers, hardened webviews)
+    // skip the warm-up instead of crashing the loading screen
+    if (typeof fetch !== "function") return Promise.resolve(new ArrayBuffer(0));
+    return fetch(url(path), { cache: "force-cache" }).then((r) => {
       if (!r.ok) throw new Error(path);
       return r.arrayBuffer();
     });
+  };
   // icons are fetched (not decoded) so the browser cache is warm for the shell's
   // own <img> requests; fetch also fails fast in environments without images
   const decodeImage = (path: string) => fetchBytes(path);
@@ -470,7 +476,7 @@ export function LoadingScreen({ onDone }: { onDone: () => void }) {
           <Emblem size={92} />
         </div>
         <div className="load-word ld-word">
-          <span className="load-word-a">MagicTD</span>
+          <span className="load-word-a">MoonLightTD</span>
           <span className="load-word-b">DEFENSE</span>
         </div>
       </div>
@@ -563,13 +569,13 @@ export function Home({
   const doUpgrade = () => {
     if (heroMaxed) {
       sfx.error();
-      return push(`${hero.name} is already max level`, "#ff4d5e");
+      return push(`${hero.name} is already max level`, "#ff5c70");
     }
     // affordability is checked BEFORE the mutation — otherwise the hero levelled
     // up for free and only the toast complained about the missing gold
     if (save.gold < cost) {
       sfx.error();
-      return push(`Need ${cost.toLocaleString("en-US")} gold to upgrade ${hero.name}`, "#ff4d5e");
+      return push(`Need ${cost.toLocaleString("en-US")} gold to upgrade ${hero.name}`, "#ff5c70");
     }
     mutate((s) => {
       // upgradeHero re-checks the price on the cloned save, so two taps in the
@@ -589,13 +595,13 @@ export function Home({
   const doClaim = () => {
     if (!canClaim) {
       sfx.error();
-      return push("Already claimed — the next day unlocks at 07:00", "#ff4d5e");
+      return push("Already claimed — the next day unlocks at 07:00", "#ff5c70");
     }
     // roll on a clone first so the animation shows exactly what gets banked
     const g = claimDailyReward(cloneSave(save));
     if (!g) {
       sfx.error();
-      return push("Already claimed — the next day unlocks at 07:00", "#ff4d5e");
+      return push("Already claimed — the next day unlocks at 07:00", "#ff5c70");
     }
     mutate((s) => {
       if (s.lastDaily === todayStr()) return;
@@ -618,7 +624,7 @@ export function Home({
   const doEventClaim = () => {
     if (!eventClaimable(save)) {
       sfx.error();
-      return push("Event bonus already taken today", "#ff4d5e");
+      return push("Event bonus already taken today", "#ff5c70");
     }
     const draft = cloneSave(save);
     const loot = claimEventBonus(draft);
@@ -644,11 +650,11 @@ export function Home({
   const doShardLevel = () => {
     if (lv >= HERO_MAX_LEVEL) {
       sfx.error();
-      return push(`${hero.name} is already max level`, "#ff4d5e");
+      return push(`${hero.name} is already max level`, "#ff5c70");
     }
     if (shards < HERO_SHARD_COST) {
       sfx.error();
-      return push(`Need ${HERO_SHARD_COST} ${hero.name} shards — open Heroes Chests`, "#ff4d5e");
+      return push(`Need ${HERO_SHARD_COST} ${hero.name} shards — open Heroes Chests`, "#ff5c70");
     }
     mutate((s) => {
       levelHeroWithShards(s, hero.id);
@@ -666,24 +672,33 @@ export function Home({
     const cur = awkTierOf(slot);
     if (cur >= HERO_AWAKENING_MAX_TIER) {
       sfx.error();
-      return push(`${spec.name} is already maxed`, "#ff4d5e");
+      return push(`${spec.name} is already maxed`, "#ff5c70");
     }
     const cost = heroAwakenCost(cur + 1);
     if (save.tokens < cost) {
       sfx.error();
-      return push(`Need ${cost} Magic Tokens for ${spec.name}`, "#ff4d5e");
+      return push(`Need ${cost} Magic Tokens for ${spec.name}`, "#ff5c70");
     }
     mutate((s) => {
       awakenHero(s, hero.id, slot);
     });
     sfx.ceremony();
-    push(`${hero.name} · ${spec.name} ${["", "I", "II", "III", "IV", "V", "VI"][cur + 1]}`, "#ff4fd8");
+    push(`${hero.name} · ${spec.name} ${["", "I", "II", "III", "IV", "V", "VI"][cur + 1]}`, "#b6a0ff");
   };
 
   return (
     <div className="scroll-thin relative flex h-full flex-col gap-3 overflow-y-auto py-1 pr-1">
       <div className="anim-slideup text-center">
-        <div className="font-disp text-3xl tracking-wide text-[#ffb324]" style={{ textShadow: "0 0 24px rgba(255,179,36,.55)" }}>
+        <div
+          className="font-disp text-3xl tracking-wide"
+          style={{
+            background: "linear-gradient(180deg, #ffffff 10%, #dfe7ff 55%, #8ceaff 110%)",
+            WebkitBackgroundClip: "text",
+            backgroundClip: "text",
+            color: "transparent",
+            filter: "drop-shadow(0 0 18px rgba(140,234,255,.4)) drop-shadow(0 0 36px rgba(182,160,255,.3))",
+          }}
+        >
           Command Center
         </div>
         <div className="mt-0.5 text-[12px] font-semibold tracking-[0.28em] text-[var(--dim)]">
@@ -699,20 +714,20 @@ export function Home({
             <span className="badge-num absolute -left-2 -top-2">{lv >= HERO_MAX_LEVEL ? "MAX" : `Lv ${lv}`}</span>
           </div>
           <div className="min-w-[210px] flex-1">
-            <div className="text-[11px] font-bold tracking-[0.28em] text-[#ffcf4d]">HERO</div>
+            <div className="text-[11px] font-bold tracking-[0.28em] text-[#ffd977]">HERO</div>
             <div className="font-disp text-2xl leading-none" style={{ color: hero.color }}>
               {hero.name}
             </div>
             <p className="mt-1 text-[12.5px] font-semibold leading-snug text-[var(--dim)]">{hero.desc}</p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <span className="pill-dark text-[11px] text-[var(--dim)]">
-                <span className="num" style={{ color: "#3dff8e" }}>
+                <span className="num" style={{ color: "#5cffaa" }}>
                   {Math.round(heroPower(lv) * 100)}%
                 </span>
                 power
               </span>
               <span className="pill-dark text-[11px] text-[var(--dim)]">
-                <span className="num" style={{ color: "#35e0ff" }}>
+                <span className="num" style={{ color: "#8ceaff" }}>
                   {heroCooldown(hero.cd, lv).toFixed(0)}s
                 </span>
                 cooldown
@@ -742,7 +757,7 @@ export function Home({
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-disp text-[15px] text-[#7ce7ff]">AWAKENING</span>
               <span className="text-[10.5px] font-bold tracking-[0.18em] text-[var(--dim)]">MAGIC TOKENS</span>
-              <span className="pill-dark ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-[#ff4fd8]">
+              <span className="pill-dark ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-[#b6a0ff]">
                 <TokenIcon size={12} />
                 <b className="num">{save.tokens}</b>
               </span>
@@ -759,10 +774,10 @@ export function Home({
                     key={slot}
                     data-testid={`hero-awakening-${slot}`}
                     className="rounded-lg border border-[#7ce7ff33] bg-black/35 p-2"
-                    style={tier > 0 ? { borderColor: "#ff4fd88c", boxShadow: "0 0 16px #ff4fd826" } : undefined}
+                    style={tier > 0 ? { borderColor: "#b6a0ff8c", boxShadow: "0 0 16px #b6a0ff26" } : undefined}
                   >
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[11.5px] font-bold text-[#ff9be9]">
+                      <span className="text-[11.5px] font-bold text-[#d9c9ff]">
                         {slot + 1}. {spec.name}
                       </span>
                       {spec.passive && <span className="rounded bg-[#7ce7ff] px-1 text-[8.5px] font-black leading-tight text-black">PASSIVE</span>}
@@ -772,7 +787,7 @@ export function Home({
                         <i
                           key={i}
                           className="h-1.5 flex-1 rounded-full"
-                          style={{ background: i < tier ? "linear-gradient(90deg,#7ce7ff,#ff4fd8)" : "rgba(255,255,255,0.12)" }}
+                          style={{ background: i < tier ? "linear-gradient(90deg,#7ce7ff,#b6a0ff)" : "rgba(255,255,255,0.12)" }}
                         />
                       ))}
                     </div>
@@ -817,7 +832,7 @@ export function Home({
                 className="tile tile-hover relative flex w-[132px] shrink-0 flex-col items-center gap-1 p-2"
                 style={{
                   borderColor: on ? h.color : undefined,
-                  boxShadow: on ? `0 0 16px ${h.color}66, 0 4px 0 #0b0722` : undefined,
+                  boxShadow: on ? `0 0 16px ${h.color}66, 0 4px 0 #0a0e2c` : undefined,
                 }}
               >
                 <span className={`badge-num absolute -left-1.5 -top-1.5 ${hl > 1 ? "" : "dim"}`}>{hl}</span>
@@ -837,7 +852,7 @@ export function Home({
       {/* MODES */}
       <div className="relative grid w-full grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <ModeCard
-          accent="#ffcf4d"
+          accent="#ffd977"
           title="Battle"
           sub={`Solo defense · ${BATTLE_ROUNDS} rounds`}
           body="Fixed 12-wave gauntlet. Win it to bank gold, gems and fragments."
@@ -845,7 +860,7 @@ export function Home({
           delay="0ms"
         />
         <ModeCard
-          accent="#ff4fd8"
+          accent="#b6a0ff"
           title="Endless"
           sub="No wave limit · score attack"
           body="Survive as long as you can. Every wave banks more, deeper runs pay more."
@@ -854,7 +869,7 @@ export function Home({
           badge={`BEST ${save.bestEndless}`}
         />
         <ModeCard
-          accent="#3dff8e"
+          accent="#5cffaa"
           title="Gauntlet"
           sub="Roguelite · boons every wave"
           body="No wave cap. Pick a boon after every clear and stack the run until it breaks you."
@@ -891,7 +906,7 @@ export function Home({
         />
       </div>
 
-      {/* TODAY'S EVENT */}
+      {/* TODAY'S EVENT — live rotation + the 7-day claim streak in one card */}
       <div className="tile event-card live relative p-3" data-testid="today-event" style={{ borderColor: liveEv.color + "77" }}>
         <div className="event-home-layout relative flex flex-wrap items-center gap-3">
           <EventGlyph id={liveEv.id} color={liveEv.color} size={46} />
@@ -904,6 +919,22 @@ export function Home({
               {liveEv.name}
             </div>
             <div className="mt-1 text-[11.5px] font-bold text-[#8effc4]">{liveEv.perk}</div>
+            {/* streak meter: seven pips fill as the daily chain grows */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-1" aria-hidden="true">
+                {Array.from({ length: 7 }, (_, i) => (
+                  <i
+                    key={i}
+                    className={`streak-pip ${i < save.eventStreak ? "on" : ""}`}
+                    style={i < save.eventStreak ? { background: liveEv.color, boxShadow: `0 0 8px ${liveEv.color}aa` } : undefined}
+                  />
+                ))}
+              </span>
+              <span className="text-[10px] font-bold tracking-wider text-[var(--dim)]" data-testid="home-event-streak">
+                STREAK <b className="num" style={{ color: liveEv.color }}>{save.eventStreak}</b>/7 · NEXT ×
+                <b className="num" style={{ color: liveEv.color }}>{eventStreakMul(nextEventStreak(save)).toFixed(2)}</b> LOOT
+              </span>
+            </div>
           </div>
           <button className="cta-banner shrink-0 px-4 py-2.5 text-[13px]" data-testid={liveEv.id === "gemrush" ? "enter-gem-rush" : "event-claim"} disabled={liveEv.id !== "gemrush" && !eventClaimable(save)} onClick={liveEv.id === "gemrush" ? onGemRush : doEventClaim}>
             {liveEv.id === "gemrush" ? "ENTER GEM RUSH" : eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED"}
@@ -922,8 +953,8 @@ export function Home({
             {league.name} · <span className="num">{save.trophies.toLocaleString()}</span> 🏆
           </div>
           <div className="mt-1 text-[11.5px] font-semibold text-[var(--dim)]">
-            Victory <span className="font-bold text-[#3dff8e]">+{TROPHY_WIN}</span> · Defeat{" "}
-            <span className="font-bold text-[#ff4d5e]">-{TROPHY_LOSS}</span>
+            Victory <span className="font-bold text-[#5cffaa]">+{TROPHY_WIN}</span> · Defeat{" "}
+            <span className="font-bold text-[#ff5c70]">-{TROPHY_LOSS}</span>
             {nextL ? ` · ${(nextL.min - save.trophies).toLocaleString()} to ${nextL.name}` : " · top league reached"}
           </div>
           {nextL && (
@@ -948,14 +979,18 @@ export function Home({
         </div>
       </div>
 
-      {/* DAILY REWARDS */}
-      <div className="tile relative p-3" data-testid="daily-rewards">
+      {/* DAILY REWARDS — the moonlit seven-day calendar */}
+      <div className="tile daily-panel relative p-3" data-testid="daily-rewards">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="font-disp text-xl text-[#ffcf4d]">Daily Rewards</div>
-            <div className="text-[12px] font-semibold text-[var(--dim)]">
+            <div className="flex items-center gap-2">
+              <span className="moon-badge" aria-hidden="true">☾</span>
+              <div className="font-disp text-xl text-[#ffd977]">Daily Rewards</div>
+              <span className="pill-dark text-[10px] text-[var(--dim)]">MOONLIT CALENDAR</span>
+            </div>
+            <div className="mt-0.5 text-[12px] font-semibold text-[var(--dim)]">
               Streak {save.dailyStreak}/7 · claiming now opens day {day}. Resets every day at{" "}
-              <span className="font-bold text-[#ffcf4d]">07:00</span> — next in{" "}
+              <span className="font-bold text-[#ffd977]">07:00</span> — next in{" "}
               <span className="font-bold text-[var(--cyan)]">{resetCountdown()}</span>. Miss a day and the streak restarts.
             </div>
           </div>
@@ -981,7 +1016,7 @@ export function Home({
                 <span className="text-center text-[9.5px] font-bold leading-tight" style={{ color: next ? r.accent : "var(--dim)" }}>
                   {r.label}
                 </span>
-                {done && <span className="absolute right-1 top-1 text-[12px] text-[#3dff8e]">✓</span>}
+                {done && <span className="absolute right-1 top-1 text-[12px] text-[#5cffaa]">✓</span>}
               </div>
             );
           })}
@@ -1110,13 +1145,21 @@ export function EventGlyph({ id, color, size = 40 }: { id: string; color: string
           <path d="M5 18.5h5" />
         </g>
       )}
+      {id === "moonwell" && (
+        <g {...common}>
+          {/* crescent moon dripping light into a rippling well */}
+          <path d="M14.6 5.4a5.2 5.2 0 1 0 3.4 8.3 6 6 0 0 1-3.4-8.3z" fill={color + "55"} />
+          <path d="M6.5 16.5c1.6 0 1.6 1.4 3.2 1.4s1.6-1.4 3.2-1.4 1.6 1.4 3.2 1.4 1.4-1.4 2.6-1.4" />
+          <path d="M8 19.8c1.3 0 1.3 1.1 2.6 1.1" opacity="0.7" />
+        </g>
+      )}
       {id === "gemrush" && (
         <g {...common}>
           <path d="M7 8.2 10 5h4l3 3.2-5 10.5z" fill={color + "44"} />
           <path d="M7 8.2h10M10 5l2 13.7L14 5M5 12h2M17 12h2" />
         </g>
       )}
-      {!(["luck", "chestbox", "trophy", "items", "mineshaft", "gemrush"] as string[]).includes(id) && (
+      {!(["luck", "chestbox", "trophy", "items", "mineshaft", "moonwell", "gemrush"] as string[]).includes(id) && (
         <g {...common}><path d="M12 5 14.2 10l5.3 2-5.3 2-2.2 5-2.2-5-5.3-2 5.3-2z" fill={color + "66"} /></g>
       )}
     </svg>
@@ -1242,7 +1285,7 @@ function TasksPanel({
     const loot = claimTask(draft, t.id);
     if (!loot) {
       sfx.error();
-      return push("Task not complete yet", "#ff4d5e");
+      return push("Task not complete yet", "#ff5c70");
     }
     mutate((s) => {
       claimTask(s, t.id);
@@ -1257,13 +1300,13 @@ function TasksPanel({
     const loot = claimMilestone(draft, idx);
     if (!loot) {
       sfx.error();
-      return push(`Need ${m.points} task points`, "#ff4d5e");
+      return push(`Need ${m.points} task points`, "#ff5c70");
     }
     mutate((s) => {
       claimMilestone(s, idx);
     });
     sfx.ceremony();
-    setClaim({ title: m.label.toUpperCase(), subtitle: `${m.points} task points reached`, lines: lootLines(loot), color: "#ffcf4d", chest: true, chestCount: 2 });
+    setClaim({ title: m.label.toUpperCase(), subtitle: `${m.points} task points reached`, lines: lootLines(loot), color: "#ffd977", chest: true, chestCount: 2 });
   };
 
   return (
@@ -1272,9 +1315,9 @@ function TasksPanel({
       <div className="tile tile-gold holo p-3">
         <div className="flex items-end justify-between">
           <div>
-            <div className="text-[11px] font-bold tracking-[0.3em] text-[#ffcf4d]">DAILY TASKS</div>
+            <div className="text-[11px] font-bold tracking-[0.3em] text-[#ffd977]">DAILY TASKS</div>
             <div className="font-disp text-2xl leading-none text-white">
-              <span className="num" style={{ color: "#ffcf4d" }}>{pts}</span>
+              <span className="num" style={{ color: "#ffd977" }}>{pts}</span>
               <span className="text-[var(--dim)]"> / {TASK_POINTS_TOTAL} PTS</span>
             </div>
           </div>
@@ -1283,7 +1326,7 @@ function TasksPanel({
           </div>
         </div>
         <div className="task-bar mt-2">
-          <span className="task-bar-fill" style={{ width: `${pct}%`, background: "linear-gradient(90deg,#ffb324,#ffe9a8)" }} />
+          <span className="task-bar-fill" style={{ width: `${pct}%`, background: "linear-gradient(90deg,#ffc457,#ffe9a8)" }} />
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2">
           {TASK_MILESTONES.map((m, i) => {
@@ -1295,11 +1338,11 @@ function TasksPanel({
                 className={`milestone-node tile flex flex-col items-center gap-1 p-2 ${hit && !got ? "ready" : ""} ${hit ? "hit" : ""}`}
                 data-testid={`milestone-${i}`}
                 disabled={!hit || got}
-                style={{ opacity: got ? 0.5 : 1, borderColor: hit ? "#ffcf4d" : undefined }}
+                style={{ opacity: got ? 0.5 : 1, borderColor: hit ? "#ffd977" : undefined }}
                 onClick={() => doMilestone(i)}
               >
-                <MiniChest size={34} color={hit ? "#ffcf4d" : "#5a5f87"} />
-                <span className="text-[11px] font-bold" style={{ color: hit ? "#ffcf4d" : "var(--dim)" }}>
+                <MiniChest size={34} color={hit ? "#ffd977" : "#5a5f87"} />
+                <span className="text-[11px] font-bold" style={{ color: hit ? "#ffd977" : "var(--dim)" }}>
                   {m.points} PTS
                 </span>
                 <span className="text-[10.5px] font-semibold text-[var(--dim)]">{got ? "CLAIMED" : m.label}</span>
@@ -1319,7 +1362,7 @@ function TasksPanel({
             key={t.id}
             className={`task-row tile flex items-center gap-3 p-3 ${done && !got ? "ready" : ""} ${got ? "done" : ""}`}
             data-testid={`task-${t.id}`}
-            style={{ borderColor: done && !got ? "#3dff8e" : undefined }}
+            style={{ borderColor: done && !got ? "#5cffaa" : undefined }}
           >
             <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border" style={{ borderColor: t.color + "66", background: t.color + "1c" }}>
               <span className="font-disp text-[17px]" style={{ color: t.color }}>
@@ -1383,13 +1426,17 @@ function EventsPanel({
   const monthPts = monthPoints(save);
   const today = new Date().getDay();
   const streak = nextEventStreak(save);
+  // weekly phase: the month is four weeks of escalating point multipliers
+  const phase = monthPhase();
+  const phaseMul = monthPhaseMul();
+  const monthTop = tiers[tiers.length - 1];
 
   const doMonthTier = (idx: number) => {
     const draft = cloneSave(save);
     const loot = claimMonthTier(draft, idx);
     if (!loot) {
       sfx.error();
-      return push(`Need ${tiers[idx].points} event points`, "#ff4d5e");
+      return push(`Need ${tiers[idx].points} event points`, "#ff5c70");
     }
     mutate((s) => {
       claimMonthTier(s, idx);
@@ -1408,7 +1455,7 @@ function EventsPanel({
   const doClaim = () => {
     if (!eventClaimable(save)) {
       sfx.error();
-      return push("Event bonus already taken today", "#ff4d5e");
+      return push("Event bonus already taken today", "#ff5c70");
     }
     const draft = cloneSave(save);
     const loot = claimEventBonus(draft);
@@ -1457,7 +1504,7 @@ function EventsPanel({
               {live.id === "gemrush" ? "ENTER GEM RUSH" : eventClaimable(save) ? "CLAIM BONUS" : "CLAIMED TODAY"}
             </button>
             {live.id !== "gemrush" ? <div className="rounded-lg border border-[var(--line)] bg-black/35 px-2 py-1 text-center text-[10.5px] font-bold tracking-wider text-[var(--dim)]" data-testid="event-streak">
-              STREAK <span className="num" style={{ color: live.color }}>{save.eventStreak}</span>/7 · NEXT ×{eventStreakMul(streak).toFixed(1)} LOOT
+              STREAK <span className="num" style={{ color: live.color }}>{save.eventStreak}</span>/7 · NEXT ×{eventStreakMul(streak).toFixed(2)} LOOT
             </div> : <div className="rounded-lg border border-[var(--line)] bg-black/35 px-2 py-1 text-center text-[10.5px] font-bold tracking-wider text-[var(--dim)]">5:00 · SURVIVE FOR GEMS</div>}
             <div className="flex justify-center gap-1" aria-hidden="true">
               {Array.from({ length: 7 }, (_, i) => (
@@ -1483,6 +1530,14 @@ function EventsPanel({
               <span className="text-[10px] font-bold tracking-[0.32em] text-[var(--dim)]">
                 ALL {month.tagline.toUpperCase()} · {monthBonus.upgradeCostMul < 1 ? "UPGRADES DISCOUNTED" : monthBonus.spMul > 1 ? "SPELL POWER SURGE" : "RIFT MODIFIER LIVE"}
               </span>
+              <span
+                className="phase-chip"
+                data-testid="month-phase"
+                style={{ borderColor: month.color + "77", color: month.color }}
+                title="Weekly phase: every run banks more event points as the month marches on"
+              >
+                WEEK {phase}/4 · ×{phaseMul.toFixed(2)} PTS
+              </span>
             </div>
             <div className="font-disp text-2xl leading-none" style={{ color: month.color }}>
               {month.name}
@@ -1494,16 +1549,29 @@ function EventsPanel({
           </div>
         </div>
       </div>
-      {/* MONTHLY TRACK — runs bank event points, three crates pay out */}
+      {/* MONTHLY TRACK — runs bank event points across four weekly phases, five crates pay out */}
       <div className="panel p-3" data-testid="month-track">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <div className="text-[11px] font-bold tracking-[0.3em]" style={{ color: month.color }}>
-              MONTHLY TRACK
+              MONTHLY TRACK · WEEK {phase}/4
             </div>
             <div className="font-disp text-2xl leading-none text-white">
               <span className="num" style={{ color: month.color }}>{monthPts}</span>
-              <span className="text-[var(--dim)]"> / {tiers[tiers.length - 1].points} EVENT PTS</span>
+              <span className="text-[var(--dim)]"> / {monthTop.points} EVENT PTS</span>
+            </div>
+            <div className="text-[10.5px] font-bold tracking-wider text-[var(--dim)]">
+              {(() => {
+                const nextT = tiers.find((t) => monthPts < t.points);
+                return nextT ? (
+                  <span>
+                    NEXT: <b style={{ color: month.color }}>{nextT.label.toUpperCase()}</b> AT{" "}
+                    <span className="num">{nextT.points}</span> PTS · RUNS PAY ×<span className="num">{phaseMul.toFixed(2)}</span> THIS WEEK
+                  </span>
+                ) : (
+                  <span style={{ color: "#5cffaa" }}>ALL FIVE CRATES UNLOCKED — COLLECT THEM</span>
+                );
+              })()}
             </div>
           </div>
           <div className="flex items-center gap-1.5 rounded-lg border border-[var(--line)] bg-black/35 px-2.5 py-1.5 text-[11.5px] font-bold text-[#b98bff]">
@@ -1515,10 +1583,10 @@ function EventsPanel({
         <div className="task-bar mt-2">
           <span
             className="task-bar-fill"
-            style={{ width: `${Math.min(100, (monthPts / tiers[tiers.length - 1].points) * 100)}%`, background: `linear-gradient(90deg,${month.color},#ffe9a8)` }}
+            style={{ width: `${Math.min(100, (monthPts / monthTop.points) * 100)}%`, background: `linear-gradient(90deg,${month.color},#ffe9a8)` }}
           />
         </div>
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {tiers.map((t, i) => {
             const hit = monthPts >= t.points;
             const got = monthTierClaimed(save, i);
@@ -1538,17 +1606,22 @@ function EventsPanel({
                   <span className="num text-[11px] font-bold text-[var(--dim)]">{t.points} PTS</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-bold text-[var(--dim)]">
-                  <span className="num text-[#ffcf4d]">+{t.gold.toLocaleString()}</span>
-                  <span className="num text-[#35e0ff]">+{t.gems}</span>
+                  <span className="num text-[#ffd977]">+{t.gold.toLocaleString()}</span>
+                  <span className="num text-[#8ceaff]">+{t.gems}</span>
                   <span className="inline-flex items-center gap-1 text-[#b98bff]"><PotionIcon size={12} />+{t.potions}</span>
+                  {!!t.tokens && (
+                    <span className="inline-flex items-center gap-1 text-[#e08fff]">
+                      <TokenIcon size={12} />+{t.tokens}
+                    </span>
+                  )}
                   {t.chips && (
                     <span className="text-[#c44dff]">
                       +{Object.values(t.chips).reduce((a, b) => a + (b || 0), 0)} chips
                     </span>
                   )}
                 </div>
-                <span className="text-[10.5px] font-bold" style={{ color: got ? "#3dff8e" : hit ? month.color : "var(--line2)" }}>
-                  {got ? "CLAIMED" : hit ? "CLAIM CRATE" : "EARN EVENT POINTS IN ANY RUN"}
+                <span className="text-[10.5px] font-bold" style={{ color: got ? "#5cffaa" : hit ? month.color : "var(--line2)" }}>
+                  {got ? "CLAIMED" : hit ? "CLAIM CRATE" : `${Math.max(0, t.points - monthPts)} PTS TO GO`}
                 </span>
               </button>
             );
@@ -1592,13 +1665,13 @@ function EventsPanel({
                 </div>
                 <p className="mt-1 text-[11.5px] font-semibold leading-snug text-[var(--dim)]">{ev.desc}</p>
                 <div className="mt-1.5 flex flex-wrap gap-1">
-                  {b.goldMul !== 1 && <span className="pill-dark text-[10px] text-[#ffcf4d]">×{b.goldMul} GOLD</span>}
-                  {b.gemMul !== 1 && <span className="pill-dark text-[10px] text-[#35e0ff]">×{b.gemMul} GEMS</span>}
-                  {b.trophyWin > 0 && <span className="pill-dark text-[10px] text-[#ff4fd8]">+{b.trophyWin} 🏆</span>}
-                  {b.chestPriceMul !== 1 && <span className="pill-dark text-[10px] text-[#3dff8e]">-{Math.round((1 - b.chestPriceMul) * 100)}% CHESTS</span>}
+                  {b.goldMul !== 1 && <span className="pill-dark text-[10px] text-[#ffd977]">×{b.goldMul} GOLD</span>}
+                  {b.gemMul !== 1 && <span className="pill-dark text-[10px] text-[#8ceaff]">×{b.gemMul} GEMS</span>}
+                  {b.trophyWin > 0 && <span className="pill-dark text-[10px] text-[#b6a0ff]">+{b.trophyWin} 🏆</span>}
+                  {b.chestPriceMul !== 1 && <span className="pill-dark text-[10px] text-[#5cffaa]">-{Math.round((1 - b.chestPriceMul) * 100)}% CHESTS</span>}
                   {b.chipDrop && <span className="pill-dark text-[10px] text-[#8fe9ff]">CHIP DROPS</span>}
-                  {b.fragBias > 0 && <span className="pill-dark text-[10px] text-[#ffb324]">RARE LUCK</span>}
-                  {b.hpMul !== 1 && <span className="pill-dark text-[10px] text-[#ff4d5e]">+{Math.round((b.hpMul - 1) * 100)}% ENEMY HP</span>}
+                  {b.fragBias > 0 && <span className="pill-dark text-[10px] text-[#ffc457]">RARE LUCK</span>}
+                  {b.hpMul !== 1 && <span className="pill-dark text-[10px] text-[#ff5c70]">+{Math.round((b.hpMul - 1) * 100)}% ENEMY HP</span>}
                 </div>
               </div>
             </div>
@@ -1631,11 +1704,11 @@ function CompetitionPanel({
   const doClaim = () => {
     if (!tier) {
       sfx.error();
-      return push("Reach the top 50 to earn a payout", "#ff4d5e");
+      return push("Reach the top 50 to earn a payout", "#ff5c70");
     }
     if (claimed) {
       sfx.error();
-      return push("This week's payout is already collected", "#ff4d5e");
+      return push("This week's payout is already collected", "#ff5c70");
     }
     mutate((s) => {
       claimCompetition(s, tier.gems, tier.gold, tier.chips);
@@ -1696,8 +1769,8 @@ function CompetitionPanel({
               {t.label}
             </div>
             <div className="mt-1 flex flex-wrap items-center justify-center gap-1 text-[10.5px] font-bold text-[var(--dim)]">
-              <span className="inline-flex items-center gap-0.5 text-[#35e0ff]"><GemIcon size={13} />{t.gems}</span>
-              <span className="inline-flex items-center gap-0.5 text-[#ffcf4d]"><CoinIcon size={13} />{t.gold.toLocaleString()}</span>
+              <span className="inline-flex items-center gap-0.5 text-[#8ceaff]"><GemIcon size={13} />{t.gems}</span>
+              <span className="inline-flex items-center gap-0.5 text-[#ffd977]"><CoinIcon size={13} />{t.gold.toLocaleString()}</span>
               {(Object.keys(t.chips) as ChipId[]).map((k) => (
                 <span key={k} className="inline-flex items-center gap-0.5">
                   <ChipIcon id={k} size={13} />
@@ -1716,11 +1789,11 @@ function CompetitionPanel({
           const me = r.name === "You";
           return (
             <div key={r.name} className={`ladder-row flex items-center gap-3 rounded-lg border border-transparent px-3 py-2 ${me ? "me" : ""}`}>
-              <span className="w-8 shrink-0 text-center font-disp text-[15px]" style={{ color: pos <= 3 ? "#ffcf4d" : "var(--dim)" }}>
+              <span className="w-8 shrink-0 text-center font-disp text-[15px]" style={{ color: pos <= 3 ? "#ffd977" : "var(--dim)" }}>
                 {pos}
               </span>
               <span className="h-7 w-7 shrink-0 rounded-lg" style={{ background: `linear-gradient(135deg, ${leagueFor(r.trophies).color}, #171038)`, border: `1px solid ${leagueFor(r.trophies).color}66` }} />
-              <span className="min-w-0 flex-1 truncate text-[13px] font-bold" style={{ color: me ? "#ffcf4d" : "var(--txt)" }}>
+              <span className="min-w-0 flex-1 truncate text-[13px] font-bold" style={{ color: me ? "#ffd977" : "var(--txt)" }}>
                 {me ? "You" : r.name}
                 <span className="ml-1.5 text-[10.5px] font-semibold text-[var(--dim)]">{r.guild}</span>
               </span>
@@ -1758,14 +1831,14 @@ interface ChatMsg {
   react?: string;
 }
 
-const CH_ROLE_COLOR: Record<string, string> = { LEADER: "#ffcf4d", OFFICER: "#ff9be9", MEMBER: "#35e0ff" };
+const CH_ROLE_COLOR: Record<string, string> = { LEADER: "#ffd977", OFFICER: "#d9c9ff", MEMBER: "#8ceaff" };
 
 const QUICK_CHAT = ["o7", "Need a party", "Boss strategy?", "GG ✨"];
 
 const CHANNELS: [ChatChannel, string, string][] = [
-  ["guild", "GUILD", "#35e0ff"],
-  ["world", "WORLD", "#ffcf4d"],
-  ["party", "PARTY", "#3dff8e"],
+  ["guild", "GUILD", "#8ceaff"],
+  ["world", "WORLD", "#ffd977"],
+  ["party", "PARTY", "#5cffaa"],
 ];
 
 /** one message bubble: avatar, name plate, text, tappable reaction */
@@ -1777,10 +1850,10 @@ function ChatBubble({ msg, onReact }: { msg: ChatMsg; onReact: () => void }) {
       </div>
     );
   }
-  const tint = msg.me ? "#ffcf4d" : CH_ROLE_COLOR[msg.role || "MEMBER"] || "#35e0ff";
+  const tint = msg.me ? "#ffd977" : CH_ROLE_COLOR[msg.role || "MEMBER"] || "#8ceaff";
   return (
     <div className={`chat-row ${msg.me ? "me" : ""}`} data-testid="chat-msg">
-      <span className="chat-av" style={{ borderColor: tint, color: tint, background: `linear-gradient(140deg, ${tint}33, #0b0722)` }}>
+      <span className="chat-av" style={{ borderColor: tint, color: tint, background: `linear-gradient(140deg, ${tint}33, #0a0e2c)` }}>
         {msg.name.slice(0, 1).toUpperCase()}
       </span>
       <div className="chat-body">
@@ -1794,7 +1867,7 @@ function ChatBubble({ msg, onReact }: { msg: ChatMsg; onReact: () => void }) {
             </span>
           )}
           {msg.me && (
-            <span className="chat-badge" style={{ borderColor: "#ffcf4d66", color: "#ffcf4d" }}>
+            <span className="chat-badge" style={{ borderColor: "#ffd97766", color: "#ffd977" }}>
               YOU
             </span>
           )}
@@ -2016,7 +2089,7 @@ export function Guild({
     const g = GUILDS.find((x) => x.id === id)!;
     if (save.trophies < g.trophyReq) {
       sfx.error();
-      return push(`${g.name} requires ${g.trophyReq.toLocaleString()} trophies`, "#ff4d5e");
+      return push(`${g.name} requires ${g.trophyReq.toLocaleString()} trophies`, "#ff5c70");
     }
     mutate((s) => {
       joinGuild(s, id);
@@ -2028,30 +2101,30 @@ export function Guild({
   const doLeave = () => {
     mutate((s) => leaveGuild(s));
     sfx.click();
-    push("You left the guild", "#ff4d5e");
+    push("You left the guild", "#ff5c70");
   };
 
   const doDonate = (id: string) => {
     const tier = GUILD_DONATIONS.find((d) => d.id === id)!;
     if (donationsLeft(save) <= 0) {
       sfx.error();
-      return push("No donations left today — resets at 07:00", "#ff4d5e");
+      return push("No donations left today — resets at 07:00", "#ff5c70");
     }
     if (save.gold < tier.gold) {
       sfx.error();
-      return push(`Need ${tier.gold.toLocaleString()} gold`, "#ff4d5e");
+      return push(`Need ${tier.gold.toLocaleString()} gold`, "#ff5c70");
     }
     mutate((s) => {
       donateToGuild(s, tier.gold, tier.xp, tier.coins);
     });
     sfx.coin();
-    push(`+${tier.xp} guild XP · +${tier.coins} guild coins`, guild?.color || "#ffcf4d");
+    push(`+${tier.xp} guild XP · +${tier.coins} guild coins`, guild?.color || "#ffd977");
   };
 
   const doChest = () => {
     if (!guildChestReady(save)) {
       sfx.error();
-      return push("Guild chest already opened today", "#ff4d5e");
+      return push("Guild chest already opened today", "#ff5c70");
     }
     const draft = cloneSave(save);
     const loot = claimGuildChest(draft);
@@ -2063,14 +2136,14 @@ export function Guild({
       bumpQuest(s, "chests", 1);
     });
     sfx.chest();
-    setClaim({ title: "GUILD CHEST", subtitle: guild?.name || "Daily supply drop", color: guild?.color || "#3dff8e", chest: true, lines: lootLines(loot) });
+    setClaim({ title: "GUILD CHEST", subtitle: guild?.name || "Daily supply drop", color: guild?.color || "#5cffaa", chest: true, lines: lootLines(loot) });
   };
 
   const doBuy = (itemId: string) => {
     const item = GUILD_SHOP.find((i) => i.id === itemId)!;
     if (save.guild.coins < item.coins) {
       sfx.error();
-      return push(`Need ${item.coins} guild coins`, "#ff4d5e");
+      return push(`Need ${item.coins} guild coins`, "#ff5c70");
     }
     mutate((s) => {
       buyGuildItem(s, item);
@@ -2083,13 +2156,13 @@ export function Guild({
     const q = GUILD_QUESTS.find((x) => x.id === id)!;
     if (questProgress(save, id) < q.need || questDone(save, id)) {
       sfx.error();
-      return push("Objective not ready", "#ff4d5e");
+      return push("Objective not ready", "#ff5c70");
     }
     mutate((s) => {
       claimQuest(s, id);
     });
     sfx.gem();
-    push(`${q.name} complete · +${q.coins} coins`, guild?.color || "#ffcf4d");
+    push(`${q.name} complete · +${q.coins} coins`, guild?.color || "#ffd977");
   };
 
   if (!guild) {
@@ -2099,7 +2172,7 @@ export function Guild({
           <div className="flex items-center gap-3">
             <GuildIcon size={38} />
             <div>
-              <div className="font-disp text-2xl text-[#ffcf4d]">Guild Hall</div>
+              <div className="font-disp text-2xl text-[#ffd977]">Guild Hall</div>
               <p className="text-sm font-semibold text-[var(--dim)]">
                 Join a guild to unlock a daily supply chest, the coin store, weekly war objectives and a shared roster.
               </p>
@@ -2113,7 +2186,7 @@ export function Guild({
               <div key={g.id} className="tile p-3" style={{ borderColor: g.color + (locked ? "33" : "88") }}>
                 <div className="flex items-center gap-3">
                   <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg" style={{ background: `linear-gradient(135deg, ${g.color}, #171038)`, border: `1px solid ${g.color}` }}>
-                    <span className="font-disp text-[13px] text-[#0b0722]">{g.tag}</span>
+                    <span className="font-disp text-[13px] text-[#0a0e2c]">{g.tag}</span>
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="font-disp text-lg leading-none" style={{ color: g.color }}>
@@ -2149,7 +2222,7 @@ export function Guild({
         <div className="absolute inset-0 opacity-25" style={{ background: `radial-gradient(600px 160px at 20% 0%, ${guild.color}77, transparent 70%)` }} />
         <div className="relative flex flex-wrap items-center gap-3">
           <div className="grid h-[62px] w-[62px] shrink-0 place-items-center rounded-xl" style={{ background: `linear-gradient(135deg, ${guild.color}, #171038)`, border: `2px solid ${guild.color}` }}>
-            <span className="font-disp text-lg text-[#0b0722]">{guild.tag}</span>
+            <span className="font-disp text-lg text-[#0a0e2c]">{guild.tag}</span>
           </div>
           <div className="min-w-[200px] flex-1">
             <div className="font-disp text-2xl leading-none" style={{ color: guild.color }}>
@@ -2204,7 +2277,7 @@ export function Guild({
 
           <div className="tile p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="font-disp text-lg text-[#ffcf4d]">Donations</div>
+              <div className="font-disp text-lg text-[#ffd977]">Donations</div>
               <span className="pill-dark text-[11px] text-[var(--dim)]">
                 {left}/{GUILD_DONATIONS_PER_DAY} LEFT TODAY
               </span>
@@ -2218,7 +2291,7 @@ export function Guild({
                   onClick={() => doDonate(d.id)}
                 >
                   <div className="font-disp text-[15px] text-[var(--txt)]">{d.label}</div>
-                  <div className="mt-0.5 inline-flex items-center gap-1 text-[12px] font-bold text-[#ffcf4d]">
+                  <div className="mt-0.5 inline-flex items-center gap-1 text-[12px] font-bold text-[#ffd977]">
                     <CoinIcon size={14} /> {d.gold.toLocaleString()}
                   </div>
                   <div className="text-[11px] font-bold text-[#8effc4]">
@@ -2231,12 +2304,12 @@ export function Guild({
 
           {/* roster */}
           <div className="tile p-3">
-            <div className="font-disp text-lg text-[#ffcf4d]">Roster</div>
+            <div className="font-disp text-lg text-[#ffd977]">Roster</div>
             <div className="mt-1.5 divide-y divide-[var(--line)]">
               {roster.map((r) => (
                 <div key={r.name} className={`ladder-row flex items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 ${r.me ? "me" : ""}`}>
                   <span className="h-7 w-7 shrink-0 rounded-lg" style={{ background: `linear-gradient(135deg, ${leagueFor(r.trophies).color}, #171038)`, border: `1px solid ${leagueFor(r.trophies).color}66` }} />
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-bold" style={{ color: r.me ? "#ffcf4d" : "var(--txt)" }}>
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-bold" style={{ color: r.me ? "#ffd977" : "var(--txt)" }}>
                     {r.name}
                   </span>
                   <span className="inline-flex items-center gap-1 text-[12.5px] font-bold" style={{ color: leagueFor(r.trophies).color }}>
@@ -2265,7 +2338,7 @@ export function Guild({
                 <p className="mt-0.5 text-[12px] font-semibold text-[var(--dim)]">{item.desc}</p>
                 <button className={`btn mt-2 w-full py-2 text-[13px] ${afford ? "btn-gold" : ""}`} disabled={!afford} onClick={() => doBuy(item.id)}>
                   <span className="inline-flex items-center gap-1.5">
-                    <GuildIcon size={14} color={afford ? "#0b0722" : item.color} /> {item.coins} coins
+                    <GuildIcon size={14} color={afford ? "#0a0e2c" : item.color} /> {item.coins} coins
                   </span>
                 </button>
               </div>
@@ -2289,14 +2362,14 @@ export function Guild({
             const done = questDone(save, q.id);
             const ready = have >= q.need && !done;
             return (
-              <div key={q.id} className="tile flex flex-wrap items-center gap-3 p-3" style={{ borderColor: ready ? "#3dff8e" : undefined }}>
+              <div key={q.id} className="tile flex flex-wrap items-center gap-3 p-3" style={{ borderColor: ready ? "#5cffaa" : undefined }}>
                 <div className="min-w-[180px] flex-1">
                   <div className="font-disp text-[16px] text-[var(--txt)]">{q.name}</div>
                   <div className="text-[11.5px] font-semibold text-[var(--dim)]">
                     {q.desc} · +{q.xp} XP · +{q.coins} coins
                   </div>
                   <div className="bar-track mt-1.5">
-                    <div className="bar-fill" style={{ width: `${Math.min(100, (have / q.need) * 100)}%`, background: ready ? "#3dff8e" : guild.color }} />
+                    <div className="bar-fill" style={{ width: `${Math.min(100, (have / q.need) * 100)}%`, background: ready ? "#5cffaa" : guild.color }} />
                   </div>
                   <div className="mt-0.5 text-[10.5px] font-bold text-[var(--dim)]">
                     {Math.min(have, q.need)} / {q.need}
@@ -2504,27 +2577,27 @@ export function SettingsModal({
     ].join("\n");
   };
   const TOGGLES: [string, keyof SaveData & string, string, SetIconName, string][] = [
-    ["Battle SFX", "sfx", "Sound effects during battle and menus", "sfx", "#35e0ff"],
-    ["Rich FX", "fx", "Extra particles, smoke and hit effects", "fx", "#ff4fd8"],
+    ["Battle SFX", "sfx", "Sound effects during battle and menus", "sfx", "#8ceaff"],
+    ["Rich FX", "fx", "Extra particles, smoke and hit effects", "fx", "#b6a0ff"],
     ["Bloom", "bloomFx", "Soft light bloom on bright battlefield effects", "fx", "#54f4ff"],
     ["Dynamic Shadows", "shadowFx", "Canvas glow and shadow rendering", "fx", "#b98bff"],
     ["Anti-aliasing", "antiAlias", "Smooth edges and scaled canvas output", "fx", "#8effc4"],
-    ["Damage Numbers", "dmgNums", "Floating damage values over every hit", "dmg", "#ffcf4d"],
+    ["Damage Numbers", "dmgNums", "Floating damage values over every hit", "dmg", "#ffd977"],
     ["Battlefield Guides", "guides", "Grid, buildable-cell and range circles", "guides", "#8effc4"],
     ["Auto-Start Waves", "fastWaves", "Skip the countdown between waves", "fast", "#b98bff"],
     ["Auto-Skip Boss Cutscene", "autoSkipBossCut", "Bosses engage immediately — a one-line callout replaces the cutscene card", "boss", "#ff8a3d"],
     ["Reduced Motion", "reducedMotion", "Calms looping menu animations", "calm", "#9fb4c7"],
-    ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#3dff8e"],
-    ["Hide Notifications", "hideNotifs", "Mutes toast popups and battle callouts — rewards still land", "bell", "#ff9be9"],
+    ["Performance HUD", "perf", "FPS and live entity counter in battle", "perf", "#5cffaa"],
+    ["Hide Notifications", "hideNotifs", "Mutes toast popups and battle callouts — rewards still land", "bell", "#d9c9ff"],
     ["Hide Wave Cleared", "hideWaveCleared", "Hides the WAVE CLEARED banners, toasts and counter in battle", "guides", "#7ce7ff"],
     ["Advanced Frame Interpolation", "frameInterp", "Glides between simulation steps for smoother motion at any frame rate", "interp", "#7c5cff"],
-    ["Super Performance Booster", "superBoost", "Cuts the heaviest effects, skips motion blur and bloom, and caps the arena at 60 FPS", "power", "#3dff8e"],
-    ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffcf4d"],
+    ["Super Performance Booster", "superBoost", "Cuts the heaviest effects, skips motion blur and bloom, and caps the arena at 60 FPS", "power", "#5cffaa"],
+    ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffd977"],
     ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
   ];
   return (
     <Modal onClose={requestClose} closing={closing} w={470}>
-      <div className="font-disp text-2xl text-[#ffcf4d]">Settings</div>
+      <div className="font-disp text-2xl text-[#ffd977]">Settings</div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--line)] bg-black/25 p-3">
         <div><div className="font-bold">Language</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose the interface language</div></div>
         <select aria-label="Language" title="Language" data-testid="language-select" className="rounded-lg border border-[var(--line)] bg-[#101329] px-3 py-2 text-sm font-bold" value={save.language} onChange={(e) => mutate((s) => { s.language = e.target.value as SaveData["language"]; })}><option value="en">English</option><option value="th">ไทย</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh">简体中文</option></select>
@@ -2540,7 +2613,7 @@ export function SettingsModal({
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">AUDIO</div>
       <div className="row-card mt-1.5">
-        <SetIcon name="volume" color="#35e0ff" />
+        <SetIcon name="volume" color="#8ceaff" />
         <div className="min-w-0 flex-1">
           <div className="font-bold">Master Volume</div>
           <div className="text-xs font-semibold text-[var(--dim)]">
@@ -2557,12 +2630,12 @@ export function SettingsModal({
             mutate((s) => { s.vol = v; });
             setVolume(v);
           }}
-          className="w-[150px] shrink-0 accent-[#35e0ff]"
+          className="w-[150px] shrink-0 accent-[#8ceaff]"
           aria-label="Master Volume"
         />
       </div>
       <div className="row-card mt-1.5" data-testid="volume-boost-row">
-        <SetIcon name="booster" color="#ff4fd8" />
+        <SetIcon name="booster" color="#b6a0ff" />
         <div className="min-w-0 flex-1">
           <div className="font-bold">Volume Booster</div>
           <div className="text-xs font-semibold text-[var(--dim)]">
@@ -2627,10 +2700,10 @@ export function SettingsModal({
         </div>
         <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
           <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Music volume <span className="ml-auto text-[var(--txt)]">{Math.round(save.musicVol * 100)}%</span>
-            <input className="w-28 accent-[#35e0ff]" type="range" min="0" max="100" value={Math.round(save.musicVol * 100)} aria-label="Music volume" onChange={(e) => { const volume = Number(e.target.value) / 100; mutate((s) => { s.musicVol = volume; }); setMusicSettings({ volume }); }} />
+            <input className="w-28 accent-[#8ceaff]" type="range" min="0" max="100" value={Math.round(save.musicVol * 100)} aria-label="Music volume" onChange={(e) => { const volume = Number(e.target.value) / 100; mutate((s) => { s.musicVol = volume; }); setMusicSettings({ volume }); }} />
           </label>
           <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Playback speed / pitch <span className="ml-auto text-[var(--txt)]">{save.musicRate.toFixed(2)}×</span>
-            <input className="w-28 accent-[#ff4fd8]" type="range" min="0.5" max="2" step="0.01" value={save.musicRate} aria-label="Music speed and pitch" onChange={(e) => { const rate = Number(e.target.value); mutate((s) => { s.musicRate = rate; }); setMusicSettings({ rate }); }} />
+            <input className="w-28 accent-[#b6a0ff]" type="range" min="0.5" max="2" step="0.01" value={save.musicRate} aria-label="Music speed and pitch" onChange={(e) => { const rate = Number(e.target.value); mutate((s) => { s.musicRate = rate; }); setMusicSettings({ rate }); }} />
           </label>
           <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Loop start <span className="ml-auto text-[var(--txt)]">{Math.min(save.musicStart, music.duration).toFixed(1)}s</span>
             <input className="w-28 accent-[#8effc4]" type="range" min="0" max={Math.max(0.1, music.duration)} step="0.1" value={Math.min(save.musicStart, Math.max(0, music.duration))} disabled={!music.hasTrack || !music.duration} aria-label="Music loop start" onChange={(e) => { const start = Math.min(Number(e.target.value), Math.max(0, Math.min(save.musicEnd || music.duration, music.duration) - 0.1)); mutate((s) => { s.musicStart = start; }); setMusicSettings({ start }); }} />
@@ -2645,7 +2718,7 @@ export function SettingsModal({
       <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
         {([['Bass Boost', 'bassBoost', 'Low-end +6 dB · effects & music', setBassBoost], ['Treble Boost', 'trebleBoost', 'High-end +6 dB · effects & music', setTrebleBoost]] as const).map(([label, key, desc, apply]) => (
           <div key={key} className="row-card" data-testid={`toggle-${key}`}>
-            <SetIcon name="volume" color={key === "bassBoost" ? "#ff8a3d" : "#35e0ff"} />
+            <SetIcon name="volume" color={key === "bassBoost" ? "#ff8a3d" : "#8ceaff"} />
             <div className="min-w-0 flex-1"><div className="font-bold">{label}</div><div className="text-[11px] font-semibold text-[var(--dim)]">{desc}</div></div>
             <KnobToggle on={save[key]} label={label} onToggle={() => { const next = !save[key]; mutate((s) => { s[key] = next; }); apply(next); }} />
           </div>
@@ -2719,7 +2792,7 @@ export function SettingsModal({
           />
         </div>
         <div className="flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="shake-intensity-row">
-          <SetIcon name="shake" color="#ffcf4d" />
+          <SetIcon name="shake" color="#ffd977" />
           <div className="min-w-[150px] flex-1">
             <div className="font-bold">Shake Intensity</div>
             <div className="text-xs font-semibold text-[var(--dim)]">How hard the arena kicks · {Math.round((save.shakeIntensity ?? 1) * 100)}%</div>
@@ -2779,7 +2852,7 @@ export function SettingsModal({
             aria-label="Motion blur strength"
             data-testid="motion-blur-amt"
             className="w-36"
-            style={{ accentColor: save.motionBlurAmt > 100 ? "#ff315c" : "#35e0ff" }}
+            style={{ accentColor: save.motionBlurAmt > 100 ? "#ff315c" : "#8ceaff" }}
             onChange={(e) => { const motionBlurAmt = Number(e.target.value); mutate((s) => { s.motionBlurAmt = motionBlurAmt; }); }}
           />
           <span data-testid="motion-blur-amt-value" className="w-12 text-right font-bold" style={{ color: save.motionBlurAmt > 100 ? "#ff315c" : undefined }}>{save.motionBlurAmt}%</span>
@@ -2909,11 +2982,11 @@ export function SettingsModal({
             <div className="font-bold">Interface Theme <span className="text-[10px] font-bold tracking-widest text-[#54f4ff]">· SUPER THEMES</span></div>
             <div className="text-[11px] font-semibold text-[var(--dim)]">Choose the arena control-room palette</div>
           </div>
-          <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--dim)]">{save.uiTheme || "rift"}</span>
+          <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--dim)]">{save.uiTheme || "moon"}</span>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="radiogroup" aria-label="Interface Theme">
           {UI_THEMES.map((theme) => {
-            const active = (save.uiTheme || "rift") === theme.id;
+            const active = (save.uiTheme || "moon") === theme.id;
             return (
               <button
                 key={theme.id}
@@ -2936,7 +3009,7 @@ export function SettingsModal({
       </div>
       <div className="mt-1.5 space-y-3">
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="max-fps-row">
-          <SetIcon name="fps" color="#3dff8e" />
+          <SetIcon name="fps" color="#5cffaa" />
           <div className="min-w-[130px] flex-1">
             <div className="font-bold">Max Frame Rate</div>
             <div className="text-xs font-semibold text-[var(--dim)]">Caps how hard the renderer works</div>
@@ -3037,14 +3110,14 @@ export function SettingsModal({
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">APP</div>
       <div className="mt-1.5 flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-        <SetIcon name="download" color="#ffcf4d" />
+        <SetIcon name="download" color="#ffd977" />
         <div className="min-w-0 flex-1">
           <div className="font-bold">Install App</div>
           <div className="text-xs font-semibold text-[var(--dim)]">
             {installed
               ? "Running as an installed app — nice"
               : promptEvent
-                ? "Add MagicTD to your home screen and play offline"
+                ? "Add MoonLightTD to your home screen and play offline"
                 : "Use your browser menu → Add to Home Screen"}
           </div>
         </div>
@@ -3063,7 +3136,7 @@ export function SettingsModal({
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">DISPLAY</div>
       <div className="row-card mt-1.5">
-        <SetIcon name="expand" color="#35e0ff" />
+        <SetIcon name="expand" color="#8ceaff" />
         <div className="min-w-0 flex-1">
           <div className="font-bold">Fullscreen</div>
           <div className="text-xs font-semibold text-[var(--dim)]">
@@ -3191,7 +3264,7 @@ export function SettingsModal({
           </div>
         )}
         <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-          <SetIcon name="replay" color="#ff9be9" />
+          <SetIcon name="replay" color="#d9c9ff" />
           <div className="min-w-0 flex-1">
             <div className="font-bold">Loading Screen</div>
             <div className="text-xs font-semibold text-[var(--dim)]">Play the boot sequence again</div>

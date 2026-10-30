@@ -1,13 +1,13 @@
 {
-  "name": "MagicTD Defense",
-  "short_name": "MagicTD",
+  "name": "MoonLightTD Defense",
+  "short_name": "MoonLightTD",
   "description": "Summon towers straight onto the grid, level heroes and hold the line against waves that grow 57% stronger every round.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#07051a",
-  "theme_color": "#100a2e",
+  "background_color": "#04060f",
+  "theme_color": "#0a1030",
   "categories": ["games", "entertainment"],
   "icons": [
     { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },

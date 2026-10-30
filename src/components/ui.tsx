@@ -20,7 +20,7 @@ export function CoinIcon({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20">
       <circle cx="10" cy="10" r="8.5" fill="#f59f00" stroke="#a86a00" strokeWidth="1.4" />
-      <circle cx="10" cy="10" r="5.5" fill="#ffcf4d" stroke="#c07a00" strokeWidth="1" />
+      <circle cx="10" cy="10" r="5.5" fill="#ffd977" stroke="#c07a00" strokeWidth="1" />
       <path d="M10 6.5 11.2 9l2.8.2-2.1 1.8.6 2.7L10 12l-2.5 1.7.6-2.7L6 9.2 8.8 9z" fill="#a86a00" />
     </svg>
   );
@@ -28,7 +28,7 @@ export function CoinIcon({ size = 18 }: { size?: number }) {
 export function GemIcon({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20">
-      <path d="M5 3h10l4 5-9 10L1 8z" fill="#35e0ff" stroke="#0a7f9e" strokeWidth="1.4" />
+      <path d="M5 3h10l4 5-9 10L1 8z" fill="#8ceaff" stroke="#0a7f9e" strokeWidth="1.4" />
       <path d="M5 3 10 8 15 3M1 8h18M10 8l0 10" stroke="#b9f4ff" strokeWidth="1" fill="none" />
     </svg>
   );
@@ -36,13 +36,13 @@ export function GemIcon({ size = 18 }: { size?: number }) {
 export function TokenIcon({ size = 18 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20">
-      <circle cx="10" cy="10" r="8.5" fill="#2a0b33" stroke="#ff4fd8" strokeWidth="1.6" />
-      <path d="M10 3.5 12 8l4.4.2-3.4 2.9 1.1 4.3L10 12.6 5.9 15.4 7 11.1 3.6 8.2 8 8z" fill="#ff4fd8" />
+      <circle cx="10" cy="10" r="8.5" fill="#2a0b33" stroke="#b6a0ff" strokeWidth="1.6" />
+      <path d="M10 3.5 12 8l4.4.2-3.4 2.9 1.1 4.3L10 12.6 5.9 15.4 7 11.1 3.6 8.2 8 8z" fill="#b6a0ff" />
     </svg>
   );
 }
 
-export function TrophyIcon({ size = 18, color = "#ffcf4d" }: { size?: number; color?: string }) {
+export function TrophyIcon({ size = 18, color = "#ffd977" }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20">
       <path d="M5 3h10v4a5 5 0 0 1-10 0z" fill={color} stroke="#7a5200" strokeWidth="1.2" />
@@ -55,7 +55,7 @@ export function TrophyIcon({ size = 18, color = "#ffcf4d" }: { size?: number; co
 const CHIP_COLORS: Record<ChipId, [string, string]> = {
   basic: ["#8fe9ff", "#1b6b86"],
   advanced: ["#c44dff", "#5a1b8a"],
-  elite: ["#ffb324", "#8a5200"],
+  elite: ["#ffc457", "#8a5200"],
 };
 
 export function ChipIcon({ id = "basic", size = 18 }: { id?: ChipId; size?: number }) {
@@ -73,7 +73,7 @@ export function ChipIcon({ id = "basic", size = 18 }: { id?: ChipId; size?: numb
   );
 }
 
-export function ShardIcon({ size = 18, color = "#ff4fd8" }: { size?: number; color?: string }) {
+export function ShardIcon({ size = 18, color = "#b6a0ff" }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20">
       <path d="M10 1.5 14 8l-4 10.5L6 8z" fill={color} stroke="#2a0b33" strokeWidth="1.2" />
@@ -106,7 +106,7 @@ export function PotionIcon({ size = 18, color = "#b98bff" }: { size?: number; co
   );
 }
 
-export function GuildIcon({ size = 18, color = "#ffb324" }: { size?: number; color?: string }) {
+export function GuildIcon({ size = 18, color = "#ffc457" }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 20 20">
       <path d="M10 1.8 17 4.4v5.3c0 4.2-2.9 7.3-7 8.5-4.1-1.2-7-4.3-7-8.5V4.4z" fill="#140d33" stroke={color} strokeWidth="1.5" />
@@ -124,7 +124,7 @@ export function RewardIcon({ line, size = 26 }: { line: RewardLine; size?: numbe
   if (line.kind === "trophy") return <TrophyIcon size={size} />;
   if (line.kind === "chip") return <ChipIcon id={(line.id as ChipId) || "basic"} size={size} />;
   if (line.kind === "heroShard")
-    return <ShardIcon size={size} color={HERO_BY_ID[line.id || ""]?.color || "#ff4fd8"} />;
+    return <ShardIcon size={size} color={HERO_BY_ID[line.id || ""]?.color || "#b6a0ff"} />;
   const def = TOWER_BY_ID[line.id || ""];
   return def ? <TowerIcon def={def} size={size} /> : <CoinIcon size={size} />;
 }
@@ -166,15 +166,15 @@ export function CurrencyBar({
           <span className="num">{Math.floor(trophies).toLocaleString()}</span>
         </div>
       )}
-      <div className="pill-dark pill-compact text-[10.5px] text-[#ffcf4d]" style={{ borderColor: "#8a6a1a" }} data-currency="gold">
+      <div className="pill-dark pill-compact text-[10.5px] text-[#ffd977]" style={{ borderColor: "#8a6a1a" }} data-currency="gold">
         <CoinIcon size={15} />
         <span className="num">{Math.floor(gold).toLocaleString()}</span>
       </div>
-      <div className="pill-dark pill-compact text-[10.5px] text-[#35e0ff]" style={{ borderColor: "#1f6f8c" }} data-currency="gems">
+      <div className="pill-dark pill-compact text-[10.5px] text-[#8ceaff]" style={{ borderColor: "#1f6f8c" }} data-currency="gems">
         <GemIcon size={15} />
         <span className="num">{Math.floor(gems).toLocaleString()}</span>
       </div>
-      <div className="pill-dark pill-compact text-[10.5px] text-[#ff4fd8]" style={{ borderColor: "#7a2f6a" }} data-currency="tokens">
+      <div className="pill-dark pill-compact text-[10.5px] text-[#b6a0ff]" style={{ borderColor: "#7a2f6a" }} data-currency="tokens">
         <TokenIcon size={15} />
         <span className="num">{Math.floor(tokens).toLocaleString()}</span>
       </div>
@@ -442,7 +442,7 @@ export function TowerIcon({
           <g>
             <rect x="9" y="28" width="30" height="14" rx="4" fill="#3a2a12" stroke={a} strokeWidth="2.4" />
             <path d="M10 20l7 6 7-11 7 11 7-6v10H10z" fill={a} stroke="#8a5a00" strokeWidth="1.6" />
-            <circle cx="24" cy="24" r="2.6" fill="#ff4fd8" />
+            <circle cx="24" cy="24" r="2.6" fill="#b6a0ff" />
             <path d="M14 34h6M28 34h6" stroke="#fff6c4" strokeWidth="2.4" strokeLinecap="round" />
           </g>
         );
@@ -664,7 +664,7 @@ export function TowerIcon({
 export function HeroIcon({
   kind,
   size = 34,
-  color = "#ff4fd8",
+  color = "#b6a0ff",
 }: {
   kind: string;
   size?: number;
@@ -726,8 +726,8 @@ export function HeroIcon({
 export function Emblem({ size = 120 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" style={{ animation: "pulseGlow 2.6s ease-in-out infinite" }}>
-      <path d="M50 6 88 26v34L50 94 12 60V26z" fill="none" stroke="#ffb324" strokeWidth="3" opacity="0.7" />
-      <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="#ffb324" />
+      <path d="M50 6 88 26v34L50 94 12 60V26z" fill="none" stroke="#ffc457" strokeWidth="3" opacity="0.7" />
+      <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="#ffc457" />
       <path d="M58 14 30 48h14l-6 30 34-40H56l8-24z" fill="none" stroke="#fff2b0" strokeWidth="1.5" opacity="0.6" />
     </svg>
   );
@@ -823,7 +823,7 @@ export function Ceremony({ data, onClose }: { data: CeremonyData; onClose: () =>
         dx: (Math.random() - 0.5) * 420,
         dy: -120 - Math.random() * 420,
         rot: `${Math.round((Math.random() - 0.5) * 900)}deg`,
-        color: [data.color, "#ffcf4d", "#35e0ff", "#ff4fd8", "#ffffff"][i % 5],
+        color: [data.color, "#ffd977", "#8ceaff", "#b6a0ff", "#ffffff"][i % 5],
         size: 5 + Math.random() * 8,
         delay: Math.random() * 0.7,
         round: i % 3 === 0,
@@ -1119,7 +1119,7 @@ const SET_PATHS: Record<SetIconName, ReactNode> = {
  * A rounded glyph tile used down the left side of every settings row, so each
  * option reads at a glance instead of being a wall of identical paragraphs.
  */
-export function SetIcon({ name, color = "#35e0ff", size = 34 }: { name: SetIconName; color?: string; size?: number }) {
+export function SetIcon({ name, color = "#8ceaff", size = 34 }: { name: SetIconName; color?: string; size?: number }) {
   return (
     <span className="set-ico" style={{ color, width: size, height: size, borderColor: color + "66", background: `radial-gradient(circle at 30% 20%, ${color}33, rgba(0,0,0,0.55))` }}>
       <svg
@@ -1484,7 +1484,7 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
         rot: `${Math.round((Math.random() - 0.5) * 900)}deg`,
         size: 4 + Math.random() * 10,
         delay: Math.random() * 0.4,
-        color: [data.color, "#ffcf4d", "#35e0ff", "#ff4fd8", "#ffffff"][i % 5],
+        color: [data.color, "#ffd977", "#8ceaff", "#b6a0ff", "#ffffff"][i % 5],
         round: i % 3 === 0,
       })),
     [data.color]
@@ -1502,7 +1502,7 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
           dy: Math.sin(a) * d * 0.8 - 40,
           size: 3 + Math.random() * 7,
           rot: `${Math.round((Math.random() - 0.5) * 900)}deg`,
-          color: [data.color, "#ffffff", "#ffcf4d"][i % 3],
+          color: [data.color, "#ffffff", "#ffd977"][i % 3],
           delay: Math.random() * 0.1,
         };
       }),
@@ -1521,7 +1521,7 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
           y: Math.sin(a) * r * 0.7,
           size: 3 + Math.random() * 6,
           delay: Math.random() * 0.6,
-          color: ["#ffffff", "#ffcf4d", data.color][i % 3],
+          color: ["#ffffff", "#ffd977", data.color][i % 3],
         };
       }),
     [data.color]
@@ -1534,7 +1534,7 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
         id: i,
         delay: i * 0.11,
         size: 60 + i * 26,
-        color: [data.color, "#ffffff", "#ffcf4d", data.color][i % 4],
+        color: [data.color, "#ffffff", "#ffd977", data.color][i % 4],
       })),
     [data.color]
   );
@@ -1548,7 +1548,7 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
         size: 3 + Math.random() * 5,
         delay: Math.random() * 0.5,
         dur: 0.9 + Math.random() * 0.9,
-        color: ["#ffcf4d", "#ffb324", data.color, "#ffffff"][i % 4],
+        color: ["#ffd977", "#ffc457", data.color, "#ffffff"][i % 4],
       })),
     [data.color]
   );
@@ -1573,7 +1573,7 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
 
       <div
         className={`panel claim-card relative w-[min(430px,94vw)] p-4 text-center ${phase === "burst" ? "claim-kick" : ""}`}
-        style={{ borderColor: data.color + "aa", boxShadow: `0 0 60px ${data.color}44, 0 10px 0 #0b0722` }}
+        style={{ borderColor: data.color + "aa", boxShadow: `0 0 60px ${data.color}44, 0 10px 0 #0a0e2c` }}
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="claim-title font-disp text-2xl leading-none" style={{ color: data.color, textShadow: `0 0 28px ${data.color}99` }}>
@@ -1581,7 +1581,7 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
         </div>
         <div className="mt-0.5 text-[11px] font-bold tracking-[0.22em] text-[var(--dim)]">{data.subtitle.toUpperCase()}</div>
         {phase === "loot" && jackpot && (
-          <div className="jackpot-tag jackpot-count mt-1 text-[12px] font-black tracking-[0.3em]" style={{ color: "#ffcf4d" }}>
+          <div className="jackpot-tag jackpot-count mt-1 text-[12px] font-black tracking-[0.3em]" style={{ color: "#ffd977" }}>
             ★ JACKPOT · {gold >= GOLD_RAIN_MIN ? `${gold.toLocaleString("en-US")} GOLD` : `${gems.toLocaleString("en-US")} GEMS`} ★
           </div>
         )}
@@ -1781,7 +1781,7 @@ export function UpgradeCeremony({ data, onClose }: { data: UpgradeData; onClose:
           dy: Math.sin(a) * dist - 30,
           rot: `${Math.round((Math.random() - 0.5) * 720)}deg`,
           size: 4 + Math.random() * 8,
-          color: [data.color, "#ffffff", "#ffcf4d", "#35e0ff"][i % 4],
+          color: [data.color, "#ffffff", "#ffd977", "#8ceaff"][i % 4],
           round: i % 3 === 0,
           delay: Math.random() * 0.25,
         };
@@ -1882,7 +1882,7 @@ export function UpgradeCeremony({ data, onClose }: { data: UpgradeData; onClose:
                 <span className="flex items-center gap-1.5 text-[12.5px] font-bold">
                   <span className="text-[var(--dim)] line-through opacity-70">{st.from}</span>
                   <span style={{ color: data.color }}>→</span>
-                  <span className="upg-delta" style={{ color: "#3dff8e", animationDelay: `${0.6 + i * 0.1}s` }}>
+                  <span className="upg-delta" style={{ color: "#5cffaa", animationDelay: `${0.6 + i * 0.1}s` }}>
                     {st.to}
                   </span>
                 </span>

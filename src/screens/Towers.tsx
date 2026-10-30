@@ -152,7 +152,7 @@ export default function Towers({
 
   const deny = (msg: string) => {
     sfx.error();
-    push(msg, "#ff4d5e");
+    push(msg, "#ff5c70");
   };
 
   const openPreview = (id: string) => {
@@ -183,7 +183,7 @@ export default function Towers({
     });
     push(
       at >= 0 ? `${TOWER_BY_NAME(id)} moved to #${(slot ?? save.lineup.length - 1) + 1}` : `${TOWER_BY_NAME(id)} added to the rotation`,
-      "#3dff8e"
+      "#5cffaa"
     );
   };
 
@@ -193,7 +193,7 @@ export default function Towers({
       mutate((s) => {
         s.lineup = s.lineup.filter((x) => x !== id);
       });
-      push(`${TOWER_BY_NAME(id)} removed from lineup`, "#9d93d6");
+      push(`${TOWER_BY_NAME(id)} removed from lineup`, "#98a4d0");
       return;
     }
     addLineup(id);
@@ -256,7 +256,7 @@ export default function Towers({
           .slice(0, 3),
       ],
     });
-    push(`${def.name} upgraded to Lv ${lv + 1}`, "#ffcf4d");
+    push(`${def.name} upgraded to Lv ${lv + 1}`, "#ffd977");
     if (lv + 1 === MAX_MENU_LEVEL) {
       sfx.ceremony();
       setCeremony({
@@ -264,7 +264,7 @@ export default function Towers({
         headline: def.name,
         sub: "MAX LEVEL REACHED",
         tier: `LV ${MAX_MENU_LEVEL}`,
-        color: "#ffcf4d",
+        color: "#ffd977",
         desc: "Every menu level is banked. Now ascend it in battle.",
         tower: def,
       });
@@ -307,7 +307,7 @@ export default function Towers({
         if (s.levels[id] > 0 && s.levels[id] < MAX_MENU_LEVEL) s.levels[id] += 1;
       }
     });
-    push("ASCENT — all towers leveled up!", "#35e0ff");
+    push("ASCENT — all towers leveled up!", "#8ceaff");
   };
 
   const doAwaken = (def: TowerDef, slot: 0 | 1) => {
@@ -332,7 +332,7 @@ export default function Towers({
       headline: def.name,
       sub: `${slot === 0 ? "1st" : "2nd"} Awakening · ${spec.name}`,
       tier: `TIER ${ROMAN[cur + 1]}`,
-      color: "#ff4fd8",
+      color: "#b6a0ff",
       desc: spec.desc,
       tower: def,
     });
@@ -390,7 +390,7 @@ export default function Towers({
       <div className="flex flex-wrap items-center gap-1.5" data-testid="tower-sections">
         {(
           [
-            ["towers", "TOWERS", `#ffcf4d`],
+            ["towers", "TOWERS", `#ffd977`],
             ["crystals", "CRYSTALS", `#b98bff`],
           ] as const
         ).map(([id, label, color]) => (
@@ -586,15 +586,15 @@ export default function Towers({
 
       <section className="tile p-3" data-testid="tower-scenes">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div><div className="font-disp text-lg text-[#ff9be9]">SCENES</div><div className="text-xs font-semibold text-[var(--dim)]">Starfall Sanctum · cosmetic battlefield backdrop</div></div>
-          {save.scenes.includes("starfall") ? <span className="chip text-[#8effc4]">OWNED · COSMETIC</span> : <button className="btn btn-cyan flex items-center gap-1.5 px-3 py-2 text-xs" disabled={save.gems < 1500} onClick={() => { mutate((s) => { if (!s.scenes.includes("starfall") && s.gems >= 1500) { s.gems -= 1500; s.scenes.push("starfall"); } }); push("STARFALL SANCTUM UNLOCKED · COSMETIC SCENE", "#ff9be9"); }}><GemIcon size={14}/> 1,500</button>}
+          <div><div className="font-disp text-lg text-[#d9c9ff]">SCENES</div><div className="text-xs font-semibold text-[var(--dim)]">Starfall Sanctum · cosmetic battlefield backdrop</div></div>
+          {save.scenes.includes("starfall") ? <span className="chip text-[#8effc4]">OWNED · COSMETIC</span> : <button className="btn btn-cyan flex items-center gap-1.5 px-3 py-2 text-xs" disabled={save.gems < 1500} onClick={() => { mutate((s) => { if (!s.scenes.includes("starfall") && s.gems >= 1500) { s.gems -= 1500; s.scenes.push("starfall"); } }); push("STARFALL SANCTUM UNLOCKED · COSMETIC SCENE", "#d9c9ff"); }}><GemIcon size={14}/> 1,500</button>}
         </div>
       </section>
 
       {/* ASCENT ALL — a compact one-line bar rather than a second panel */}
-      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#35e0ff66] bg-[#0d1330]/70 px-2.5 py-1.5" data-testid="ascent-all">
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#8ceaff66] bg-[#0d1330]/70 px-2.5 py-1.5" data-testid="ascent-all">
         <div className="min-w-0 flex-1">
-          <div className="font-disp text-[15px] leading-none text-[#35e0ff]">Ascent All</div>
+          <div className="font-disp text-[15px] leading-none text-[#8ceaff]">Ascent All</div>
           <div className="truncate text-[10.5px] font-semibold text-[var(--dim)]">Every unlocked tower +1 level · no fragments</div>
         </div>
         <button
@@ -661,16 +661,16 @@ function CrystalVault({
   onUpgrade: (id: CrystalId) => void;
 }) {
   const active: { label: string; value: string; color: string }[] = [];
-  if (summary.atk > 0) active.push({ label: "Tower ATK", value: `+${(summary.atk * 100).toFixed(1)}%`, color: "#ff4d5e" });
+  if (summary.atk > 0) active.push({ label: "Tower ATK", value: `+${(summary.atk * 100).toFixed(1)}%`, color: "#ff5c70" });
   if (summary.aspd > 0) active.push({ label: "ATK Speed", value: `+${(summary.aspd * 100).toFixed(1)}%`, color: "#c44dff" });
   if (summary.crit > 0) active.push({ label: "Crit Chance", value: `+${(summary.crit * 100).toFixed(1)}%`, color: "#3fb6ff" });
-  if (summary.sp > 0) active.push({ label: "SP Gain", value: `+${(summary.sp * 100).toFixed(1)}%`, color: "#3dff8e" });
-  if (summary.gold > 0) active.push({ label: "Run Gold", value: `+${(summary.gold * 100).toFixed(1)}%`, color: "#ffcf4d" });
+  if (summary.sp > 0) active.push({ label: "SP Gain", value: `+${(summary.sp * 100).toFixed(1)}%`, color: "#5cffaa" });
+  if (summary.gold > 0) active.push({ label: "Run Gold", value: `+${(summary.gold * 100).toFixed(1)}%`, color: "#ffd977" });
   if (summary.lives > 0) active.push({ label: "Start Lives", value: `+${summary.lives}`, color: "#9fe8ff" });
   if (summary.magicianKing > 0) active.push({ label: "Magician King · ATK & Speed", value: `+${(summary.magicianKing * 100).toFixed(0)}%`, color: "#ffd76a" });
   if (summary.lightning > 0) active.push({ label: "Lightning ATK", value: `+${(summary.lightning * 100).toFixed(0)}%`, color: "#ffef77" });
-  if (summary.critDamage > 0) active.push({ label: "Super Crit · Crit DMG", value: `+${(summary.critDamage * 100).toFixed(0)}%`, color: "#ff4fd8" });
-  if (summary.superCritChance > 0) active.push({ label: "Super Crit · Crit Chance", value: `+${(summary.superCritChance * 100).toFixed(1)}%`, color: "#ff4fd8" });
+  if (summary.critDamage > 0) active.push({ label: "Super Crit · Crit DMG", value: `+${(summary.critDamage * 100).toFixed(0)}%`, color: "#b6a0ff" });
+  if (summary.superCritChance > 0) active.push({ label: "Super Crit · Crit Chance", value: `+${(summary.superCritChance * 100).toFixed(1)}%`, color: "#b6a0ff" });
 
   return (
     <div className="flex flex-col gap-2.5" data-testid="crystal-vault">
@@ -863,7 +863,7 @@ function TowerPreview({
                   <div className="shrink-0 text-right">
                     <div
                       className="text-[14px] font-bold"
-                      style={{ color: r.better === "down" ? "#35e0ff" : "#3dff8e" }}
+                      style={{ color: r.better === "down" ? "#8ceaff" : "#5cffaa" }}
                     >
                       {r.delta}
                     </div>
@@ -880,10 +880,10 @@ function TowerPreview({
         {/* ================= LEVEL UP ================= */}
         <div className="upg-block mt-4" data-testid="tower-upgrade-block">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-disp text-base text-[#ffcf4d]">LEVEL UP</span>
+            <span className="font-disp text-base text-[#ffd977]">LEVEL UP</span>
             <span className="chip text-[11.5px]">{locked ? "LOCKED" : `Lv ${lv}/${MAX_MENU_LEVEL}`}</span>
             {!locked && !maxed && (
-              <span className="text-[11px] font-bold text-[#3dff8e]">{gold > 0 ? `+1 → Lv ${lv + 1}` : `gems → Lv ${lv + 1}`}</span>
+              <span className="text-[11px] font-bold text-[#5cffaa]">{gold > 0 ? `+1 → Lv ${lv + 1}` : `gems → Lv ${lv + 1}`}</span>
             )}
             <span className="ml-auto text-[10.5px] font-semibold text-[var(--dim)]">
               {locked ? `Needs ${def.unlockFrags} fragments` : maxed ? "Menu level maxed" : "One level per purchase"}
@@ -929,9 +929,9 @@ function TowerPreview({
         {/* ================= ASCENT · AWAKENINGS ================= */}
         <div className="awk-block mt-3" data-testid="tower-awakening-block">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-disp text-base text-[#ff9be9]">ASCENT · AWAKENINGS</span>
+            <span className="font-disp text-base text-[#d9c9ff]">ASCENT · AWAKENINGS</span>
             <span className="text-[10px] font-bold tracking-[0.16em] text-[var(--dim)]">MAGIC TOKENS</span>
-            <span className="pill-dark ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-[#ff4fd8]">
+            <span className="pill-dark ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-[#b6a0ff]">
               <TokenIcon size={12} />
               <b className="num">{save.tokens}</b>
             </span>
@@ -956,8 +956,8 @@ function TowerPreview({
                 >
                   <div className="flex items-center gap-1.5">
                     <span className="awk-num">{slot === 0 ? "1" : "2"}</span>
-                    <span className="truncate text-[12px] font-bold text-[#ff9be9]">{spec.name}</span>
-                    <span className="ml-auto font-disp text-[13px]" style={{ color: tier > 0 ? "#ff4fd8" : "var(--line2)" }}>
+                    <span className="truncate text-[12px] font-bold text-[#d9c9ff]">{spec.name}</span>
+                    <span className="ml-auto font-disp text-[13px]" style={{ color: tier > 0 ? "#b6a0ff" : "var(--line2)" }}>
                       {tier > 0 ? ROMAN[tier] : "—"}
                     </span>
                   </div>
@@ -1000,7 +1000,7 @@ function TowerPreview({
         <div className="mt-4 flex gap-2">
           <button
             className="btn flex-1 py-2 text-[13px]"
-            style={inLine ? { borderColor: "#ff4d5e88", color: "#ff8f9a" } : { borderColor: "#3dff8e88", color: "#8effc4" }}
+            style={inLine ? { borderColor: "#ff5c7088", color: "#ff8f9a" } : { borderColor: "#5cffaa88", color: "#8effc4" }}
             disabled={locked}
             onClick={onToggleLineup}
           >
