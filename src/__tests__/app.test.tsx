@@ -768,6 +768,59 @@ describe("Clone tower", () => {
   }, 25000);
 });
 
+describe("Honor Emperor", () => {
+  it("honors any tower it is dragged onto, without points needing to match", async () => {
+    // regression: the drag used to fall through to the merge error toast
+    // ("only merges with another Honor Emperor…"), so the Emperor was unusable
+    persistSave({
+      ...defaultSave(),
+      lineup: ["arrow", "honor"],
+      levels: { ...defaultSave().levels, arrow: 1, honor: 1 },
+    });
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+    const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
+    await sleep(120); // let the battle engine bind the imperative summon callback
+    summon.click();
+    await waitFor(() => (document.body.textContent || "").includes("deployed!"), "first summon");
+    summon.click();
+    await waitFor(() => (document.body.textContent || "").includes("deployed!"), "second summon");
+    const towersOnBoard = () =>
+      Number((document.querySelector('[data-testid="towers-on-board"]')?.textContent || "0").replace(/[^\d]/g, ""));
+    await waitFor(() => towersOnBoard() === 2, "arrow and emperor on the grid");
+
+    // drag across every ordered cell pair until the honor ceremony fires;
+    // stop at the first success so nothing else touches the board after it
+    const canvas = document.querySelector("canvas") as HTMLCanvasElement;
+    // arena geometry: OX=(1000-7*104)/2, OY=(580-4*104)/2+48, cell 104
+    const cx = (c: number) => 136 + (c + 0.5) * 104;
+    const cy = (r: number) => 130 + (r + 0.5) * 104;
+    const cells: [number, number][] = [];
+    for (let c = 1; c <= 5; c++) for (let r = 0; r <= 2; r++) cells.push([cx(c), cy(r)]);
+    let honored = false;
+    for (const [x1, y1] of cells) {
+      for (const [x2, y2] of cells) {
+        if (x1 === x2 && y1 === y2) continue;
+        pointer("pointerdown", canvas, x1, y1);
+        pointer("pointermove", canvas, x2, y2);
+        pointer("pointerup", canvas, x2, y2);
+        await sleep(6);
+        if (/HONOR —/i.test(document.body.textContent || "")) {
+          honored = true;
+          break;
+        }
+      }
+      if (honored) break;
+    }
+    await waitFor(() => /HONOR —/i.test(document.body.textContent || ""), "honor toast", 6000);
+    // the Emperor is consumed; the heir stays with the grown point
+    await waitFor(() => towersOnBoard() === 1, "emperor consumed, heir kept");
+    noErrors();
+    unmountApp();
+  }, 25000);
+});
+
 describe("Frame settings", () => {
   it("caps the frame rate and toggles frame interpolation", async () => {
     await mountApp();
@@ -824,14 +877,14 @@ describe("Towers", () => {
     expect(page, "tower page").toBeTruthy();
     expect(page.className).toContain("overflow-y-auto");
     // ...that is actually bounded by the app shell: the tab is h-full all the way
-    // up into the min-h-0 flex-1 content area, otherwise a 65-cell grid would
+    // up into the min-h-0 flex-1 content area, otherwise a 66-cell grid would
     // just push the nav bar off the bottom of the screen
     const chain: string[] = [];
     for (let el = page.parentElement; el && el !== document.body; el = el.parentElement) chain.push(el.className);
     expect(chain.some((c) => c.includes("min-h-0") && c.includes("flex-1")), `bounded ancestor: ${chain.join(" > ")}`).toBe(true);
     expect(chain.every((c) => !/overflow-(y-)?(auto|scroll|hidden)/.test(c)), "a second scroller between the tab and the shell").toBe(true);
 
-    // the 65-cell grid hangs directly off it: it used to live inside
+    // the 66-cell grid hangs directly off it: it used to live inside
     // `flex min-h-0 flex-1` with a pinned ASCENT ALL footer below, which capped
     // the box at a handful of rows and made the last groups unreachable
     const grid = document.querySelector('[data-testid="tower-grid"]') as HTMLElement;
@@ -845,10 +898,10 @@ describe("Towers", () => {
     );
     expect(nested, "nested scroll boxes inside the tab").toHaveLength(0);
 
-    // every tower is in that one grid: 65 cells + 5 rarity headers
-    expect(grid.children.length).toBe(70);
+    // every tower is in that one grid: 66 cells + 5 rarity headers
+    expect(grid.children.length).toBe(71);
     const towerCells = page.querySelectorAll(".tw-cell[data-tower]").length;
-    expect(towerCells).toBe(65);
+    expect(towerCells).toBe(66);
 
     // the rotation strip and the filters ride along on top of the scroll, so the
     // drag-to-rotation drop target never scrolls out of reach
@@ -1291,6 +1344,36 @@ describe("Battle", () => {
     await waitFor(() => byText("div", "Command Center"), "back home after abandoning");
     noErrors();
   });
+
+  it("summons God of Zeus and runs its divine-bolt cadence without engine errors", async () => {
+    persistSave({
+      ...defaultSave(),
+      lineup: ["godzeus"],
+      levels: { ...defaultSave().levels, godzeus: 1 },
+    });
+    await mountApp();
+    startMode("Battle");
+    await waitFor(() => byText("button", "SUMMON"), "battle HUD");
+    const summon = document.querySelector('[data-testid="summon-btn"]') as HTMLButtonElement;
+    await sleep(120);
+    click(summon);
+    const towersOnBoard = () =>
+      Number((document.querySelector('[data-testid="towers-on-board"]')?.textContent || "0").replace(/[^\d]/g, ""));
+    await waitFor(() => towersOnBoard() === 1, "godzeus deployed");
+    // the fixed bottom bar owns the Zeus card
+    const card = document.querySelector('[data-testid="ascent-bar"] [data-tower="godzeus"]') as HTMLElement;
+    expect(card, "godzeus ascent card").toBeTruthy();
+    // wave 1 walks out; the 2.5s bolt cadence then runs against living
+    // enemies (wipe or consume) — any engine exception fails noErrors()
+    await waitFor(() => {
+      const chip = document.querySelector('[data-testid="enemies-left"]');
+      const n = parseInt((chip?.textContent || "0").replace(/[^\d]/g, ""), 10);
+      return n > 0;
+    }, "first wave to spawn", 15000);
+    await sleep(4000);
+    noErrors();
+    unmountApp();
+  }, 25000);
 
   it("shows the merged crit damage in the HUD and counts up as crits land", async () => {
     // a deep save: lots of upgrades banked, so the merged stat is a big number

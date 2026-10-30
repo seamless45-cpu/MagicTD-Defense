@@ -639,6 +639,18 @@ export function TowerIcon({
             <circle cx="24" cy="20" r="3" fill={a} />
           </g>
         );
+      case "godzeus":
+        return (
+          <g>
+            <circle cx="24" cy="13" r="9" fill="#0d2138" stroke={c} strokeWidth="2.2" />
+            <circle cx="14" cy="15" r="6" fill="#0d2138" stroke={c} strokeWidth="1.8" />
+            <circle cx="34" cy="15" r="6" fill="#0d2138" stroke={c} strokeWidth="1.8" />
+            <path d="M27 20l-7 10h5l-3 12 10-13h-5l4-9z" fill="#ffffff" stroke={c} strokeWidth="1.4" strokeLinejoin="round" />
+            <circle cx="8" cy="27" r="1.6" fill={a} />
+            <circle cx="40" cy="30" r="1.6" fill={a} />
+            <circle cx="37" cy="38" r="1.2" fill="#ffffff" />
+          </g>
+        );
       default:
         return (
           <g>

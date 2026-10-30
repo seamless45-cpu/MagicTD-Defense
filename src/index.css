@@ -429,13 +429,13 @@ body,
 .modal-slide-in { animation: modalSlideIn .48s cubic-bezier(.12,1,.28,1) both; }
 .modal-slide-out { animation: modalSlideOut .22s cubic-bezier(.55,0,1,.45) both; pointer-events: none; }
 @keyframes modalSlideIn {
-  0% { opacity: 0; transform: translate3d(0,52px,0) scale(.92); filter: blur(8px); }
-  62% { opacity: 1; transform: translate3d(0,-5px,0) scale(1.015); filter: blur(0); }
-  100% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: none; }
+  0% { opacity: 0; transform: translate3d(0,52px,0) scale(.92); }
+  62% { opacity: 1; transform: translate3d(0,-5px,0) scale(1.015); }
+  100% { opacity: 1; transform: translate3d(0,0,0) scale(1); }
 }
 @keyframes modalSlideOut {
-  0% { opacity: 1; transform: translate3d(0,0,0) scale(1); filter: blur(0); }
-  100% { opacity: 0; transform: translate3d(0,24px,0) scale(.96); filter: blur(4px); }
+  0% { opacity: 1; transform: translate3d(0,0,0) scale(1); }
+  100% { opacity: 0; transform: translate3d(0,24px,0) scale(.96); }
 }
 @media (prefers-reduced-motion: reduce) {
   .modal-slide-in, .modal-slide-out { animation-duration: .01ms !important; }
@@ -1837,9 +1837,8 @@ body,
   animation: screenEnter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 @keyframes screenEnter {
-  0% { opacity: 0; transform: translateY(14px) scale(0.985); filter: blur(6px); }
-  60% { filter: blur(0); }
-  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  0% { opacity: 0; transform: translateY(14px) scale(0.985); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 /* cards inside a screen land one after another */
 .screen-enter .tile,
@@ -2057,10 +2056,12 @@ body,
 @keyframes heroCool {
   0%,
   100% {
-    filter: brightness(0.85);
+    opacity: 0.88;
+    transform: scale(1);
   }
   50% {
-    filter: brightness(1.1);
+    opacity: 1;
+    transform: scale(1.02);
   }
 }
 
@@ -2075,10 +2076,10 @@ body,
 @keyframes bossRage {
   0%,
   100% {
-    filter: brightness(1);
+    transform: scaleX(1);
   }
   50% {
-    filter: brightness(1.5) saturate(1.3);
+    transform: scaleX(1.03);
   }
 }
 .boss-backdrop {
@@ -2481,10 +2482,10 @@ body,
 @keyframes dayReady {
   0%,
   100% {
-    box-shadow: 0 0 0 rgba(255, 217, 119, 0);
+    transform: scale(1);
   }
   50% {
-    box-shadow: 0 0 18px rgba(255, 217, 119, 0.45);
+    transform: scale(1.035);
   }
 }
 
@@ -2805,12 +2806,10 @@ body,
 @keyframes taskReady {
   0%,
   100% {
-    box-shadow: 0 0 0 rgba(92, 255, 170, 0);
+    transform: scale(1);
   }
   50% {
-    box-shadow:
-      0 0 20px rgba(92, 255, 170, 0.4),
-      inset 0 0 14px rgba(92, 255, 170, 0.1);
+    transform: scale(1.02);
   }
 }
 .task-row.ready::before {
@@ -3582,10 +3581,10 @@ body,
 @keyframes mailReadyPulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(92, 255, 170, 0);
+    transform: scale(1);
   }
   50% {
-    box-shadow: 0 0 0 3px rgba(92, 255, 170, 0.16);
+    transform: scale(1.012);
   }
 }
 .mail-row-glyph {
@@ -3673,10 +3672,10 @@ body,
 @keyframes seasonReady {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(140, 234, 255, 0);
+    transform: scale(1);
   }
   50% {
-    box-shadow: 0 0 0 3px rgba(140, 234, 255, 0.22), 0 10px 26px -14px rgba(140, 234, 255, 0.9);
+    transform: scale(1.025);
   }
 }
 .season-tier.done {
@@ -4469,13 +4468,8 @@ body,
 }
 .month-strip {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
   gap: 6px;
-}
-@media (min-width: 720px) {
-  .month-strip {
-    grid-template-columns: repeat(12, minmax(0, 1fr));
-  }
 }
 .month-tile {
   display: flex;
@@ -4860,8 +4854,8 @@ body,
   animation: tileReady 1.8s ease-in-out infinite;
 }
 @keyframes tileReady {
-  0%, 100% { box-shadow: 0 0 0 1px #ffd76633, 0 0 18px -14px #ffd766; }
-  50% { box-shadow: 0 0 0 1px #ffd76666, 0 0 26px -8px #ffd766; }
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
 }
 .power-saver .tile.ready {
   animation: none;
@@ -4897,12 +4891,12 @@ body,
 }
 .ascent-btn-compact.on {
   background-image: linear-gradient(120deg, rgba(30, 97, 143, .96), rgba(112, 67, 174, .92), rgba(30, 97, 143, .96));
-  background-size: 220% 100%;
+  box-shadow: 0 0 14px -4px #7fe9ff, inset 0 1px 0 rgba(255, 255, 255, .2);
   animation: ascentCharged 2.8s ease-in-out infinite;
 }
 @keyframes ascentCharged {
-  0%, 100% { background-position: 0% 50%; box-shadow: 0 0 8px -4px #7fe9ff; }
-  50% { background-position: 100% 50%; box-shadow: 0 0 16px -3px #c9a7ff; }
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.045); }
 }
 .power-saver .ascent-slot,
 .calm .ascent-slot,
@@ -4970,18 +4964,21 @@ html[data-ui-glass="on"] .claim-card,
 html[data-ui-glass="on"] .upg-statrow,
 html[data-ui-glass="on"] [data-testid="hud"],
 html[data-ui-glass="on"] [data-testid="ascent-bar"] > .tile {
-  background-color: color-mix(in srgb, var(--panel2) 62%, transparent) !important;
+  background-color: color-mix(in srgb, var(--panel2) 58%, transparent) !important;
   background-image:
-    linear-gradient(138deg, rgba(255,255,255,.24), rgba(255,255,255,.06) 18%, transparent 43%),
-    linear-gradient(180deg, color-mix(in srgb, var(--cyan) 7%, transparent), rgba(0,0,0,.12)) !important;
+    linear-gradient(138deg, rgba(255,255,255,.3), rgba(255,255,255,.08) 14%, transparent 38%),
+    linear-gradient(225deg, rgba(255,255,255,.1), transparent 34%),
+    linear-gradient(180deg, color-mix(in srgb, var(--cyan) 9%, transparent), rgba(0,0,0,.16)) !important;
   border-color: var(--glass-edge) !important;
   box-shadow:
-    inset 0 1px 0 var(--glass-sheen),
-    inset 0 -1px 0 rgba(255,255,255,.06),
-    0 12px 32px var(--glass-shadow),
-    0 0 18px color-mix(in srgb, var(--cyan) 8%, transparent) !important;
-  backdrop-filter: blur(18px) saturate(1.5);
-  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+    inset 0 1.5px 0 var(--glass-sheen),
+    inset 1px 0 0 rgba(255,255,255,.1),
+    inset -1px 0 0 rgba(255,255,255,.07),
+    inset 0 -1.5px 0 rgba(255,255,255,.08),
+    0 18px 44px -10px var(--glass-shadow),
+    0 0 24px color-mix(in srgb, var(--cyan) 10%, transparent) !important;
+  backdrop-filter: blur(22px) saturate(1.6) brightness(1.02);
+  -webkit-backdrop-filter: blur(22px) saturate(1.6) brightness(1.02);
 }
 html[data-ui-glass="on"] .tile::after,
 html[data-ui-glass="on"] .panel::after {
@@ -5039,8 +5036,8 @@ html[data-ui-glass="on"] .power-saver * { backdrop-filter: none !important; -web
   animation: uiGlideIn .34s cubic-bezier(.18,.76,.24,1) both;
 }
 @keyframes uiGlideIn {
-  from { opacity: 0; transform: translateY(9px) scale(.992); filter: blur(2px); }
-  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+  from { opacity: 0; transform: translateY(9px) scale(.992); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 [data-ui-glass="on"] .row-card:hover,
 [data-ui-glass="on"] .mail-row:hover,
@@ -6170,3 +6167,118 @@ html[data-toggle-style="edison"] .knob.on .knob-glow { background: linear-gradie
 /* Burmese and Lao need their own script fonts; Rajdhani has no glyphs for either. */
 html:lang(my), html:lang(my) body { font-family: "Noto Sans Myanmar", "Rajdhani", system-ui, sans-serif; }
 html:lang(lo), html:lang(lo) body { font-family: "Noto Sans Lao", "Rajdhani", system-ui, sans-serif; }
+
+
+/* ================================================================
+   FULL MOTION PASS — complete animation coverage (no more "halfway").
+   Cheap transform/opacity motion everywhere: staggered screen children,
+   press feedback on every primary control, and richer hover states.
+   ================================================================ */
+.screen-enter > *:nth-child(2) { animation-delay: 40ms; }
+.screen-enter > *:nth-child(3) { animation-delay: 80ms; }
+.screen-enter > *:nth-child(4) { animation-delay: 120ms; }
+.screen-enter > *:nth-child(5) { animation-delay: 160ms; }
+.screen-enter > *:nth-child(6) { animation-delay: 200ms; }
+.screen-enter > *:nth-child(n + 7) { animation-delay: 240ms; }
+
+.btn,
+.cta-banner,
+.day-tile,
+.month-tile,
+.tw-cell,
+.lane-btn,
+.skill-card,
+.claim-card {
+  transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1),
+    border-color 0.24s ease, box-shadow 0.28s ease, background-color 0.28s ease,
+    opacity 0.2s ease;
+}
+.btn:active:not(:disabled),
+.cta-banner:active:not(:disabled),
+.day-tile:active:not(:disabled),
+.month-tile:active:not(:disabled),
+.tw-cell:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.nav-btn:hover,
+.tab-btn:hover {
+  transform: translateY(-1px);
+}
+.tile:hover,
+.row-card:hover {
+  transform: translateY(-1px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen-enter > * { animation-delay: 0s !important; }
+  .btn:active:not(:disabled),
+  .cta-banner:active:not(:disabled),
+  .day-tile:active:not(:disabled),
+  .month-tile:active:not(:disabled),
+  .tw-cell:active:not(:disabled) { transform: none; }
+}
+
+/* ================================================================
+   LIQUID GLASS 2.0 — specular reflections layer (experimental opt-in).
+   The base glass above stays still; this layer breathes a moving
+   catch-light across every glass surface. Opacity-only, so it is
+   compositor-cheap even on low-end phones.
+   ================================================================ */
+@keyframes glassSheen {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+@keyframes glassEdge {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.7; }
+}
+html[data-glass-sheen="on"] .tile::after,
+html[data-glass-sheen="on"] .panel::after {
+  background:
+    linear-gradient(116deg, transparent 18%, rgba(255,255,255,.26) 40%, rgba(255,255,255,.08) 52%, transparent 74%),
+    linear-gradient(180deg, rgba(255,255,255,.1), transparent 36%) !important;
+  animation: glassSheen 5.2s ease-in-out infinite;
+}
+html[data-glass-sheen="on"] .btn,
+html[data-glass-sheen="on"] .nav-btn,
+html[data-glass-sheen="on"] .tab-btn {
+  animation: glassEdge 3.6s ease-in-out infinite;
+}
+
+/* ================================================================
+   CINEMATIC TRANSITIONS (experimental opt-in) — the heavy blur-in
+   versions of the screen transitions, kept opt-in because filtering
+   a full screen is what caused the old UI lag spikes.
+   ================================================================ */
+@keyframes screenEnterCin {
+  0% { opacity: 0; transform: translateY(14px) scale(0.985); filter: blur(6px); }
+  60% { filter: blur(0); }
+  100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes uiGlideInCin {
+  from { opacity: 0; transform: translateY(9px) scale(0.992); filter: blur(2px); }
+  to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+html[data-cinematic="on"] .screen-enter {
+  animation: screenEnterCin 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+html[data-cinematic="on"] .screen-enter > * {
+  animation: uiGlideInCin 0.34s cubic-bezier(0.18, 0.76, 0.24, 1) both;
+}
+html[data-cinematic="on"] .modal-slide-in {
+  animation: modalSlideInCin 0.48s cubic-bezier(0.12, 1, 0.28, 1) both;
+}
+@keyframes modalSlideInCin {
+  0% { opacity: 0; transform: translate3d(0, 40px, 0) scale(0.94); filter: blur(8px); }
+  62% { opacity: 1; filter: blur(0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-cinematic="on"] .screen-enter,
+  html[data-cinematic="on"] .screen-enter > *,
+  html[data-cinematic="on"] .modal-slide-in { animation-duration: 0.01ms !important; }
+  html[data-glass-sheen="on"] .tile::after,
+  html[data-glass-sheen="on"] .panel::after,
+  html[data-glass-sheen="on"] .btn,
+  html[data-glass-sheen="on"] .nav-btn,
+  html[data-glass-sheen="on"] .tab-btn { animation: none !important; }
+}

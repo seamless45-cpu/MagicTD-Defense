@@ -60,7 +60,7 @@ import {
 } from "../game/save";
 import { useRecorder } from "../components/ScreenRecorder";
 import { startRecording, stopRecording } from "../game/recorder";
-import { sfx, setVolume, setVolumeBoost, setSuperVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost } from "../game/audio";
+import { sfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost } from "../game/audio";
 
 /** equalizer presets: 60 · 250 · 1k · 4k · 12k Hz, in dB */
 const EQ_PRESETS: Record<string, number[]> = {
@@ -1232,22 +1232,22 @@ export function Specials({
   const ready = tasksReady(save);
   return (
     <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
-          className={`tab-btn relative ${tab === "tasks" ? "on" : ""}`}
+          className={`tab-btn relative shrink-0 ${tab === "tasks" ? "on" : ""}`}
           data-testid="tab-tasks"
           onClick={() => { sfx.uiTab(); setTab("tasks"); }}
         >
           TASKS
           {ready > 0 && <span className="badge-ping">{ready}</span>}
         </button>
-        <button className={`tab-btn ${tab === "events" ? "on" : ""}`} data-testid="tab-events" onClick={() => { sfx.uiTab(); setTab("events"); }}>
+        <button className={`tab-btn shrink-0 ${tab === "events" ? "on" : ""}`} data-testid="tab-events" onClick={() => { sfx.uiTab(); setTab("events"); }}>
           EVENTS
         </button>
-        <button className={`tab-btn ${tab === "competition" ? "on" : ""}`} data-testid="tab-competition" onClick={() => { sfx.uiTab(); setTab("competition"); }}>
+        <button className={`tab-btn shrink-0 ${tab === "competition" ? "on" : ""}`} data-testid="tab-competition" onClick={() => { sfx.uiTab(); setTab("competition"); }}>
           COMPETITION
         </button>
-        <span className="ml-auto text-[11px] font-bold tracking-widest text-[var(--dim)]">RESETS 07:00 · {resetCountdown()}</span>
+        <span className="ml-auto whitespace-nowrap text-[11px] font-bold tracking-widest text-[var(--dim)]">RESETS 07:00 · {resetCountdown()}</span>
       </div>
       {tab === "tasks" ? (
         <TasksPanel save={save} mutate={mutate} push={push} />
@@ -2249,9 +2249,9 @@ export function Guild({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {(["hall", "store", "war"] as const).map((t) => (
-          <button key={t} className={`tab-btn ${tab === t ? "on" : ""}`} onClick={() => { sfx.uiTab(); setTab(t); }}>
+          <button key={t} className={`tab-btn shrink-0 ${tab === t ? "on" : ""}`} onClick={() => { sfx.uiTab(); setTab(t); }}>
             {t === "hall" ? "HALL" : t === "store" ? "COIN STORE" : "GUILD WAR"}
           </button>
         ))}
@@ -2655,28 +2655,6 @@ export function SettingsModal({
           }}
         />
       </div>
-      <div className="row-card mt-1.5" data-testid="super-volume-row">
-        <SetIcon name="booster" color="#ff315c" />
-        <div className="min-w-0 flex-1">
-          <div className="font-bold">Super Volume Booster <span className="text-[10px] font-bold text-[#ff315c]">· 500%</span></div>
-          <div className="text-xs font-semibold text-[var(--dim)]">
-            Pushes every sound <b>and your personal music</b> to 500%. Very loud: the limiter tightens at this level, but protect your ears.
-          </div>
-        </div>
-        <KnobToggle
-          on={save.superVolBoost}
-          label="Super Volume Booster"
-          testId="toggle-superVolBoost"
-          onToggle={() => {
-            const next = !save.superVolBoost;
-            mutate((s) => { s.superVolBoost = next; });
-            setSuperVolumeBoost(next);
-            if (next) sfx.uiPop();
-            else sfx.uiOff();
-          }}
-        />
-      </div>
-
       <div className="mt-3 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="music-player">
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
@@ -2975,6 +2953,42 @@ export function SettingsModal({
             }}
           />
         </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="exp-glass-sheen-row">
+          <SetIcon name="booster" color="#a8ecff" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Liquid Glass reflections</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Adds an animated specular sheen across every Liquid Glass surface.</div>
+          </div>
+          <KnobToggle
+            on={!!save.experimental?.glassSheen}
+            label="Liquid Glass reflections"
+            testId="exp-glass-sheen"
+            onToggle={() => {
+              const next = !save.experimental?.glassSheen;
+              mutate((s) => { s.experimental = { ...s.experimental, glassSheen: next }; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="exp-cinematic-row">
+          <SetIcon name="perf" color="#b6a0ff" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Cinematic transitions</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Blur-in screen and modal transitions like the old UI — prettier, but heavier.</div>
+          </div>
+          <KnobToggle
+            on={!!save.experimental?.cinematicTrans}
+            label="Cinematic transitions"
+            testId="exp-cinematic"
+            onToggle={() => {
+              const next = !save.experimental?.cinematicTrans;
+              mutate((s) => { s.experimental = { ...s.experimental, cinematicTrans: next }; });
+              if (next) sfx.uiPop();
+              else sfx.uiOff();
+            }}
+          />
+        </div>
       </div>
       <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
         <div className="mb-2 flex items-center justify-between gap-2">
@@ -3248,7 +3262,6 @@ export function SettingsModal({
                   });
                   setVolume(next.vol);
                   setVolumeBoost(!!next.volBoost);
-                  setSuperVolumeBoost(!!next.superVolBoost);
                   setAudioEQ(next.eqBands);
                   setImportOpen(false);
                   setImportText("");

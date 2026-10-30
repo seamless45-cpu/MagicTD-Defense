@@ -190,6 +190,36 @@ describe("tower data", () => {
     expect(rows.some((r) => r.label.includes("Attack Speed"))).toBe(false);
   });
 
+  it("ships God of Zeus with divine wipe bolts, stun scaling and two awakenings", () => {
+    const z = TOWER_BY_ID.godzeus;
+    expect(z).toBeTruthy();
+    expect(z.rarity).toBe("mystical");
+    expect(z.kind).toBe("godzeus");
+    expect(z.target).toBe("all");
+    expect(z.exotic).toBe(true);
+    // cadence: 2.5s base, −0.01s per menu level
+    expect(z.zeusCd).toBe(2.5);
+    expect(z.upZeusCd).toBe(0.01);
+    // stun: 3s base, +0.1s per menu level, +0.5s per ascent
+    expect(z.stun).toBe(3);
+    expect(z.upStun).toBe(0.1);
+    expect(z.ascStun).toBe(0.5);
+    // awakening 1 — Unpredictable Rhythm: 4%..24% merge chance, radius ×50 steps
+    expect(z.awk1?.name).toBe("Unpredictable Rhythm");
+    expect(z.awk1?.chance.slice(0, 6)).toEqual([0.04, 0.08, 0.12, 0.16, 0.2, 0.24]);
+    expect(z.awk1?.mult[0]).toBe(1);
+    expect(z.awk1?.mult[1]).toBe(50);
+    expect(z.awk1?.fmt?.(1, undefined)).toContain("900,000");
+    // awakening 2 — Electrical Death: 12%..27% max-HP consume, 1s..2.25s stun
+    expect(z.awk2?.name).toBe("Electrical Death");
+    expect(z.awk2?.mult.slice(0, 6)).toEqual([0.12, 0.15, 0.18, 0.21, 0.24, 0.27]);
+    expect(z.awk2?.mult2?.slice(0, 6)).toEqual([1, 1.25, 1.5, 1.75, 2, 2.25]);
+    // bespoke stat rows explain the kit in the preview
+    const rows = towerStatRows(z, 15);
+    expect(rows.find((r) => r.label === "Divine Wipe")?.value).toContain("wiped through immunity");
+    expect(rows.find((r) => r.label === "Strike Interval")?.value).toContain("2.5s base");
+  });
+
   it("boosts every Supervisor buff parameter by tenfold", () => {
     const supervisor = TOWER_BY_ID.supervisor;
     expect(supervisor.desc).toContain("1% per kill");
@@ -351,9 +381,9 @@ describe("tower data", () => {
     expect(byRarity("decent")).toHaveLength(3);
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
-    // the roster includes the established towers, the Mystical Supervisor and
-    // the two new mystical summons (Eclipse Oracle / Astral Seraph)
-    expect(TOWERS).toHaveLength(65);
+    // the roster includes the established towers, the Mystical Supervisor,
+    // the two mystical summons (Eclipse Oracle / Astral Seraph) and God of Zeus
+    expect(TOWERS).toHaveLength(66);
     expect(TOWER_BY_ID.supervisor.rarity).toBe("mystical");
     expect(TOWER_BY_ID.supervisor.unlockFrags).toBe(1);
     expect(TOWER_BY_ID.meteor.awk1?.name).toBe("Asteroid Drop");

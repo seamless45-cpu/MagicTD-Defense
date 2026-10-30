@@ -74,7 +74,8 @@ export type TowerKind =
   | "bloodstone"
   | "venom"
   | "eclipse"
-  | "seraph";
+  | "seraph"
+  | "godzeus";
 
 export type GameMode = "battle" | "endless" | "gauntlet" | "gemrush" | "hardcore" | "superhardcore" | "sandbox";
 
@@ -267,6 +268,9 @@ export interface TowerDef {
   skill?: string;
   /** Demon Execution: seconds between executioner strikes (base, un-awakened) */
   execCd?: number;
+  /** God of Zeus: seconds between divine lightning strikes, and the per-level shave */
+  zeusCd?: number;
+  upZeusCd?: number;
   /** Heavenly God: how many enemies behind the target the laser also burns */
   laserBehind?: number;
   /** Heavenly God: damage share the enemies behind the target take */
@@ -1095,6 +1099,30 @@ export const TOWERS: TowerDef[] = [
     awk2: awking("Choir of Stars", "chain",
       "Chance the holy arc forks into extra enemies", [0.2, 0.7], [1, 4]),
   },
+  // ---------- the storm throne ----------
+  {
+    id: "godzeus", name: "God of Zeus", rarity: "mystical", kind: "godzeus", art: "godzeus", accent: "#8ceaff",
+    target: "all", exotic: true, unlockFrags: 1,
+    desc: "Strikes one random enemy with a colossal lightning bolt that wipes bosses, elites and normals outright, straight through every immunity — then stuns the victim for 3 seconds. Cooldown: 2.5s. Attack, attack speed and other buffs do not affect it.",
+    dmg: 0, upDmg: 0, ascDmg: 0, rate: 2.5, upRate: 0, ascRate: 0,
+    zeusCd: 2.5, upZeusCd: 0.01,
+    stun: 3, upStun: 0.1, ascStun: 0.5,
+    awk1: {
+      name: "Unpredictable Rhythm",
+      desc: "When merging, chance to drop a wrathful lightning ball down on the lane: it detonates over a 900,000m blast and wipes every enemy the shockwave catches.",
+      chance: [0.04, 0.08, 0.12, 0.16, 0.2, 0.24],
+      mult: [1, 50, 2500, 125000, 6250000, 312500000],
+      fmt: (m) => `${Math.round(900000 * m).toLocaleString()}m blast · wipes everything hit`,
+    },
+    awk2: {
+      name: "Electrical Death",
+      desc: "Bolts no longer wipe in one strike: each hit consumes 12% of the enemy's maximum health and stuns for 1s instead. At the final tier the wipe returns.",
+      chance: [1, 1, 1, 1, 1, 1],
+      mult: [0.12, 0.15, 0.18, 0.21, 0.24, 0.27],
+      mult2: [1, 1.25, 1.5, 1.75, 2, 2.25],
+      fmt: (m, m2) => `consume ${Math.round(m * 100)}% max HP · stun ${m2?.toFixed(2) ?? "1.00"}s`,
+    },
+  },
 ];
 
 /** Tier VI extends every tower's two awakening paths beyond the original five tiers.
@@ -1339,11 +1367,15 @@ export function towerStatRows(def: TowerDef, menuLv: number, battleLv = 1): Stat
       better: "up",
     });
   } else {
-    rows.push({ label: "Attacks", value: def.id === "demon" ? "Unbuffable execution" : "Support tower", better: "up" });
+    rows.push({ label: "Attacks", value: def.id === "demon" ? "Unbuffable execution" : def.id === "godzeus" ? "Divine lightning" : "Support tower", better: "up" });
   }
   if (def.id === "demon") {
     rows.push({ label: "Execution", value: "One enemy per strike · bosses take 50% max HP", better: "up" });
     rows.push({ label: "Strike Interval", value: `${def.execCd || 3}s base · strikes per volley = points · cooldown cut by the points buff`, better: "down", maxed: true });
+  }
+  if (def.id === "godzeus") {
+    rows.push({ label: "Divine Wipe", value: "One random enemy per strike · bosses, elites and normals wiped through immunity", better: "up" });
+    rows.push({ label: "Strike Interval", value: `${def.zeusCd || 2.5}s base · −${(def.upZeusCd || 0).toFixed(2)}s per level · cooldown cut by the points buff`, better: "down", maxed: true });
   }
   if (def.id === "supervisor") {
     rows.push({ label: "Kill Buff", value: "+1% ATK speed per kill · +2,000% cap", better: "up" });
