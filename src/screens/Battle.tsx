@@ -114,6 +114,7 @@ import {
   critMultiplierFrom,
   trophyStreakBonus,
   towerUpgradeCount,
+  AWAKENING_MAX_TIER,
   fmtCritPct,
   HERO_BY_ID,
   HERO_MAX_LEVEL,
@@ -3476,6 +3477,68 @@ export default function Battle({
       }
     };
 
+    /**
+     * GOD OF ZEUS — one colossal bolt on a fixed divine cadence. It picks a
+     * random enemy (not the front): bosses, elites and normals are wiped
+     * outright through armour, wards, crit-immunity and every other immunity
+     * (killReward is unconditional). Electrical Death (awakening 2) swaps the
+     * wipe for a max-HP consume + short stun until its final tier, when the
+     * wipe returns. Menu levels shave the cooldown and deepen the stun;
+     * ascent adds half a second of stun per battle level.
+     */
+    const zeusStrike = (t: BT) => {
+      const now = performance.now();
+      const list = g.enemies.filter((e) => !e.dead);
+      if (!list.length) return;
+      const target = list[Math.floor(Math.random() * list.length)];
+      const ep = enemyPos(target);
+      const tp = cellCenter(t.cell!.c, t.cell!.r);
+      const upg = t.menuLv - 1;
+      const asc = t.bLv - 1;
+      const t2 = saveRef.current.awn.godzeus?.[1] || 0;
+      const wipeMode = t2 === 0 || t2 >= AWAKENING_MAX_TIER;
+
+      // sky channel: a white-hot pillar with an electric-blue corona, plus the
+      // connecting bolt from the throne itself
+      g.strikes.push({ x: ep.x, y: ep.y, life: 0.62, max: 0.62, width: 24, color: "#3fb6ff", core: "#ffffff", seed: Math.random() * 100, forks: 6, top: -H });
+      g.strikes.push({ x: ep.x, y: ep.y, life: 0.4, max: 0.4, width: 10, color: "#9fe4ff", core: "#ffffff", seed: Math.random() * 100, forks: 4, top: -H * 0.5 });
+      g.strikes.push({ x: ep.x, y: ep.y, life: 0.24, max: 0.24, width: 5, color: "#ffffff", seed: Math.random() * 100, forks: 3, top: -H * 0.9 });
+      if (g.bolts.length < 44) g.bolts.push(randBolt(tp.x, tp.y, ep.x, ep.y, "#8ceaff", 3.2, 0.3, now));
+      ring(ep.x, ep.y, "#8ceaff", 64);
+      shock(ep.x, ep.y, "#3fb6ff", 150, 0.6);
+      glow(ep.x, ep.y, "#8ceaff", 190, 0.55);
+      burst(ep.x, ep.y, "#c9ecff", 26, 430);
+      sparkAt(ep.x, ep.y, 30, 480);
+      flash("#16324f", 0.34);
+      punch(0.85, 0.7);
+      hitStop(0.09);
+      g.shake = saveRef.current.shakeFx ? Math.min(26, g.shake + 20) : 0;
+      sfx.zap();
+      sfx.heavenlyImpact();
+
+      if (wipeMode) {
+        addText(ep.x, ep.y - 58, "DIVINE WIPE", "#ffffff", 15, true);
+        target.hp = 0;
+        killReward(target); // unconditional: ignores armour, wards and immunities
+      } else {
+        const share = t.def.awk2!.mult[t2 - 1];
+        const cut = target.max * share;
+        target.hp = Math.max(0, target.hp - cut);
+        target.flash = 0.3;
+        addText(ep.x, ep.y - 58, `−${Math.round(share * 100)}% MAX HP`, "#9fe4ff", 14, true);
+        addText(ep.x, ep.y - 38, `−${shortHp(cut)}`, "#dff4ff", 12, true);
+        if (target.hp <= 0) killReward(target);
+      }
+      const stunS = wipeMode
+        ? (t.def.stun || 0) + (t.def.upStun || 0) * upg + (t.def.ascStun || 0) * asc
+        : t.def.awk2!.mult2![t2 - 1] + (t.def.upStun || 0) * upg + (t.def.ascStun || 0) * asc;
+      if (!target.dead) {
+        target.stun = Math.max(target.stun, stunS);
+        addText(ep.x, ep.y - 78, `STUN ${stunS.toFixed(2)}s`, "#8ceaff", 12, false);
+        sfx.stun();
+      }
+    };
+
     /** global buffs, with Superbolt's extra multiplier restricted to lightning towers */
     const globalMul = (t?: BT) =>
       (g.odT > 0 ? 1 + OVERDRIVE_DMG : 1) *
@@ -4590,6 +4653,44 @@ export default function Battle({
      */
     const mergeTowers = (a: BT, b: BT) => {
       const p = b.cell ? cellCenter(b.cell.c, b.cell.r) : cellCenter(a.cell!.c, a.cell!.r);
+      // Honor Emperor runs first: it hands a point to the heir whatever points
+      // the heir already sits on, and never falls through to the roulette or
+      // the "nothing to gain" guard below.
+      // ---------- Honor Emperor: hands the point over, keeps the tower ----------
+      if (a.def.honor || b.def.honor) {
+        const emperor = a.def.honor ? a : b;
+        const heir = a.def.honor ? b : a;
+        const t1 = saveRef.current.awn["honor"]?.[0] || 0;
+        const t2 = saveRef.current.awn["honor"]?.[1] || 0;
+        let gain = 1;
+        if (t1 > 0 && Math.random() < emperor.def.awk1!.chance[t1 - 1]) {
+          gain += emperor.def.awk1!.mult[t1 - 1];
+          addText(p.x, p.y - 74, "HONOR BLESSING", "#fff6c4", 14, true);
+        }
+        heir.points = Math.min(MAX_POINTS, heir.points + gain);
+        heir.cd = 0.2;
+        if (t2 > 0) heir.honorMul += emperor.def.awk2!.mult[t2 - 1];
+        g.towers = g.towers.filter((t) => t.uid !== emperor.uid);
+        if (heir.cell) {
+          const hp = cellCenter(heir.cell.c, heir.cell.r);
+          g.strikes.push({ x: hp.x, y: hp.y, life: 0.5, max: 0.5, width: 14, color: "#ffd76a", seed: Math.random() * 100 });
+          shock(hp.x, hp.y, "#ffd76a", 96, 0.5);
+          glow(hp.x, hp.y, "#ffd76a", 140, 0.5);
+          stars(hp.x, hp.y, "#ffd76a", 16, 80);
+          levelFlourish(hp.x, hp.y, "#ffd76a", "HONORED", 2);
+          addText(hp.x, hp.y - 46, `HONOR +${gain}`, "#ffd76a", 17, true);
+        }
+        sfx.merge();
+        sfx.point();
+        toastRef.current(
+          t2 > 0
+            ? `HONOR — ${heir.def.name} grew to ${heir.points} pts · +${Math.round(heir.honorMul * 100)}% forever`
+            : `HONOR — ${heir.def.name} grew to ${heir.points} pts`,
+          "#ffd76a"
+        );
+        return;
+      }
+
       const wanted = Math.min(MAX_POINTS, a.points + 1);
       if (wanted <= b.points) {
         // nothing to gain: never eat a tower for nothing
@@ -4616,6 +4717,41 @@ export default function Battle({
       }
       const heavenlySource = a.def.id === "heavenly" ? a : b.def.id === "heavenly" ? b : undefined;
       const wasHeavenly = !!heavenlySource;
+      const zeusSource = a.def.id === "godzeus" ? a : b.def.id === "godzeus" ? b : undefined;
+      if (zeusSource) {
+        // UNPREDICTABLE RHYTHM — a wrathful lightning ball drops on the lane and
+        // detonates over a 900,000m blast (radius scales ×50 per tier; the
+        // shockwave wipes every enemy it catches).
+        const t1 = saveRef.current.awn.godzeus?.[0] || 0;
+        if (t1 > 0 && Math.random() < zeusSource.def.awk1!.chance[t1 - 1]) {
+          const meters = Math.round(900000 * zeusSource.def.awk1!.mult[t1 - 1]);
+          const radius = Math.min(2400, 900 * zeusSource.def.awk1!.mult[t1 - 1]);
+          const doomed = g.enemies.filter((e) => !e.dead);
+          // the ball falls first, then the sky column lands with it
+          g.strikes.push({ x: p.x, y: p.y, life: 0.5, max: 0.5, width: 30, color: "#3fb6ff", core: "#ffffff", seed: Math.random() * 100, forks: 7, top: -H });
+          g.strikes.push({ x: p.x, y: p.y, life: 0.32, max: 0.32, width: 12, color: "#c9ecff", core: "#ffffff", seed: Math.random() * 100, forks: 4, top: -H * 0.55 });
+          ring(p.x, p.y, "#8ceaff", Math.min(1400, radius));
+          shock(p.x, p.y, "#3fb6ff", Math.min(1600, radius * 1.2), 0.95);
+          shock(p.x, p.y, "#ffffff", Math.min(900, radius * 0.7), 0.7);
+          glow(p.x, p.y, "#8ceaff", Math.min(1500, radius * 1.1), 0.8);
+          burst(p.x, p.y, "#c9ecff", 54, 700);
+          sparkAt(p.x, p.y, 44, 620);
+          flash("#1c3d63", 0.6);
+          punch(1, 1);
+          hitStop(0.18);
+          g.shake = saveRef.current.shakeFx ? Math.min(28, g.shake + 26) : 0;
+          addText(p.x, p.y - 104, `LIGHTNING BALL · ${meters.toLocaleString()}m`, "#9fe4ff", 22, true);
+          sfx.doomsday();
+          for (const enemy of doomed) {
+            if (enemy.dead) continue;
+            const ep2 = enemyPos(enemy);
+            if (Math.hypot(ep2.x - p.x, ep2.y - p.y) > radius) continue;
+            g.strikes.push({ x: ep2.x, y: ep2.y, life: 0.6, max: 0.6, width: 20, color: "#8ceaff", seed: Math.random() * 100, forks: 5, top: -240 });
+            enemy.hp = 0;
+            killReward(enemy);
+          }
+        }
+      }
       const demonSource = a.def.id === "demon" ? a : b.def.id === "demon" ? b : undefined;
       const demonPoints = demonSource?.points ?? 0;
       const supervisorSource = a.def.id === "supervisor" ? a : b.def.id === "supervisor" ? b : undefined;
@@ -4665,41 +4801,6 @@ export default function Battle({
           enemy.hp = 0;
           killReward(enemy);
         }
-      }
-
-      // ---------- Honor Emperor: hands the point over, keeps the tower ----------
-      if (a.def.honor || b.def.honor) {
-        const emperor = a.def.honor ? a : b;
-        const heir = a.def.honor ? b : a;
-        const t1 = saveRef.current.awn["honor"]?.[0] || 0;
-        const t2 = saveRef.current.awn["honor"]?.[1] || 0;
-        let gain = 1;
-        if (t1 > 0 && Math.random() < emperor.def.awk1!.chance[t1 - 1]) {
-          gain += emperor.def.awk1!.mult[t1 - 1];
-          addText(p.x, p.y - 74, "HONOR BLESSING", "#fff6c4", 14, true);
-        }
-        heir.points = Math.min(MAX_POINTS, heir.points + gain);
-        heir.cd = 0.2;
-        if (t2 > 0) heir.honorMul += emperor.def.awk2!.mult[t2 - 1];
-        g.towers = g.towers.filter((t) => t.uid !== emperor.uid);
-        if (heir.cell) {
-          const hp = cellCenter(heir.cell.c, heir.cell.r);
-          g.strikes.push({ x: hp.x, y: hp.y, life: 0.5, max: 0.5, width: 14, color: "#ffd76a", seed: Math.random() * 100 });
-          shock(hp.x, hp.y, "#ffd76a", 96, 0.5);
-          glow(hp.x, hp.y, "#ffd76a", 140, 0.5);
-          stars(hp.x, hp.y, "#ffd76a", 16, 80);
-          levelFlourish(hp.x, hp.y, "#ffd76a", "HONORED", 2);
-          addText(hp.x, hp.y - 46, `HONOR +${gain}`, "#ffd76a", 17, true);
-        }
-        sfx.merge();
-        sfx.point();
-        toastRef.current(
-          t2 > 0
-            ? `HONOR — ${heir.def.name} grew to ${heir.points} pts · +${Math.round(heir.honorMul * 100)}% forever`
-            : `HONOR — ${heir.def.name} grew to ${heir.points} pts`,
-          "#ffd76a"
-        );
-        return;
       }
 
       // ---------- the merge roulette ----------
@@ -6437,6 +6538,20 @@ export default function Battle({
           }
           continue;
         }
+        if (t.def.id === "godzeus") {
+          // The divine bolt ignores the whole ATK pipeline: its cadence comes
+          // from zeusCd (2.5s base, −0.01s per menu level) and the standard
+          // per-point buff; points never add extra strikes — every bolt is a
+          // full wipe (or the awakened consume) on a random enemy.
+          t.cd -= dt;
+          if (t.cd <= 0) {
+            const baseCd = Math.max(0.4, (t.def.zeusCd || 2.5) - (t.def.upZeusCd || 0) * (t.menuLv - 1));
+            t.cd = baseCd / (1 + POINT_STEP * t.points);
+            zeusStrike(t);
+            t.shots++;
+          }
+          continue;
+        }
         if (t.def.rapid) {
           t.rapidCool -= dt;
           if (t.rapidCool <= 0 && t.rapidT <= 0) {
@@ -7989,6 +8104,70 @@ export default function Battle({
           ctx.beginPath();
           ctx.arc(0, -10, 3.2 + Math.abs(Math.sin(now / 170)) * 2, 0, Math.PI * 2);
           ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case "godzeus": {
+          // the storm throne: a charged cloud ring with a white bolt crackling
+          // through it and sparks orbiting the crown
+          const breathe = 1 + Math.sin(now / 300) * 0.06;
+          const spin = now / 800;
+          ctx.save();
+          ctx.scale(breathe, breathe);
+          // corona
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          const halo = ctx.createRadialGradient(0, -6, 3, 0, -6, 30);
+          halo.addColorStop(0, "rgba(140,234,255,0.85)");
+          halo.addColorStop(0.55, "rgba(63,182,255,0.3)");
+          halo.addColorStop(1, "transparent");
+          ctx.fillStyle = halo;
+          ctx.beginPath();
+          ctx.arc(0, -6, 30, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          // storm cloud crown
+          ctx.fillStyle = "#0d2138";
+          ctx.strokeStyle = "#8ceaff";
+          ctx.lineWidth = 2.4;
+          ctx.beginPath();
+          ctx.arc(-10, -14, 8, 0, Math.PI * 2);
+          ctx.arc(0, -18, 10, 0, Math.PI * 2);
+          ctx.arc(11, -13, 8, 0, Math.PI * 2);
+          ctx.moveTo(19, -8);
+          ctx.lineTo(-18, -8);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          // the bolt — re-jitters every 90ms
+          const jx = () => (Math.random() - 0.5) * 5;
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = 3;
+          ctx.lineJoin = "miter";
+          ctx.beginPath();
+          ctx.moveTo(2 + jx(), -8);
+          ctx.lineTo(-4 + jx(), 4);
+          ctx.lineTo(2 + jx(), 3);
+          ctx.lineTo(-3 + jx(), 18);
+          ctx.stroke();
+          ctx.strokeStyle = "#8ceaff";
+          ctx.lineWidth = 6;
+          ctx.globalAlpha = 0.45;
+          ctx.beginPath();
+          ctx.moveTo(2, -8);
+          ctx.lineTo(-4, 4);
+          ctx.lineTo(2, 3);
+          ctx.lineTo(-3, 18);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          // orbiting sparks
+          for (let i = 0; i < 3; i++) {
+            const a = spin * (i % 2 ? -1 : 1) + (i * Math.PI * 2) / 3;
+            ctx.fillStyle = i % 2 ? "#ffffff" : "#9fe4ff";
+            ctx.beginPath();
+            ctx.arc(Math.cos(a) * 24, -6 + Math.sin(a) * 9, 2.2, 0, Math.PI * 2);
+            ctx.fill();
+          }
           ctx.restore();
           break;
         }
@@ -9956,6 +10135,11 @@ export default function Battle({
           cloneTower(src, occ);
         } else if (src.def.id === "clone") {
           cloneTower(occ, src);
+        } else if (src.def.honor || occ.def.honor) {
+          // Honor Emperor works on ANY tower sitting on the board — points do
+          // not have to match and the heir's own points never block it (the
+          // Emperor is consumed and the heir grows a point).
+          mergeTowers(src, occ);
         } else if (occ.points >= MAX_POINTS) {
           sfx.error();
           toastRef.current(`${occ.def.name} is already at ${MAX_POINTS} points`, "#ff5c70");

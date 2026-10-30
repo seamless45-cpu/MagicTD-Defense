@@ -220,7 +220,7 @@ export interface SaveData {
   /** one switch that cuts the heaviest effects and caps the arena at 60 FPS */
   superBoost: boolean;
   /** opt-in features that trade frame time for effect; every flag is off by default */
-  experimental: { adaptiveScale: boolean; hqMotionBlur: boolean; richLightning: boolean; particleBoost: boolean; frameHud: boolean };
+  experimental: { adaptiveScale: boolean; hqMotionBlur: boolean; richLightning: boolean; particleBoost: boolean; frameHud: boolean; glassSheen: boolean; cinematicTrans: boolean };
   /** hide the "WAVE N CLEARED" banners, toasts and progress counter in battle */
   hideWaveCleared: boolean;
   /** boost low frequencies on the sound-effects mix */
@@ -229,8 +229,6 @@ export interface SaveData {
   trebleBoost: boolean;
   /** five-band equalizer in decibels (-12..12): 60 · 250 · 1k · 4k · 12k Hz; shapes effects and music */
   eqBands: number[];
-  /** super volume booster: 500% for every sound and the personal music */
-  superVolBoost: boolean;
   /** independent music player settings; the track itself is stored in IndexedDB */
   musicVol: number;
   musicStart: number;
@@ -369,12 +367,11 @@ export function defaultSave(): SaveData {
     motionBlur: false,
     motionBlurAmt: 100,
     superBoost: false,
-    experimental: { adaptiveScale: false, hqMotionBlur: false, richLightning: false, particleBoost: false, frameHud: false },
+    experimental: { adaptiveScale: false, hqMotionBlur: false, richLightning: false, particleBoost: false, frameHud: false, glassSheen: false, cinematicTrans: false },
     hideWaveCleared: false,
     bassBoost: false,
     trebleBoost: false,
     eqBands: [0, 0, 0, 0, 0],
-    superVolBoost: false,
     musicVol: 0.5,
     musicStart: 0,
     musicEnd: 0,
@@ -454,6 +451,8 @@ function normalise(s: SaveData): SaveData {
     richLightning: !!s.experimental?.richLightning,
     particleBoost: !!s.experimental?.particleBoost,
     frameHud: !!s.experimental?.frameHud,
+    glassSheen: !!s.experimental?.glassSheen,
+    cinematicTrans: !!s.experimental?.cinematicTrans,
   };
   s.bassBoost = !!s.bassBoost;
   s.trebleBoost = !!s.trebleBoost;
@@ -467,7 +466,6 @@ function normalise(s: SaveData): SaveData {
   delete legacy.eqBass;
   delete legacy.eqMid;
   delete legacy.eqTreble;
-  s.superVolBoost = !!s.superVolBoost;
   s.musicVol = Math.max(0, Math.min(1, Number.isFinite(s.musicVol) ? s.musicVol : 0.5));
   s.musicStart = Math.max(0, Number.isFinite(s.musicStart) ? s.musicStart : 0);
   s.musicEnd = Math.max(0, Number.isFinite(s.musicEnd) ? s.musicEnd : 0);

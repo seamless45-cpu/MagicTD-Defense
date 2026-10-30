@@ -38,8 +38,6 @@ let enabled = true;
 let volume = 0.7;
 /** volume booster: pushes the master bus up to 300% of the slider value */
 let boosted = false;
-/** super volume booster: 500% of the slider value, for every sound and the music */
-let superBoosted = false;
 let bassBoosted = false;
 let trebleBoosted = false;
 /** five-band equalizer in dB (-12..12) — bands follow EQ_LAYOUT */
@@ -48,8 +46,8 @@ let lastShot = 0;
 
 const MASTER_LEVEL = 0.42;
 
-/** loudness multiplier of the volume switches: super (500%) beats the booster (300%) */
-export const boostMul = () => (superBoosted ? 5 : boosted ? 3 : 1);
+/** loudness multiplier of the volume booster (300%) */
+export const boostMul = () => (boosted ? 3 : 1);
 
 /** the gain the master bus should sit at right now */
 const masterGain = () => (enabled ? MASTER_LEVEL * volume * boostMul() : 0);
@@ -80,17 +78,7 @@ export function setVolumeBoost(on: boolean) {
   pushVolume(0.08);
 }
 
-/**
- * SUPER VOLUME BOOSTER — 500%, for every sound and the personal music. The
- * limiter tightens at this level, but it is still very loud: use with care.
- */
-export function setSuperVolumeBoost(on: boolean) {
-  superBoosted = !!on;
-  pushVolume(0.08);
-}
-
 export const volumeBoosterOn = () => boosted;
-export const superVolumeBoosterOn = () => superBoosted;
 
 /** the per-band gains actually applied: the bass/treble switches add 6 dB to the end bands */
 export function effectiveEq(): number[] {

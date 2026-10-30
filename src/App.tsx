@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { deliverAutoBattleReport, loadSave, mailReady, persistSave, seasonReady, spendHardcorePlay, spendSuperHardcorePlay, tasksReady, weekStr, type SaveData } from "./game/save";
 import { estimateAutoBattle } from "./game/autobattle";
 import { applyFont } from "./game/fonts";
-import { sfx, setSfx, setVolume, setVolumeBoost, setSuperVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost, initAudio } from "./game/audio";
+import { sfx, setSfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost, initAudio } from "./game/audio";
 import { loadSavedMusic, setMusicSettings } from "./game/music";
 import { useUiLanguage } from "./game/i18n";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
@@ -152,11 +152,10 @@ export default function App() {
     setSfx(save.sfx);
     setVolume(save.vol);
     setVolumeBoost(save.volBoost);
-    setSuperVolumeBoost(save.superVolBoost);
     setAudioEQ(save.eqBands);
     setBassBoost(save.bassBoost);
     setTrebleBoost(save.trebleBoost);
-  }, [save.sfx, save.vol, save.volBoost, save.superVolBoost, save.eqBands, save.bassBoost, save.trebleBoost]);
+  }, [save.sfx, save.vol, save.volBoost, save.eqBands, save.bassBoost, save.trebleBoost]);
 
   useEffect(() => {
     setMusicSettings({ volume: save.musicVol, start: save.musicStart, end: save.musicEnd, rate: save.musicRate });
@@ -177,8 +176,10 @@ export default function App() {
     root.dataset.powerSaver = save.powerSaver ? "on" : "off";
     root.dataset.shadows = save.shadowFx ? "on" : "off";
     root.dataset.toggleStyle = save.toggleStyle || "led";
+    root.dataset.glassSheen = save.experimental?.glassSheen ? "on" : "off";
+    root.dataset.cinematic = save.experimental?.cinematicTrans ? "on" : "off";
     root.lang = save.language;
-  }, [save.liquidGlass, save.uiTheme, save.reducedMotion, save.powerSaver, save.shadowFx, save.toggleStyle, save.language]);
+  }, [save.liquidGlass, save.uiTheme, save.reducedMotion, save.powerSaver, save.shadowFx, save.toggleStyle, save.language, save.experimental?.glassSheen, save.experimental?.cinematicTrans]);
 
   // the static splash in index.html is only there until the app has painted
   useEffect(() => {
