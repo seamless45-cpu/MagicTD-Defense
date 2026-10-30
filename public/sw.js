@@ -11,7 +11,7 @@
  * Bump CACHE when the sample files change, otherwise installed PWAs keep the
  * old clips (the filenames are stable).
  */
-const CACHE = "magictd-v9";
+const CACHE = "magictd-v10";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png"];
 
 self.addEventListener("install", (e) => {
