@@ -27,35 +27,23 @@ import {
   claimEventBonus,
   cloneSave,
   grantLoot,
-  claimGuildChest,
-  bumpQuest,
-  claimQuest,
   claimMonthTier,
-  donateToGuild,
-  donationsLeft,
   eventClaimable,
   eventStreakMul,
   monthPoints,
   monthTierClaimed,
   nextEventStreak,
-  guildChestReady,
   heroLevel,
-  joinGuild,
-  leaveGuild,
   levelHeroWithShards,
   lootLines,
   nextDailyStreak,
-  questDone,
-  questProgress,
   resetCountdown,
   upgradeHero,
   awakenHero,
   heroAwkTier,
   weekStr,
-  buyGuildItem,
   claimCompetition,
   compClaimed,
-  GUILD_DONATIONS_PER_DAY,
   UI_THEMES,
 } from "../game/save";
 import { useRecorder } from "../components/ScreenRecorder";
@@ -96,7 +84,6 @@ import {
   CoinIcon,
   Emblem,
   GemIcon,
-  GuildIcon,
   FpsBars,
   HeroIcon,
   Modal,
@@ -118,10 +105,6 @@ import {
   COMPETITION_TIERS,
   DAILY_REWARDS,
   EVENTS,
-  GUILDS,
-  GUILD_DONATIONS,
-  GUILD_QUESTS,
-  GUILD_SHOP,
   HEROES,
   HERO_BY_ID,
   HERO_MAX_LEVEL,
@@ -139,7 +122,6 @@ import {
   monthlyEventForDate,
   monthlyTiers,
   MONTHLY_EVENTS,
-  guildLevel,
   heroCooldown,
   heroPower,
   heroAwakenCost,
@@ -1817,7 +1799,6 @@ function CompetitionPanel({
               <span className="h-7 w-7 shrink-0 rounded-lg" style={{ background: `linear-gradient(135deg, ${leagueFor(r.trophies).color}, #171038)`, border: `1px solid ${leagueFor(r.trophies).color}66` }} />
               <span className="min-w-0 flex-1 truncate text-[13px] font-bold" style={{ color: me ? "#ffd977" : "var(--txt)" }}>
                 {me ? "You" : r.name}
-                <span className="ml-1.5 text-[10.5px] font-semibold text-[var(--dim)]">{r.guild}</span>
               </span>
               <span className="inline-flex shrink-0 items-center gap-1 text-[13px] font-bold" style={{ color: leagueFor(r.trophies).color }}>
                 <TrophyIcon size={15} color={leagueFor(r.trophies).color} />
@@ -1836,579 +1817,6 @@ function CompetitionPanel({
       </div>
       {claim && <RewardClaim data={claim} onClose={() => setClaim(null)} />}
     </>
-  );
-}
-
-// ---------- guild chat ----------
-
-type ChatChannel = "guild" | "world" | "party";
-
-interface ChatMsg {
-  id: number;
-  name: string;
-  text: string;
-  me?: boolean;
-  sys?: boolean;
-  role?: string;
-  react?: string;
-}
-
-const CH_ROLE_COLOR: Record<string, string> = { LEADER: "#ffd977", OFFICER: "#d9c9ff", MEMBER: "#8ceaff" };
-
-const QUICK_CHAT = ["o7", "Need a party", "Boss strategy?", "GG ✨"];
-
-const CHANNELS: [ChatChannel, string, string][] = [
-  ["guild", "GUILD", "#8ceaff"],
-  ["world", "WORLD", "#ffd977"],
-  ["party", "PARTY", "#5cffaa"],
-];
-
-/** one message bubble: avatar, name plate, text, tappable reaction */
-function ChatBubble({ msg, onReact }: { msg: ChatMsg; onReact: () => void }) {
-  if (msg.sys) {
-    return (
-      <div className="chat-sys" data-testid="chat-msg">
-        <span>{msg.text}</span>
-      </div>
-    );
-  }
-  const tint = msg.me ? "#ffd977" : CH_ROLE_COLOR[msg.role || "MEMBER"] || "#8ceaff";
-  return (
-    <div className={`chat-row ${msg.me ? "me" : ""}`} data-testid="chat-msg">
-      <span className="chat-av" style={{ borderColor: tint, color: tint, background: `linear-gradient(140deg, ${tint}33, #0a0e2c)` }}>
-        {msg.name.slice(0, 1).toUpperCase()}
-      </span>
-      <div className="chat-body">
-        <div className="chat-head">
-          <span className="chat-name" style={{ color: tint }}>
-            {msg.name}
-          </span>
-          {msg.role && !msg.me && (
-            <span className="chat-badge" style={{ borderColor: tint + "66", color: tint }}>
-              {msg.role}
-            </span>
-          )}
-          {msg.me && (
-            <span className="chat-badge" style={{ borderColor: "#ffd97766", color: "#ffd977" }}>
-              YOU
-            </span>
-          )}
-        </div>
-        <button className="chat-text" onClick={onReact} title="Tap to react">
-          {msg.text}
-          {msg.react && <span className="chat-react">{msg.react}</span>}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Three persistent local channels, member roles, a same-browser tab presence
- * strip, quick-chat and tap-to-react. Remote multiplayer requires a server.
- */
-function ChatPanel({ guildId, guildName, color }: { guildId: string; guildName: string; color: string }) {
-  const [ch, setCh] = useState<ChatChannel>("guild");
-  const [input, setInput] = useState("");
-  const [reacted, setReacted] = useState(0);
-  const seq = useRef(0);
-  const logRef = useRef<HTMLDivElement>(null);
-  const sessionId = useRef(`local-${Math.random().toString(36).slice(2, 9)}`);
-  const busRef = useRef<BroadcastChannel | null>(null);
-  const lastSeenRef = useRef(new Map<string, number>());
-  const [peerCount, setPeerCount] = useState(0);
-  const [logs, setLogs] = useState<Record<ChatChannel, ChatMsg[]>>(() => {
-    const seed: Record<ChatChannel, ChatMsg[]> = {
-      guild: [
-        { id: ++seq.current, name: "", text: `${guildName} · local room ready · open another game tab to chat`, sys: true },
-      ],
-      world: [{ id: ++seq.current, name: "", text: "World channel · messages are shared across your open game tabs", sys: true }],
-      party: [{ id: ++seq.current, name: "", text: "Party channel · messages are shared across tabs in your guild", sys: true }],
-    };
-    try {
-      const saved = localStorage.getItem(`magictd_chat_${guildId}`);
-      if (!saved) return seed;
-      const parsed = JSON.parse(saved) as Partial<Record<ChatChannel, ChatMsg[]>>;
-      for (const channel of ["guild", "world", "party"] as const) {
-        if (Array.isArray(parsed[channel])) seed[channel] = parsed[channel]!.filter((m) => typeof m?.text === "string").slice(-100);
-      }
-    } catch { /* local chat remains usable when storage is unavailable */ }
-    return seed;
-  });
-
-  // The local link supports live chat between game tabs on this browser. It is
-  // intentionally not advertised as online matchmaking: no remote server exists.
-  useEffect(() => {
-    if (typeof BroadcastChannel === "undefined") return;
-    const bus = new BroadcastChannel("magictd-local-chat-v1");
-    busRef.current = bus;
-    const announce = (online: boolean) => bus.postMessage({ kind: "presence", guildId, senderId: sessionId.current, online, at: Date.now() });
-    const refreshPeers = () => {
-      const now = Date.now();
-      for (const [id, seen] of lastSeenRef.current) if (now - seen > 15000) lastSeenRef.current.delete(id);
-      setPeerCount(lastSeenRef.current.size);
-      announce(true);
-    };
-    bus.onmessage = (event: MessageEvent) => {
-      const payload = event.data as { kind?: string; guildId?: string; senderId?: string; online?: boolean; channel?: ChatChannel; text?: string; at?: number; name?: string };
-      if (!payload || payload.senderId === sessionId.current) return;
-      if (payload.kind === "presence") {
-        if (payload.guildId !== guildId) return;
-        if (payload.online) lastSeenRef.current.set(payload.senderId || "", Date.now());
-        else lastSeenRef.current.delete(payload.senderId || "");
-        setPeerCount(lastSeenRef.current.size);
-        return;
-      }
-      if (payload.kind !== "message" || typeof payload.text !== "string" || !payload.channel) return;
-      if (payload.channel !== "world" && payload.guildId !== guildId) return;
-      const text = payload.text.trim().slice(0, 140);
-      if (!text) return;
-      const msg: ChatMsg = { id: Date.now() + Math.floor(Math.random() * 1000), name: payload.name || `Guest ${payload.senderId?.slice(-4) || ""}`, text, role: "MEMBER" };
-      setLogs((prev) => ({ ...prev, [payload.channel!]: [...prev[payload.channel!], msg].slice(-100) }));
-    };
-    announce(true);
-    const heartbeat = window.setInterval(refreshPeers, 5000);
-    return () => {
-      window.clearInterval(heartbeat);
-      announce(false);
-      bus.close();
-      busRef.current = null;
-    };
-  }, [guildId]);
-
-  useEffect(() => {
-    try { localStorage.setItem(`magictd_chat_${guildId}`, JSON.stringify(logs)); } catch { /* storage quota/private mode */ }
-  }, [logs, guildId]);
-  useEffect(() => {
-    const el = logRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [logs, ch]);
-
-  const send = (raw?: string) => {
-    const text = (raw ?? input).trim().replace(/\s+/g, " ").slice(0, 140);
-    if (!text) return;
-    setInput("");
-    const mine: ChatMsg = { id: Date.now() + Math.floor(Math.random() * 1000), name: "You", text, me: true, role: "MEMBER" };
-    setLogs((prev) => ({ ...prev, [ch]: [...prev[ch], mine].slice(-100) }));
-    busRef.current?.postMessage({ kind: "message", channel: ch, guildId, senderId: sessionId.current, name: `Guest ${sessionId.current.slice(-4)}`, text, at: Date.now() });
-    sfx.chatSend();
-  };
-
-  const react = (id: number) => {
-    const glyphs = ["✨", "🔥", "👑", "💀", "🛡️", "💎"];
-    const g = glyphs[reacted % glyphs.length];
-    setReacted((v) => v + 1);
-    sfx.uiPop();
-    setLogs((l) => ({ ...l, [ch]: l[ch].map((m) => (m.id === id ? { ...m, react: g } : m)) }));
-  };
-
-  const log = logs[ch];
-
-  return (
-    <div className="tile chat-panel p-3" data-testid="guild-chat">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="font-disp text-lg" style={{ color }}>
-          GUILD CHAT
-        </div>
-        <div className="chat-chans ml-auto">
-          {CHANNELS.map(([id, label, c]) => (
-            <button
-              key={id}
-              data-testid={`chat-chan-${id}`}
-              className={`chat-chan ${ch === id ? "on" : ""}`}
-              style={ch === id ? { borderColor: c, color: c, boxShadow: `0 0 14px -4px ${c}` } : undefined}
-              onClick={() => {
-                sfx.uiTab();
-                setCh(id);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="chat-online" data-testid="chat-connection">
-        <span className="chat-online-dot" />
-        <span className="num">{peerCount + 1}</span> local tab{peerCount === 0 ? "" : "s"} · {peerCount ? "LIVE LINK" : "OPEN ANOTHER TAB TO CHAT LIVE"}
-        <span className="ml-auto text-[9px] font-bold tracking-wider text-[var(--dim)]">SAME BROWSER ONLY · NO ONLINE MATCHMAKING SERVER</span>
-      </div>
-
-      <div className="chat-log scroll-thin" ref={logRef} data-testid="chat-log">
-        {log.map((m) => (
-          <ChatBubble key={m.id} msg={m} onReact={() => react(m.id)} />
-        ))}
-
-      </div>
-
-      <div className="chat-quick">
-        {QUICK_CHAT.map((q) => (
-          <button
-            key={q}
-            className="chip chip-btn"
-            onClick={() => {
-              sfx.uiPop();
-              send(q);
-            }}
-          >
-            {q}
-          </button>
-        ))}
-      </div>
-
-      <div className="chat-input">
-        <input
-          className="chat-field"
-          placeholder={`Message ${ch === "guild" ? guildName : ch === "world" ? "the world" : "your party"}…`}
-          value={input}
-          maxLength={140}
-          data-testid="chat-input"
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-        />
-        <button
-          className="btn btn-cyan px-4 py-2 text-[13px]"
-          data-testid="chat-send"
-          disabled={!input.trim()}
-          onClick={() => send()}
-        >
-          Send
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Reworked Guild hall: real membership stored in the save, a contribution
- * level with perks, daily donations, a free daily guild chest, a coin-funded
- * guild store, weekly war objectives and a roster.
- */
-export function Guild({
-  save,
-  mutate,
-  push,
-}: {
-  save: SaveData;
-  mutate: (fn: (s: SaveData) => void) => void;
-  push: (m: string, c?: string) => void;
-}) {
-  const [tab, setTab] = useState<"hall" | "store" | "war">("hall");
-  const [claim, setClaim] = useState<ClaimData | null>(null);
-  const guild = save.guild.id ? GUILDS.find((g) => g.id === save.guild.id) || null : null;
-  const lvl = guildLevel(save.guild.xp);
-
-  const roster = useMemo(() => {
-    if (!guild) return [];
-    const board = competitionBoard(save.trophies, weekStr());
-    return board
-      .filter((r) => r.guild === guild.name || r.name === "You")
-      .slice(0, 12)
-      .map((r) => ({ ...r, me: r.name === "You" }));
-  }, [guild, save.trophies]);
-
-  const doJoin = (id: string) => {
-    const g = GUILDS.find((x) => x.id === id)!;
-    if (save.trophies < g.trophyReq) {
-      sfx.error();
-      return push(`${g.name} requires ${g.trophyReq.toLocaleString()} trophies`, "#ff5c70");
-    }
-    mutate((s) => {
-      joinGuild(s, id);
-    });
-    sfx.gem();
-    push(`Welcome to ${g.name}!`, g.color);
-  };
-
-  const doLeave = () => {
-    mutate((s) => leaveGuild(s));
-    sfx.click();
-    push("You left the guild", "#ff5c70");
-  };
-
-  const doDonate = (id: string) => {
-    const tier = GUILD_DONATIONS.find((d) => d.id === id)!;
-    if (donationsLeft(save) <= 0) {
-      sfx.error();
-      return push("No donations left today — resets at 07:00", "#ff5c70");
-    }
-    if (save.gold < tier.gold) {
-      sfx.error();
-      return push(`Need ${tier.gold.toLocaleString()} gold`, "#ff5c70");
-    }
-    mutate((s) => {
-      donateToGuild(s, tier.gold, tier.xp, tier.coins);
-    });
-    sfx.coin();
-    push(`+${tier.xp} guild XP · +${tier.coins} guild coins`, guild?.color || "#ffd977");
-  };
-
-  const doChest = () => {
-    if (!guildChestReady(save)) {
-      sfx.error();
-      return push("Guild chest already opened today", "#ff5c70");
-    }
-    const draft = cloneSave(save);
-    const loot = claimGuildChest(draft);
-    if (!loot) return;
-    mutate((s) => {
-      if (s.guild.lastChest === todayStr()) return;
-      grantLoot(s, loot);
-      s.guild.lastChest = todayStr();
-      bumpQuest(s, "chests", 1);
-    });
-    sfx.chest();
-    setClaim({ title: "GUILD CHEST", subtitle: guild?.name || "Daily supply drop", color: guild?.color || "#5cffaa", chest: true, lines: lootLines(loot) });
-  };
-
-  const doBuy = (itemId: string) => {
-    const item = GUILD_SHOP.find((i) => i.id === itemId)!;
-    if (save.guild.coins < item.coins) {
-      sfx.error();
-      return push(`Need ${item.coins} guild coins`, "#ff5c70");
-    }
-    mutate((s) => {
-      buyGuildItem(s, item);
-    });
-    sfx.buy();
-    push(`${item.name} redeemed`, item.color);
-  };
-
-  const doQuest = (id: string) => {
-    const q = GUILD_QUESTS.find((x) => x.id === id)!;
-    if (questProgress(save, id) < q.need || questDone(save, id)) {
-      sfx.error();
-      return push("Objective not ready", "#ff5c70");
-    }
-    mutate((s) => {
-      claimQuest(s, id);
-    });
-    sfx.gem();
-    push(`${q.name} complete · +${q.coins} coins`, guild?.color || "#ffd977");
-  };
-
-  if (!guild) {
-    return (
-      <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1" data-testid="guild">
-        <div className="panel p-5">
-          <div className="flex items-center gap-3">
-            <GuildIcon size={38} />
-            <div>
-              <div className="font-disp text-2xl text-[#ffd977]">Guild Hall</div>
-              <p className="text-sm font-semibold text-[var(--dim)]">
-                Join a guild to unlock a daily supply chest, the coin store, weekly war objectives and a shared roster.
-              </p>
-            </div>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {GUILDS.map((g) => {
-            const locked = save.trophies < g.trophyReq;
-            return (
-              <div key={g.id} className="tile p-3" style={{ borderColor: g.color + (locked ? "33" : "88") }}>
-                <div className="flex items-center gap-3">
-                  <div className="grid h-11 w-11 shrink-0 place-items-center rounded-lg" style={{ background: `linear-gradient(135deg, ${g.color}, #171038)`, border: `1px solid ${g.color}` }}>
-                    <span className="font-disp text-[13px] text-[#0a0e2c]">{g.tag}</span>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="font-disp text-lg leading-none" style={{ color: g.color }}>
-                      {g.name}
-                    </div>
-                    <div className="text-[11px] font-bold text-[var(--dim)]">
-                      {g.members} members · {g.power.toLocaleString()} power
-                    </div>
-                  </div>
-                </div>
-                <p className="mt-1.5 text-[12px] font-semibold italic text-[var(--dim)]">“{g.motto}”</p>
-                <div className="mt-1.5 text-[11.5px] font-bold" style={{ color: g.color }}>
-                  PERK · {g.perk}
-                </div>
-                <button className={`btn mt-2 w-full py-2 text-[13px] ${locked ? "" : "btn-gold"}`} disabled={locked} onClick={() => doJoin(g.id)}>
-                  {locked ? `Needs ${g.trophyReq.toLocaleString()} 🏆 (you have ${save.trophies.toLocaleString()})` : "Join Guild"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-        <div className="h-2 shrink-0" />
-      </div>
-    );
-  }
-
-  const left = donationsLeft(save);
-
-  return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1" data-testid="guild">
-      {/* banner */}
-      <div className="panel relative overflow-hidden p-4" style={{ borderColor: guild.color + "99" }}>
-        <div className="absolute inset-0 opacity-25" style={{ background: `radial-gradient(600px 160px at 20% 0%, ${guild.color}77, transparent 70%)` }} />
-        <div className="relative flex flex-wrap items-center gap-3">
-          <div className="grid h-[62px] w-[62px] shrink-0 place-items-center rounded-xl" style={{ background: `linear-gradient(135deg, ${guild.color}, #171038)`, border: `2px solid ${guild.color}` }}>
-            <span className="font-disp text-lg text-[#0a0e2c]">{guild.tag}</span>
-          </div>
-          <div className="min-w-[200px] flex-1">
-            <div className="font-disp text-2xl leading-none" style={{ color: guild.color }}>
-              {guild.name}
-            </div>
-            <div className="text-[11.5px] font-bold text-[var(--dim)]">
-              Guild Lv {lvl.level} · {guild.members} members · PERK: <span style={{ color: guild.color }}>{guild.perk}</span>
-            </div>
-            <div className="bar-track mt-1.5">
-              <div className="bar-fill" style={{ width: `${lvl.need ? Math.min(100, (lvl.into / lvl.need) * 100) : 100}%`, background: `linear-gradient(90deg, ${guild.color}, #fff6)` }} />
-            </div>
-            <div className="mt-0.5 text-[10.5px] font-bold text-[var(--dim)]">
-              {lvl.need ? `${lvl.into.toLocaleString()} / ${lvl.need.toLocaleString()} contribution XP` : "MAX GUILD LEVEL"}
-            </div>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-1">
-            <span className="pill-dark text-[11px]" style={{ borderColor: guild.color + "66", color: guild.color }}>
-              <GuildIcon size={15} color={guild.color} /> <span className="num">{save.guild.coins.toLocaleString()}</span> coins
-            </span>
-            <button className="btn px-3 py-1 text-[11px]" onClick={doLeave}>
-              Leave
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        {(["hall", "store", "war"] as const).map((t) => (
-          <button key={t} className={`tab-btn shrink-0 ${tab === t ? "on" : ""}`} onClick={() => { sfx.uiTab(); setTab(t); }}>
-            {t === "hall" ? "HALL" : t === "store" ? "COIN STORE" : "GUILD WAR"}
-          </button>
-        ))}
-      </div>
-
-      {tab === "hall" && (
-        <>
-          {/* daily chest + donations */}
-          <div className="tile flex flex-wrap items-center gap-3 p-3">
-            <MiniChest color={guild.color} size={46} />
-            <div className="min-w-[180px] flex-1">
-              <div className="font-disp text-lg" style={{ color: guild.color }}>
-                Daily Guild Chest
-              </div>
-              <div className="text-[11.5px] font-semibold text-[var(--dim)]">
-                Chips, gold and fragments from the guild vault. Refills at 07:00 ({resetCountdown()}).
-              </div>
-            </div>
-            <button className="cta-banner shrink-0 px-4 py-2.5 text-[13px]" data-testid="guild-chest" disabled={!guildChestReady(save)} onClick={doChest}>
-              {guildChestReady(save) ? "OPEN CHEST" : "OPENED"}
-            </button>
-          </div>
-
-          <div className="tile p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="font-disp text-lg text-[#ffd977]">Donations</div>
-              <span className="pill-dark text-[11px] text-[var(--dim)]">
-                {left}/{GUILD_DONATIONS_PER_DAY} LEFT TODAY
-              </span>
-            </div>
-            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {GUILD_DONATIONS.map((d) => (
-                <button
-                  key={d.id}
-                  className="tile tile-hover p-2.5 text-left disabled:opacity-50"
-                  disabled={left <= 0 || save.gold < d.gold}
-                  onClick={() => doDonate(d.id)}
-                >
-                  <div className="font-disp text-[15px] text-[var(--txt)]">{d.label}</div>
-                  <div className="mt-0.5 inline-flex items-center gap-1 text-[12px] font-bold text-[#ffd977]">
-                    <CoinIcon size={14} /> {d.gold.toLocaleString()}
-                  </div>
-                  <div className="text-[11px] font-bold text-[#8effc4]">
-                    +{d.xp} XP · +{d.coins} coins
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* roster */}
-          <div className="tile p-3">
-            <div className="font-disp text-lg text-[#ffd977]">Roster</div>
-            <div className="mt-1.5 divide-y divide-[var(--line)]">
-              {roster.map((r) => (
-                <div key={r.name} className={`ladder-row flex items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 ${r.me ? "me" : ""}`}>
-                  <span className="h-7 w-7 shrink-0 rounded-lg" style={{ background: `linear-gradient(135deg, ${leagueFor(r.trophies).color}, #171038)`, border: `1px solid ${leagueFor(r.trophies).color}66` }} />
-                  <span className="min-w-0 flex-1 truncate text-[13px] font-bold" style={{ color: r.me ? "#ffd977" : "var(--txt)" }}>
-                    {r.name}
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-[12.5px] font-bold" style={{ color: leagueFor(r.trophies).color }}>
-                    <TrophyIcon size={14} color={leagueFor(r.trophies).color} />
-                    {r.trophies.toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* chat */}
-          <ChatPanel guildId={guild.id} guildName={guild.name} color={guild.color} />
-        </>
-      )}
-
-      {tab === "store" && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {GUILD_SHOP.map((item) => {
-            const afford = save.guild.coins >= item.coins;
-            return (
-              <div key={item.id} className="tile p-3" style={{ borderColor: item.color + "55" }}>
-                <div className="font-disp text-lg" style={{ color: item.color }}>
-                  {item.name}
-                </div>
-                <p className="mt-0.5 text-[12px] font-semibold text-[var(--dim)]">{item.desc}</p>
-                <button className={`btn mt-2 w-full py-2 text-[13px] ${afford ? "btn-gold" : ""}`} disabled={!afford} onClick={() => doBuy(item.id)}>
-                  <span className="inline-flex items-center gap-1.5">
-                    <GuildIcon size={14} color={afford ? "#0a0e2c" : item.color} /> {item.coins} coins
-                  </span>
-                </button>
-              </div>
-            );
-          })}
-          <div className="sm:col-span-2 text-[11.5px] font-semibold text-[var(--dim)]">
-            Guild coins come from donations, war objectives and the daily chest. You have{" "}
-            <span className="font-bold" style={{ color: guild.color }}>
-              {save.guild.coins.toLocaleString()}
-            </span>
-            .
-          </div>
-        </div>
-      )}
-
-      {tab === "war" && (
-        <div className="flex flex-col gap-2">
-          <div className="text-[11.5px] font-bold tracking-widest text-[var(--dim)]">WEEKLY OBJECTIVES · {weekStr()}</div>
-          {GUILD_QUESTS.map((q) => {
-            const have = questProgress(save, q.id);
-            const done = questDone(save, q.id);
-            const ready = have >= q.need && !done;
-            return (
-              <div key={q.id} className="tile flex flex-wrap items-center gap-3 p-3" style={{ borderColor: ready ? "#5cffaa" : undefined }}>
-                <div className="min-w-[180px] flex-1">
-                  <div className="font-disp text-[16px] text-[var(--txt)]">{q.name}</div>
-                  <div className="text-[11.5px] font-semibold text-[var(--dim)]">
-                    {q.desc} · +{q.xp} XP · +{q.coins} coins
-                  </div>
-                  <div className="bar-track mt-1.5">
-                    <div className="bar-fill" style={{ width: `${Math.min(100, (have / q.need) * 100)}%`, background: ready ? "#5cffaa" : guild.color }} />
-                  </div>
-                  <div className="mt-0.5 text-[10.5px] font-bold text-[var(--dim)]">
-                    {Math.min(have, q.need)} / {q.need}
-                  </div>
-                </div>
-                <button className={`btn shrink-0 px-4 py-2 text-[12px] ${ready ? "btn-gold" : ""}`} disabled={!ready} onClick={() => doQuest(q.id)}>
-                  {done ? "CLAIMED" : ready ? "CLAIM" : "IN PROGRESS"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div className="h-2 shrink-0" />
-      {claim && <RewardClaim data={claim} onClose={() => setClaim(null)} />}
-    </div>
   );
 }
 
@@ -2549,6 +1957,40 @@ export function FullscreenButton({ compact = false }: { compact?: boolean }) {
   );
 }
 
+/** the seven groups of the Settings sheet */
+type SettingsTab = "general" | "audio" | "graphics" | "motion" | "performance" | "experimental" | "data";
+
+const SETTINGS_TABS: { id: SettingsTab; label: string }[] = [
+  { id: "general", label: "General" },
+  { id: "audio", label: "Audio" },
+  { id: "graphics", label: "Graphics" },
+  { id: "motion", label: "Motion" },
+  { id: "performance", label: "Performance" },
+  { id: "experimental", label: "Experimental" },
+  { id: "data", label: "Data" },
+];
+
+/** which tab each switch lives on */
+const TOGGLE_TAB: Record<string, SettingsTab> = {
+  dmgNums: "general",
+  guides: "general",
+  fastWaves: "general",
+  autoSkipBossCut: "general",
+  hideNotifs: "general",
+  hideWaveCleared: "general",
+  sfx: "audio",
+  fx: "graphics",
+  bloomFx: "graphics",
+  shadowFx: "graphics",
+  antiAlias: "graphics",
+  liquidGlass: "graphics",
+  reducedMotion: "motion",
+  perf: "performance",
+  frameInterp: "performance",
+  superBoost: "performance",
+  powerSaver: "performance",
+};
+
 export function SettingsModal({
   save,
   mutate,
@@ -2559,6 +2001,7 @@ export function SettingsModal({
   onClose: () => void;
 }) {
   const rec = useRecorder();
+  const [tab, setTab] = useState<SettingsTab>("general");
   const [diagOpen, setDiagOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -2627,10 +2070,49 @@ export function SettingsModal({
     ["Power Saving Mode", "powerSaver", "Caps the arena at 30 FPS, thins effects and skips interpolation — easier on battery and heat", "power", "#ffd977"],
     ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
   ];
+  const renderToggles = (group: SettingsTab) =>
+    TOGGLES.filter(([, key]) => TOGGLE_TAB[key] === group).map(([label, key, d, icon, color]) => (
+            <div key={key} className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+              <SetIcon name={icon} color={color} />
+              <div className="min-w-0 flex-1">
+                <div className="font-bold">{label}</div>
+                <div className="text-xs font-semibold text-[var(--dim)]">{d}</div>
+              </div>
+              <KnobToggle
+                on={!!save[key]}
+                label={label}
+                testId={`toggle-${key}`}
+                onToggle={() => {
+                  const next = !save[key];
+                  mutate((s) => { s[key] = !s[key] as never; });
+                  if (next) sfx.uiPop();
+                  else sfx.uiOff();
+                }}
+              />
+            </div>
+    ));
+
   return (
     <>
     <Modal onClose={requestClose} closing={closing} w={470}>
       <div className="font-disp text-2xl text-[#ffd977]">Settings</div>
+      <div role="tablist" aria-label="Settings sections" className="mt-3 grid grid-cols-4 gap-1.5 sm:grid-cols-7" data-testid="settings-tabs">
+        {SETTINGS_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            data-testid={`settings-tab-${t.id}`}
+            className={"chip chip-btn justify-center px-1 text-[11px]" + (tab === t.id ? " on" : "")}
+            onClick={() => { sfx.uiTab(); setTab(t.id); }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === "general" && (
+        <div data-testid="settings-panel-general">
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--line)] bg-black/25 p-3">
         <div><div className="font-bold">Language</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose the interface language</div></div>
         <GameSelect
@@ -2653,6 +2135,108 @@ export function SettingsModal({
         </div>
       </div>
 
+      <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div>
+            <div className="font-bold">Interface Theme <span className="text-[10px] font-bold tracking-widest text-[#54f4ff]">· SUPER THEMES</span></div>
+            <div className="text-[11px] font-semibold text-[var(--dim)]">Choose the arena control-room palette</div>
+          </div>
+          <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--dim)]">{save.uiTheme || "moon"}</span>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="radiogroup" aria-label="Interface Theme">
+          {UI_THEMES.map((theme) => {
+            const active = (save.uiTheme || "moon") === theme.id;
+            return (
+              <button
+                key={theme.id}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                data-testid={`ui-theme-${theme.id}`}
+                onClick={() => { sfx.uiTab(); mutate((s) => { s.uiTheme = theme.id; if (theme.id === "super" || theme.id === "liquid") s.liquidGlass = true; }); }}
+                className={`theme-choice rounded-lg border p-1.5 text-left transition ${active ? "is-active" : ""}`}
+                style={{ borderColor: active ? theme.accent : "var(--line)", "--theme-accent": theme.accent } as React.CSSProperties}
+              >
+                <span className="mb-1.5 flex h-5 overflow-hidden rounded-md" aria-hidden="true">
+                  {theme.swatches.map((color) => <i key={color} className="h-full flex-1" style={{ background: color }} />)}
+                </span>
+                <span className="block truncate text-[10px] font-bold">{theme.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+        {renderToggles("general")}
+      {/* FONT VAULT — eighty faces, each tile previews itself. Picking one applies
+          it live (UI + headings) and lazily pulls the Google stylesheet. */}
+      <div className="mt-4 flex items-center gap-2">
+        <div className="text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">FONT</div>
+        <span className="text-[10px] font-bold tracking-[0.18em] text-[var(--dim)]" data-testid="font-count">
+          {FONTS.length} FACES · NOW {((FONT_BY_ID[save.font] || FONT_BY_ID[DEFAULT_FONT]).name || "").toUpperCase()}
+        </span>
+      </div>
+      <div className="mt-1.5 rounded-lg border border-[var(--line)] bg-black/30 p-2" data-testid="font-grid">
+        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
+          {FONTS.map((f) => {
+            const on = (save.font || DEFAULT_FONT) === f.id;
+            return (
+              <button
+                key={f.id}
+                data-testid={`font-${f.id}`}
+                data-font={f.id}
+                title={`${f.name} · ${f.group}`}
+                className={"font-tile" + (on ? " on" : "")}
+                style={{ fontFamily: f.stack }}
+                onClick={() => {
+                  sfx.uiTab();
+                  applyFont(f.id);
+                  mutate((s) => {
+                    s.font = f.id;
+                  });
+                }}
+              >
+                <span className="font-tile-sample">{f.name}</span>
+                <span className="font-tile-group" style={{ fontFamily: "var(--font-ui, inherit)" }}>
+                  {f.group}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">APP</div>
+      <div className="mt-1.5 flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+        <SetIcon name="download" color="#ffd977" />
+        <div className="min-w-0 flex-1">
+          <div className="font-bold">Install App</div>
+          <div className="text-xs font-semibold text-[var(--dim)]">
+            {installed
+              ? "Running as an installed app — nice"
+              : promptEvent
+                ? "Add MoonLightTD to your home screen and play offline"
+                : "Use your browser menu → Add to Home Screen"}
+          </div>
+        </div>
+        <button
+          data-testid="install-app"
+          className="btn btn-cyan shrink-0 px-4 py-1.5 text-sm"
+          disabled={installed || !promptEvent}
+          onClick={() => {
+            if (installed || !promptEvent) return;
+            sfx.click();
+            setInstallClosing(false);
+            setInstallOpen(true);
+          }}
+        >
+          {installed ? "Installed" : "Install"}
+        </button>
+      </div>
+
+        </div>
+      )}
+      {tab === "audio" && (
+        <div data-testid="settings-panel-audio">
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">AUDIO</div>
       <div className="row-card mt-1.5">
         <SetIcon name="volume" color="#8ceaff" />
@@ -2789,6 +2373,84 @@ export function SettingsModal({
         </div>
       </div>
 
+        {renderToggles("audio")}
+        </div>
+      )}
+      {tab === "graphics" && (
+        <div data-testid="settings-panel-graphics">
+          <div className="mt-1.5 space-y-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="fxq-row">
+          <SetIcon name="bolt" color="#ffd23f" />
+          <div className="min-w-[130px] flex-1">
+            <div className="font-bold">Effect Quality</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">How heavy crits and explosions get — the game also eases off on its own when frames run long</div>
+          </div>
+          <div className="flex w-full flex-wrap gap-1.5 sm:w-auto">
+            {([0, 1, 2] as const).map((lvl) => (
+              <button
+                key={lvl}
+                data-testid={"fxq-" + lvl}
+                className={"chip chip-btn" + (save.fxq === lvl ? " on" : "")}
+                onClick={() => {
+                  sfx.uiTab();
+                  mutate((s) => {
+                    s.fxq = lvl;
+                  });
+                }}
+              >
+                {lvl === 0 ? "ALL" : lvl === 1 ? "REDUCED" : "MINIMAL"}
+              </button>
+            ))}
+          </div>
+        </div>
+            {renderToggles("graphics")}
+          </div>
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
+      <div className="row-card mt-1.5" data-testid="pixel-ratio-row">
+        <SetIcon name="perf" color="#54f4ff" />
+        <div className="min-w-0 flex-1"><div className="font-bold">Pixel Ratio</div><div className="text-[11px] font-semibold text-[var(--dim)]">Canvas render resolution · {save.pixelRatio.toFixed(2)}× · 0.25 = fastest, 2.00 = sharpest</div></div>
+        <input className="w-36" type="range" min="0.25" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
+      </div>
+      <div className="row-card mt-1.5" data-testid="upscale-row">
+        <SetIcon name="perf" color="#54f4ff" />
+        <div className="min-w-0 flex-1"><div className="font-bold">Upscale</div><div className="text-[11px] font-semibold text-[var(--dim)]">Presents the render at screen size · Sharp adds an edge-restoring GPU pass</div></div>
+        <GameSelect
+          className="shrink-0"
+          triggerClassName="w-36 rounded-lg border border-[var(--line)] bg-black/40 px-2 py-1 text-left font-bold text-[var(--txt)]"
+          value={save.upscale}
+          ariaLabel="Upscale"
+          options={UPSCALE_OPTIONS}
+          onChange={(v) => mutate((st) => { st.upscale = v as "native" | "smooth" | "sharp"; })}
+        />
+      </div>
+      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">DISPLAY</div>
+      <div className="row-card mt-1.5">
+        <SetIcon name="expand" color="#8ceaff" />
+        <div className="min-w-0 flex-1">
+          <div className="font-bold">Fullscreen</div>
+          <div className="text-xs font-semibold text-[var(--dim)]">
+            {fullscreenSupported()
+              ? fs.on
+                ? "The arena is running edge to edge"
+                : "Fill the whole screen — no browser chrome, no accidental swipes"
+              : "This browser only allows fullscreen from the video player"}
+          </div>
+        </div>
+        <KnobToggle
+          on={fs.on}
+          label="Fullscreen"
+          testId="toggle-fullscreen"
+          onToggle={() => {
+            sfx.click();
+            void fs.toggle();
+          }}
+        />
+      </div>
+
+        </div>
+      )}
+      {tab === "motion" && (
+        <div data-testid="settings-panel-motion">
       {/* CAMERA SHAKE — its own section: the on/off switch, the high-frequency
           intensity slider, and the trail smear that only runs while shaking. */}
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]" data-testid="camera-shake-section">CAMERA SHAKE</div>
@@ -2934,24 +2596,57 @@ export function SettingsModal({
         )}
       </div>
 
-      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">OPTIONS</div>
-      <div className="row-card mt-1.5" data-testid="pixel-ratio-row">
-        <SetIcon name="perf" color="#54f4ff" />
-        <div className="min-w-0 flex-1"><div className="font-bold">Pixel Ratio</div><div className="text-[11px] font-semibold text-[var(--dim)]">Canvas render resolution · {save.pixelRatio.toFixed(2)}× · 0.25 = fastest, 2.00 = sharpest</div></div>
-        <input className="w-36" type="range" min="0.25" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
-      </div>
-      <div className="row-card mt-1.5" data-testid="upscale-row">
-        <SetIcon name="perf" color="#54f4ff" />
-        <div className="min-w-0 flex-1"><div className="font-bold">Upscale</div><div className="text-[11px] font-semibold text-[var(--dim)]">Presents the render at screen size · Sharp adds an edge-restoring GPU pass</div></div>
-        <GameSelect
-          className="shrink-0"
-          triggerClassName="w-36 rounded-lg border border-[var(--line)] bg-black/40 px-2 py-1 text-left font-bold text-[var(--txt)]"
-          value={save.upscale}
-          ariaLabel="Upscale"
-          options={UPSCALE_OPTIONS}
-          onChange={(v) => mutate((st) => { st.upscale = v as "native" | "smooth" | "sharp"; })}
-        />
-      </div>
+        <div className="mt-1.5 space-y-3">
+          {renderToggles("motion")}
+        </div>
+        </div>
+      )}
+      {tab === "performance" && (
+        <div data-testid="settings-panel-performance">
+          <div className="mt-1.5 space-y-3">
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="max-fps-row">
+          <SetIcon name="fps" color="#5cffaa" />
+          <div className="min-w-[130px] flex-1">
+            <div className="font-bold">Max Frame Rate</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Caps how hard the renderer works</div>
+          </div>
+          <div className="flex w-full flex-wrap gap-1.5 sm:w-auto">
+            {[0, 30, 60, 120, 144, 240].map((fps) => (
+              <button
+                key={fps}
+                data-testid={"fps-" + fps}
+                title={fps === 0 ? "Unlimited" : fps + " FPS"}
+                className={"chip chip-btn chip-ico" + (save.maxFps === fps ? " on" : "")}
+                onClick={() => {
+                  sfx.uiTab();
+                  mutate((s) => {
+                    s.maxFps = fps;
+                  });
+                }}
+              >
+                <FpsBars fps={fps} active={save.maxFps === fps} />
+                {fps === 0 ? "" : fps}
+              </button>
+            ))}
+          </div>
+        </div>
+            {renderToggles("performance")}
+        <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
+          <div className="min-w-0 flex-1"><div className="font-bold">Interpolation Method</div><div className="text-xs font-semibold text-[var(--dim)]">Hermite uses velocity-aware, monotonic easing; Smoothstep or Linear remain available.</div></div>
+          <GameSelect
+            className="shrink-0"
+            triggerClassName="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-left text-xs text-[var(--txt)]"
+            value={save.interpolationMethod}
+            ariaLabel="Interpolation Method"
+            options={INTERP_METHODS.map((m) => ({ value: m, label: INTERP_LABELS[m] }))}
+            onChange={(v) => mutate((st) => { st.interpolationMethod = (INTERP_METHODS as readonly string[]).includes(v) ? (v as InterpMethod) : "smoothstep"; })}
+          />
+        </div>
+          </div>
+        </div>
+      )}
+      {tab === "experimental" && (
+        <div data-testid="settings-panel-experimental">
       <div className="row-card mt-1.5 border-[#f057ff55]" style={{ display: "block" }} data-testid="experimental-section">
         <div className="mb-2 text-[12px] font-bold tracking-[0.25em] text-[#f057ff]">EXPERIMENTAL</div>
         <div className="mb-2 text-[11px] font-semibold text-[var(--dim)]">Opt-in features that may cost frame time. Everything here is off by default.</div>
@@ -3082,121 +2777,10 @@ export function SettingsModal({
           />
         </div>
       </div>
-      <div className="theme-picker mt-1.5 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="ui-theme-picker">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div>
-            <div className="font-bold">Interface Theme <span className="text-[10px] font-bold tracking-widest text-[#54f4ff]">· SUPER THEMES</span></div>
-            <div className="text-[11px] font-semibold text-[var(--dim)]">Choose the arena control-room palette</div>
-          </div>
-          <span className="rounded-full border border-[var(--line)] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[var(--dim)]">{save.uiTheme || "moon"}</span>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5" role="radiogroup" aria-label="Interface Theme">
-          {UI_THEMES.map((theme) => {
-            const active = (save.uiTheme || "moon") === theme.id;
-            return (
-              <button
-                key={theme.id}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                data-testid={`ui-theme-${theme.id}`}
-                onClick={() => { sfx.uiTab(); mutate((s) => { s.uiTheme = theme.id; if (theme.id === "super" || theme.id === "liquid") s.liquidGlass = true; }); }}
-                className={`theme-choice rounded-lg border p-1.5 text-left transition ${active ? "is-active" : ""}`}
-                style={{ borderColor: active ? theme.accent : "var(--line)", "--theme-accent": theme.accent } as React.CSSProperties}
-              >
-                <span className="mb-1.5 flex h-5 overflow-hidden rounded-md" aria-hidden="true">
-                  {theme.swatches.map((color) => <i key={color} className="h-full flex-1" style={{ background: color }} />)}
-                </span>
-                <span className="block truncate text-[10px] font-bold">{theme.name}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="mt-1.5 space-y-3">
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="max-fps-row">
-          <SetIcon name="fps" color="#5cffaa" />
-          <div className="min-w-[130px] flex-1">
-            <div className="font-bold">Max Frame Rate</div>
-            <div className="text-xs font-semibold text-[var(--dim)]">Caps how hard the renderer works</div>
-          </div>
-          <div className="flex w-full flex-wrap gap-1.5 sm:w-auto">
-            {[0, 30, 60, 120, 144, 240].map((fps) => (
-              <button
-                key={fps}
-                data-testid={"fps-" + fps}
-                title={fps === 0 ? "Unlimited" : fps + " FPS"}
-                className={"chip chip-btn chip-ico" + (save.maxFps === fps ? " on" : "")}
-                onClick={() => {
-                  sfx.uiTab();
-                  mutate((s) => {
-                    s.maxFps = fps;
-                  });
-                }}
-              >
-                <FpsBars fps={fps} active={save.maxFps === fps} />
-                {fps === 0 ? "" : fps}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="fxq-row">
-          <SetIcon name="bolt" color="#ffd23f" />
-          <div className="min-w-[130px] flex-1">
-            <div className="font-bold">Effect Quality</div>
-            <div className="text-xs font-semibold text-[var(--dim)]">How heavy crits and explosions get — the game also eases off on its own when frames run long</div>
-          </div>
-          <div className="flex w-full flex-wrap gap-1.5 sm:w-auto">
-            {([0, 1, 2] as const).map((lvl) => (
-              <button
-                key={lvl}
-                data-testid={"fxq-" + lvl}
-                className={"chip chip-btn" + (save.fxq === lvl ? " on" : "")}
-                onClick={() => {
-                  sfx.uiTab();
-                  mutate((s) => {
-                    s.fxq = lvl;
-                  });
-                }}
-              >
-                {lvl === 0 ? "ALL" : lvl === 1 ? "REDUCED" : "MINIMAL"}
-              </button>
-            ))}
-          </div>
-        </div>
-        {TOGGLES.map(([label, key, d, icon, color]) => (
-          <div key={key} className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-            <SetIcon name={icon} color={color} />
-            <div className="min-w-0 flex-1">
-              <div className="font-bold">{label}</div>
-              <div className="text-xs font-semibold text-[var(--dim)]">{d}</div>
-            </div>
-            <KnobToggle
-              on={!!save[key]}
-              label={label}
-              testId={`toggle-${key}`}
-              onToggle={() => {
-                const next = !save[key];
-                mutate((s) => { s[key] = !s[key] as never; });
-                if (next) sfx.uiPop();
-                else sfx.uiOff();
-              }}
-            />
-          </div>
-        ))}
-        <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-          <div className="min-w-0 flex-1"><div className="font-bold">Interpolation Method</div><div className="text-xs font-semibold text-[var(--dim)]">Hermite uses velocity-aware, monotonic easing; Smoothstep or Linear remain available.</div></div>
-          <GameSelect
-            className="shrink-0"
-            triggerClassName="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-left text-xs text-[var(--txt)]"
-            value={save.interpolationMethod}
-            ariaLabel="Interpolation Method"
-            options={INTERP_METHODS.map((m) => ({ value: m, label: INTERP_LABELS[m] }))}
-            onChange={(v) => mutate((st) => { st.interpolationMethod = (INTERP_METHODS as readonly string[]).includes(v) ? (v as InterpMethod) : "smoothstep"; })}
-          />
-        </div>
-      </div>
-
+      )}
+      {tab === "data" && (
+        <div data-testid="settings-panel-data">
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">SCREEN RECORDING</div>
       <div className="mt-1.5 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="screen-recording-row">
         <div className="min-w-[160px] flex-1">
@@ -3215,96 +2799,6 @@ export function SettingsModal({
             ● START RECORDING
           </button>
         )}
-      </div>
-
-      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">APP</div>
-      <div className="mt-1.5 flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
-        <SetIcon name="download" color="#ffd977" />
-        <div className="min-w-0 flex-1">
-          <div className="font-bold">Install App</div>
-          <div className="text-xs font-semibold text-[var(--dim)]">
-            {installed
-              ? "Running as an installed app — nice"
-              : promptEvent
-                ? "Add MoonLightTD to your home screen and play offline"
-                : "Use your browser menu → Add to Home Screen"}
-          </div>
-        </div>
-        <button
-          data-testid="install-app"
-          className="btn btn-cyan shrink-0 px-4 py-1.5 text-sm"
-          disabled={installed || !promptEvent}
-          onClick={() => {
-            if (installed || !promptEvent) return;
-            sfx.click();
-            setInstallClosing(false);
-            setInstallOpen(true);
-          }}
-        >
-          {installed ? "Installed" : "Install"}
-        </button>
-      </div>
-
-      <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">DISPLAY</div>
-      <div className="row-card mt-1.5">
-        <SetIcon name="expand" color="#8ceaff" />
-        <div className="min-w-0 flex-1">
-          <div className="font-bold">Fullscreen</div>
-          <div className="text-xs font-semibold text-[var(--dim)]">
-            {fullscreenSupported()
-              ? fs.on
-                ? "The arena is running edge to edge"
-                : "Fill the whole screen — no browser chrome, no accidental swipes"
-              : "This browser only allows fullscreen from the video player"}
-          </div>
-        </div>
-        <KnobToggle
-          on={fs.on}
-          label="Fullscreen"
-          testId="toggle-fullscreen"
-          onToggle={() => {
-            sfx.click();
-            void fs.toggle();
-          }}
-        />
-      </div>
-
-      {/* FONT VAULT — eighty faces, each tile previews itself. Picking one applies
-          it live (UI + headings) and lazily pulls the Google stylesheet. */}
-      <div className="mt-4 flex items-center gap-2">
-        <div className="text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">FONT</div>
-        <span className="text-[10px] font-bold tracking-[0.18em] text-[var(--dim)]" data-testid="font-count">
-          {FONTS.length} FACES · NOW {((FONT_BY_ID[save.font] || FONT_BY_ID[DEFAULT_FONT]).name || "").toUpperCase()}
-        </span>
-      </div>
-      <div className="mt-1.5 rounded-lg border border-[var(--line)] bg-black/30 p-2" data-testid="font-grid">
-        <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
-          {FONTS.map((f) => {
-            const on = (save.font || DEFAULT_FONT) === f.id;
-            return (
-              <button
-                key={f.id}
-                data-testid={`font-${f.id}`}
-                data-font={f.id}
-                title={`${f.name} · ${f.group}`}
-                className={"font-tile" + (on ? " on" : "")}
-                style={{ fontFamily: f.stack }}
-                onClick={() => {
-                  sfx.uiTab();
-                  applyFont(f.id);
-                  mutate((s) => {
-                    s.font = f.id;
-                  });
-                }}
-              >
-                <span className="font-tile-sample">{f.name}</span>
-                <span className="font-tile-group" style={{ fontFamily: "var(--font-ui, inherit)" }}>
-                  {f.group}
-                </span>
-              </button>
-            );
-          })}
-        </div>
       </div>
 
       <div className="mt-4 text-[12px] font-bold tracking-[0.25em] text-[var(--cyan)]">SAVE DATA</div>
@@ -3430,6 +2924,8 @@ export function SettingsModal({
           )}
         </div>
       </div>
+        </div>
+      )}
       <button className="btn mt-4 w-full py-2" onClick={() => { sfx.click(); requestClose(); }}>
         Close
       </button>

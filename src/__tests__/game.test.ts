@@ -969,7 +969,7 @@ describe("bosses", () => {
   });
 });
 
-// ---------- 7 A.M. reset, events, trophies, chests, guild & competition ----------
+// ---------- 7 A.M. reset, events, trophies, chests & competition ----------
 import {
   CHESTS,
   CHEST_BY_ID,
@@ -977,10 +977,6 @@ import {
   COMPETITION_TIERS,
   DAILY_RESET_HOUR,
   EVENTS,
-  GUILDS,
-  GUILD_DONATIONS,
-  GUILD_QUESTS,
-  GUILD_SHOP,
   LEAGUES,
   TROPHY_LOSS,
   TROPHY_WIN,
@@ -993,7 +989,6 @@ import {
   GEM_RUSH_SPEED_MUL,
   GEM_RUSH_NORMAL_GEMS,
   gemRushKillGems,
-  guildLevel,
   leagueFor,
   nextLeague,
   trophyDelta,
@@ -1004,28 +999,18 @@ import {
   addChips,
   addTrophies,
   applyBattleTrophies,
-  buyGuildItem,
   claimCompetition,
   claimEventBonus,
-  claimGuildChest,
-  claimQuest,
   cloneSave,
   compClaimed,
-  donateToGuild,
-  donationsLeft,
   eventClaimable,
   grantLoot,
-  guildChestReady,
-  joinGuild,
-  leaveGuild,
   levelHeroWithShards,
   lootLines,
   msUntilReset,
-  questDone,
   resetCountdown,
   rollChest,
   weekStr,
-  GUILD_DONATIONS_PER_DAY,
 } from "../game/save";
 import { HERO_SHARD_COST } from "../game/data";
 
@@ -1285,78 +1270,6 @@ describe("support and heroes chests", () => {
   });
 });
 
-describe("guild", () => {
-  it("gates guilds behind a trophy requirement", () => {
-    const s = defaultSave();
-    expect(joinGuild(s, "null")).toBe(false); // needs 1800 trophies
-    expect(joinGuild(s, "vanguard")).toBe(true);
-    expect(s.guild.id).toBe("vanguard");
-    leaveGuild(s);
-    expect(s.guild.id).toBeNull();
-    GUILDS.forEach((g) => expect(g.perk.length).toBeGreaterThan(0));
-  });
-
-  it("limits donations per game-day and converts them to xp and coins", () => {
-    const s = defaultSave();
-    joinGuild(s, "vanguard");
-    s.gold = 100000;
-    const tier = GUILD_DONATIONS[0];
-    expect(donationsLeft(s)).toBe(GUILD_DONATIONS_PER_DAY);
-    for (let i = 0; i < GUILD_DONATIONS_PER_DAY; i++) expect(donateToGuild(s, tier.gold, tier.xp, tier.coins)).toBe(true);
-    expect(donationsLeft(s)).toBe(0);
-    expect(donateToGuild(s, tier.gold, tier.xp, tier.coins)).toBe(false);
-    expect(s.guild.xp).toBe(tier.xp * GUILD_DONATIONS_PER_DAY);
-    expect(s.guild.coins).toBe(tier.coins * GUILD_DONATIONS_PER_DAY);
-  });
-
-  it("levels the guild from contribution xp", () => {
-    expect(guildLevel(0).level).toBe(1);
-    expect(guildLevel(100000).level).toBeLessThanOrEqual(20);
-    const a = guildLevel(2000);
-    expect(a.level).toBeGreaterThan(1);
-    expect(a.into).toBeLessThan(a.need || Infinity);
-  });
-
-  it("opens one guild chest per day and gives Null Sigil extra chips", () => {
-    const s = defaultSave();
-    joinGuild(s, "vanguard");
-    expect(guildChestReady(s)).toBe(true);
-    expect(claimGuildChest(s)).not.toBeNull();
-    expect(guildChestReady(s)).toBe(false);
-    expect(claimGuildChest(s)).toBeNull();
-
-    const n = defaultSave();
-    n.trophies = 5000;
-    joinGuild(n, "null");
-    const loot = claimGuildChest(n)!;
-    expect((loot.chips.basic || 0)).toBeGreaterThanOrEqual(2);
-  });
-
-  it("spends guild coins in the coin store", () => {
-    const s = defaultSave();
-    joinGuild(s, "vanguard");
-    const item = GUILD_SHOP[0];
-    expect(buyGuildItem(s, item)).toBe(false); // broke
-    s.guild.coins = item.coins;
-    const gold = s.gold;
-    expect(buyGuildItem(s, item)).toBe(true);
-    expect(s.gold).toBe(gold + item.grant.gold!);
-    expect(s.guild.coins).toBe(0);
-  });
-
-  it("claims weekly war objectives only once they are complete", () => {
-    const s = defaultSave();
-    joinGuild(s, "vanguard");
-    const q = GUILD_QUESTS.find((x) => x.id === "wins")!;
-    expect(claimQuest(s, q.id)).toBe(false);
-    s.guild.quests.wins = q.need;
-    expect(claimQuest(s, q.id)).toBe(true);
-    expect(questDone(s, q.id)).toBe(true);
-    expect(claimQuest(s, q.id)).toBe(false);
-    expect(s.guild.coins).toBe(q.coins);
-  });
-});
-
 describe("reworked enemies", () => {
   it("gives every enemy a full palette and a distinct silhouette", () => {
     const shapes = new Set<EnemyShape>();
@@ -1430,7 +1343,8 @@ describe("save migration", () => {
     const s = importSave(JSON.stringify({ gold: 10, levels: { arrow: 1 }, lineup: ["arrow"] }));
     expect(s.chips).toEqual({ basic: 0, advanced: 0, elite: 0 });
     expect(s.trophies).toBe(0);
-    expect(s.guild.id).toBeNull();
+    // the removed guild feature leaves no state behind
+    expect((s as unknown as { guild?: unknown }).guild).toBeUndefined();
     expect(s.heroShards).toEqual({});
     expect(s.compClaimed).toEqual([]);
   });
@@ -1439,9 +1353,7 @@ describe("save migration", () => {
     const s = defaultSave();
     const c = cloneSave(s);
     c.chips.basic = 9;
-    c.guild.coins = 5;
     expect(s.chips.basic).toBe(0);
-    expect(s.guild.coins).toBe(0);
   });
 });
 

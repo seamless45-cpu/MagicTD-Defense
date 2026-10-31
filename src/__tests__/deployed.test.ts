@@ -128,7 +128,7 @@ describe("published build (index.html)", () => {
       "Power Saving Mode",
       "CALL WAVE EARLY",
       "Rift Overlord",
-      // 7 A.M. daily rewards, events, trophies, new chests and the guild rework
+      // 7 A.M. daily rewards, events, trophies and new chests
       "Daily Rewards",
       "Luck Hunting",
       "Chest Box",
@@ -139,8 +139,6 @@ describe("published build (index.html)", () => {
       "Support Chest",
       "Heroes Chest",
       "Advanced Chip Module",
-      "Guild Hall",
-      "COIN STORE",
       "STANDINGS",
       // mythic arsenal II, the staged results screen and the Tone.js audio
       "Nova Cannon",

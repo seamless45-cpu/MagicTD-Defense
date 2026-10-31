@@ -8,7 +8,7 @@ import { useUiLanguage } from "./game/i18n";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
 import { ScreenStage } from "./components/ScreenStage";
 import { RecordingPill } from "./components/ScreenRecorder";
-import { LaunchIntro, LoadingScreen, Home, Specials, Guild, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
+import { LaunchIntro, LoadingScreen, Home, Specials, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
 import Towers from "./screens/Towers";
 import Battle from "./screens/Battle";
@@ -22,7 +22,6 @@ type Screen =
   | "shop"
   | "towers"
   | "specials"
-  | "guild"
   | "mail"
   | "season"
   | "battle"
@@ -101,18 +100,6 @@ const NAV: { id: Screen; label: string; icon: React.ReactNode }[] = [
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 2l2.4 5.2L20 8l-4 4 1 6-5-3-5 3 1-6-4-4 5.6-.8z" />
-      </svg>
-    ),
-  },
-  {
-    id: "guild",
-    label: "Guild",
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="9" cy="8" r="3.2" />
-        <path d="M3 20c0-3.3 2.7-5 6-5s6 1.7 6 5" />
-        <circle cx="17.5" cy="9.5" r="2.4" />
-        <path d="M16 15.2c3 .2 5 1.8 5 4.3" />
       </svg>
     ),
   },
@@ -339,7 +326,6 @@ export default function App() {
         {screen === "shop" && <Shop save={save} mutate={mutate} push={push} />}
         {screen === "towers" && <Towers save={save} mutate={mutate} push={push} />}
         {screen === "specials" && <Specials save={save} mutate={mutate} push={push} onGemRush={() => setScreen("gemrush")} />}
-          {screen === "guild" && <Guild save={save} mutate={mutate} push={push} />}
           {screen === "mail" && <Mail save={save} mutate={mutate} push={push} />}
           {screen === "season" && <Season save={save} mutate={mutate} push={push} />}
         </div>

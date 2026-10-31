@@ -650,6 +650,21 @@ function chestLootCue(n: number): SampleCue {
 /** level of the sample bus at volume 100%, before the player's volume slider */
 const SAMPLE_MASTER = 0.56;
 
+/** the highest peak a single normalised clip may reach before its layer gain */
+const MAX_CLIP_PEAK = 0.9;
+
+/**
+ * Transparent soft ceiling for the master bus: a straight wire up to 0.8, then
+ * a smooth tanh knee that never exceeds 1.0. Unlike a full-scale tanh it leaves
+ * every normal-level signal untouched, so it cannot add harmonics to the mix.
+ */
+export function softCeiling(x: number): number {
+  const a = Math.abs(x);
+  if (a <= 0.8) return x;
+  const y = 0.8 + 0.2 * Math.tanh((a - 0.8) / 0.2);
+  return x < 0 ? -y : y;
+}
+
 type AudioContextCtor = new () => AudioContext;
 
 /**
@@ -841,7 +856,11 @@ function measureLoudness(buf: AudioBuffer): number {
     const peakGain = 0.92 / peak;
     const rmsGain = rms > 0.0001 ? 0.16 / rms : 1;
     const gain = Math.pow(peakGain, 0.7) * Math.pow(Math.min(rmsGain, 8), 0.3);
-    return Math.max(0.2, Math.min(8, gain));
+    // HEADROOM CEILING: a sparse clip (quiet RMS, peak already near full scale)
+    // used to be boosted past 0.9 — then several layers stacked into the master
+    // and got squashed into audible distortion. The boost may never push the
+    // clip's own peak above MAX_CLIP_PEAK.
+    return Math.max(0.2, Math.min(8, gain, MAX_CLIP_PEAK / peak));
   } catch {
     return 1;
   }
@@ -944,19 +963,18 @@ export function initSamples(fallback?: () => void): boolean {
     lowCut.connect(eq[0]);
     for (let i = 1; i < eq.length; i++) eq[i - 1].connect(eq[i]);
     musicIn.connect(lowCut);
-    // ---- master saturation: a soft tube-ish curve before the limiter ----
-    // It adds the harmonic density that makes layered samples read as "produced"
-    // instead of "triggered", and it acts as a gentle safety ceiling too.
+    // ---- master ceiling: transparent below 0.8, a soft knee above ----
+    // The old full-scale tanh (k = 1.8) nearly doubled quiet signals and bent
+    // every layer, which read as fuzz. This keeps the bus linear and only
+    // rounds off true overs before the compressor and limiter.
     let sat: WaveShaperNode | null = null;
     try {
       sat = ctx.createWaveShaper();
       const n = 2048;
       const curve = new Float32Array(n);
-      const k = 1.8;
-      const norm = Math.tanh(k);
       for (let i = 0; i < n; i++) {
         const x = (i / (n - 1)) * 2 - 1;
-        curve[i] = Math.tanh(k * x) / norm;
+        curve[i] = softCeiling(x);
       }
       sat.curve = curve;
       sat.oversample = "2x";
