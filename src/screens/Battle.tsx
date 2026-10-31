@@ -493,6 +493,31 @@ interface Bolt {
   /** jitter multiplier (1 = standard) */
   jit?: number;
 }
+/**
+ * Bespoke divine lightning (God of Zeus + Thunder God): a multi-stroke trunk
+ * that re-jitters on its own fast rhythm like a real strike, with recursive
+ * branch segments flickering independently. A much wider jag envelope and a
+ * cooling white core keep it visually distinct from the shared combat bolts.
+ */
+interface Arc {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  n: number;
+  off: Float32Array;
+  lastJit: number;
+  /** ms between re-strokes of the trunk */
+  pace: number;
+  /** branch polylines (flat x/y pairs) peeled off the trunk */
+  br: number[][];
+  lastBr: number;
+  life: number;
+  max: number;
+  w: number;
+  color: string;
+}
+
 interface Part {
   x: number;
   y: number;
@@ -618,10 +643,13 @@ interface G {
   towers: BT[];
   projs: Proj[];
   bolts: Bolt[];
+  arcs: Arc[];
   parts: Part[];
   texts: FT[];
   spawnQ: { type: number; at: number }[];
   heroCd: number;
+  /** God of Zeus passive: shared lightning-hit counter for Upcoming Power */
+  zeusHits: number;
   kills: number;
   /** boss cutscene: name + how long the intro card still runs */
   cut: { type: number; name: string; sub: string; t: number; total: number; locked?: boolean } | null;
@@ -771,10 +799,12 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     towers,
     projs: [],
     bolts: [],
+    arcs: [],
     parts: [],
     texts: [],
     spawnQ: [],
     heroCd: 0,
+    zeusHits: 0,
     kills: 0,
     cut: null,
     bossCast: null,
@@ -860,6 +890,78 @@ function boltPts(b: Bolt, out: { x: number; y: number }[]) {
       y: b.y0 + (b.y1 - b.y0) * t + py * b.off[i],
     });
   }
+}
+
+function arcPts(a: Arc, out: { x: number; y: number }[]) {
+  out.length = 0;
+  const L = Math.max(1, Math.hypot(a.x1 - a.x0, a.y1 - a.y0));
+  const px = -(a.y1 - a.y0) / L;
+  const py = (a.x1 - a.x0) / L;
+  for (let i = 0; i < a.n; i++) {
+    const t = i / (a.n - 1);
+    out.push({
+      x: a.x0 + (a.x1 - a.x0) * t + px * a.off[i],
+      y: a.y0 + (a.y1 - a.y0) * t + py * a.off[i],
+    });
+  }
+}
+/** re-strike: refresh the trunk envelope and re-roll its branch segments */
+function jitArc(a: Arc, now: number, branchCount = 5) {
+  if (now - a.lastJit >= a.pace) {
+    a.lastJit = now;
+    const dx = a.x1 - a.x0;
+    const dy = a.y1 - a.y0;
+    const L = Math.max(1, Math.hypot(dx, dy));
+    const amp = Math.min(44, L * 0.15);
+    for (let i = 0; i < a.n; i++) {
+      if (i === 0 || i === a.n - 1) a.off[i] = 0;
+      else a.off[i] = (Math.random() - 0.5) * 2 * amp * Math.sin((Math.PI * i) / (a.n - 1));
+    }
+  }
+  if (now - a.lastBr >= 170) {
+    a.lastBr = now;
+    const pts: { x: number; y: number }[] = [];
+    arcPts(a, pts);
+    a.br.length = 0;
+    for (let k = 0; k < branchCount; k++) {
+      const i0 = 2 + Math.floor(Math.random() * (pts.length - 5));
+      const p0 = pts[i0];
+      const p1 = pts[i0 + 1];
+      const sgn = Math.random() < 0.5 ? -1 : 1;
+      const len = a.w * (6 + Math.random() * 9);
+      const bx1 = p0.x + (p1.x - p0.x) + sgn * len * 0.55;
+      const by1 = p0.y + (p1.y - p0.y) + len * 0.8;
+      const bx2 = bx1 + sgn * len * 0.7;
+      const by2 = by1 + len * 0.5;
+      a.br.push([p0.x, p0.y, bx1, by1, bx2, by2]);
+    }
+  }
+}
+function spawnArc(
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  color: string,
+  w: number,
+  max: number,
+  opts?: { pace?: number; branches?: number }
+): Arc {
+  const a: Arc = {
+    x0, y0, x1, y1,
+    n: 16,
+    off: new Float32Array(16),
+    lastJit: -9999,
+    lastBr: -9999,
+    pace: opts?.pace ?? 56,
+    br: [],
+    life: max,
+    max,
+    w,
+    color,
+  };
+  jitArc(a, performance.now() + 1e5, opts?.branches ?? 5);
+  return a;
 }
 
 /**
@@ -3487,7 +3589,6 @@ export default function Battle({
      * ascent adds half a second of stun per battle level.
      */
     const zeusStrike = (t: BT) => {
-      const now = performance.now();
       const list = g.enemies.filter((e) => !e.dead);
       if (!list.length) return;
       const target = list[Math.floor(Math.random() * list.length)];
@@ -3498,12 +3599,10 @@ export default function Battle({
       const t2 = saveRef.current.awn.godzeus?.[1] || 0;
       const wipeMode = t2 === 0 || t2 >= AWAKENING_MAX_TIER;
 
-      // sky channel: a white-hot pillar with an electric-blue corona, plus the
-      // connecting bolt from the throne itself
-      g.strikes.push({ x: ep.x, y: ep.y, life: 0.62, max: 0.62, width: 24, color: "#3fb6ff", core: "#ffffff", seed: Math.random() * 100, forks: 6, top: -H });
-      g.strikes.push({ x: ep.x, y: ep.y, life: 0.4, max: 0.4, width: 10, color: "#9fe4ff", core: "#ffffff", seed: Math.random() * 100, forks: 4, top: -H * 0.5 });
-      g.strikes.push({ x: ep.x, y: ep.y, life: 0.24, max: 0.24, width: 5, color: "#ffffff", seed: Math.random() * 100, forks: 3, top: -H * 0.9 });
-      if (g.bolts.length < 44) g.bolts.push(randBolt(tp.x, tp.y, ep.x, ep.y, "#8ceaff", 3.2, 0.3, now));
+      // bespoke divine strike: a re-striking sky bolt with recursive forks,
+      // plus the connecting arc from the Zeus throne itself — nothing shared
+      if (g.arcs.length < 26) g.arcs.push(spawnArc(ep.x + (Math.random() - 0.5) * 70, -34, ep.x, ep.y, "#9fe4ff", 6.5, 0.5, { pace: 50, branches: 6 }));
+      if (g.arcs.length < 28) g.arcs.push(spawnArc(tp.x, tp.y - 6, ep.x, ep.y, "#8ceaff", 2.6, 0.34, { pace: 66, branches: 4 }));
       ring(ep.x, ep.y, "#8ceaff", 64);
       shock(ep.x, ep.y, "#3fb6ff", 150, 0.6);
       glow(ep.x, ep.y, "#8ceaff", 190, 0.55);
@@ -3513,8 +3612,7 @@ export default function Battle({
       punch(0.85, 0.7);
       hitStop(0.09);
       g.shake = saveRef.current.shakeFx ? Math.min(26, g.shake + 20) : 0;
-      sfx.zap();
-      sfx.heavenlyImpact();
+      sfx.zeusThunder();
 
       if (wipeMode) {
         addText(ep.x, ep.y - 58, "DIVINE WIPE", "#ffffff", 15, true);
@@ -3536,6 +3634,31 @@ export default function Battle({
         target.stun = Math.max(target.stun, stunS);
         addText(ep.x, ep.y - 78, `STUN ${stunS.toFixed(2)}s`, "#8ceaff", 12, false);
         sfx.stun();
+      }
+
+      // UPCOMING POWER: every 5 lightning hits blesses ALL God of Zeus towers
+      // with +1 point (shared counter, capped at MAX_POINTS) — the points are
+      // what the cadence below converts into up to +20% attack speed.
+      g.zeusHits += 1;
+      if (g.zeusHits >= 5) {
+        g.zeusHits = 0;
+        let blessed = 0;
+        for (const z of g.towers) {
+          if (z.def.id !== "godzeus" || !z.cell) continue;
+          const before = z.points;
+          z.points = Math.min(MAX_POINTS, z.points + 1);
+          if (z.points > before) {
+            blessed += 1;
+            const zp = cellCenter(z.cell.c, z.cell.r);
+            z.flash = 0.4;
+            addText(zp.x, zp.y - 34, "+1 PT", "#ffe9a8", 13, true);
+            if (g.arcs.length < 30) g.arcs.push(spawnArc(zp.x + (Math.random() - 0.5) * 24, -24, zp.x, zp.y - 14, "#ffe14d", 3, 0.42, { pace: 62, branches: 3 }));
+          }
+        }
+        if (blessed) {
+          addText(ep.x, ep.y - 96, "UPCOMING POWER", "#ffe9a8", 18, true);
+          sfx.point();
+        }
       }
     };
 
@@ -4727,9 +4850,9 @@ export default function Battle({
           const meters = Math.round(900000 * zeusSource.def.awk1!.mult[t1 - 1]);
           const radius = Math.min(2400, 900 * zeusSource.def.awk1!.mult[t1 - 1]);
           const doomed = g.enemies.filter((e) => !e.dead);
-          // the ball falls first, then the sky column lands with it
-          g.strikes.push({ x: p.x, y: p.y, life: 0.5, max: 0.5, width: 30, color: "#3fb6ff", core: "#ffffff", seed: Math.random() * 100, forks: 7, top: -H });
-          g.strikes.push({ x: p.x, y: p.y, life: 0.32, max: 0.32, width: 12, color: "#c9ecff", core: "#ffffff", seed: Math.random() * 100, forks: 4, top: -H * 0.55 });
+          // the ball falls first, then the bespoke sky column lands with it
+          if (g.arcs.length < 26) g.arcs.push(spawnArc(p.x + (Math.random() - 0.5) * 60, -34, p.x, p.y, "#9fe4ff", 9, 0.56, { pace: 48, branches: 7 }));
+          if (g.arcs.length < 28) g.arcs.push(spawnArc(p.x, p.y, p.x + 44, p.y - 64, "#c9ecff", 2.6, 0.34, { pace: 62, branches: 4 }));
           ring(p.x, p.y, "#8ceaff", Math.min(1400, radius));
           shock(p.x, p.y, "#3fb6ff", Math.min(1600, radius * 1.2), 0.95);
           shock(p.x, p.y, "#ffffff", Math.min(900, radius * 0.7), 0.7);
@@ -4741,12 +4864,12 @@ export default function Battle({
           hitStop(0.18);
           g.shake = saveRef.current.shakeFx ? Math.min(28, g.shake + 26) : 0;
           addText(p.x, p.y - 104, `LIGHTNING BALL · ${meters.toLocaleString()}m`, "#9fe4ff", 22, true);
-          sfx.doomsday();
+          sfx.zeusThunder();
           for (const enemy of doomed) {
             if (enemy.dead) continue;
             const ep2 = enemyPos(enemy);
             if (Math.hypot(ep2.x - p.x, ep2.y - p.y) > radius) continue;
-            g.strikes.push({ x: ep2.x, y: ep2.y, life: 0.6, max: 0.6, width: 20, color: "#8ceaff", seed: Math.random() * 100, forks: 5, top: -240 });
+            if (g.arcs.length < 40) g.arcs.push(spawnArc(ep2.x + (Math.random() - 0.5) * 50, -40, ep2.x, ep2.y, "#8ceaff", 5.6, 0.5, { pace: 54, branches: 5 }));
             enemy.hp = 0;
             killReward(enemy);
           }
@@ -5035,9 +5158,7 @@ export default function Battle({
         e.burnDps = Math.max(e.burnDps, j.burnDps);
         e.burnT = Math.max(e.burnT, 1.2);
       }
-      if (g.strikes.length < 24) {
-        g.strikes.push({ x: j.x, y: j.y, life: 0.36, max: 0.36, width: JUDGEMENT_BOLT_WIDTH, color: j.color, core: "#fff6c4", seed: (j.seed + g.t * 13) % 100, forks: 3, top: -H });
-      }
+      if (g.arcs.length < 30) g.arcs.push(spawnArc(j.x + (j.seed % 40) - 20, -34, j.x, j.y, j.color, JUDGEMENT_BOLT_WIDTH / 3, 0.36, { pace: 50, branches: 5 }));
       shock(j.x, j.y, j.color, Math.min(j.radius, 420), 0.5);
       glow(j.x, j.y, j.color, Math.min(j.radius, 300), 0.4);
     };
@@ -5085,12 +5206,11 @@ export default function Battle({
       if (g.heroCd > 0 || g.final) return;
       const hero = HERO_BY_ID[g.heroId] || HERO_BY_ID.nova;
       const lv = g.heroLv;
-      const power = heroPower(lv);
-      g.heroCd = heroCooldown(hero.cd, lv);
+      const power = heroPower(lv, hero.id);
+      g.heroCd = heroCooldown(hero.cd, lv, hero.id);
       g.skillCasts++;
       if (hero.id === "thunder") {
         const targets = g.towers.filter((tower) => tower.cell && tower.points < MAX_POINTS);
-        const wardNow = performance.now();
         for (let i = 0; i < Math.min(2, targets.length); i++) {
           const pick = Math.floor(Math.random() * targets.length);
           const [tower] = targets.splice(pick, 1);
@@ -5102,9 +5222,8 @@ export default function Battle({
           // the lightning lands on the tower that actually gains the points:
           // a sky channel and a forked bolt strike down onto its cell
           const skyX = at.x + (Math.random() - 0.5) * 30;
-          if (g.strikes.length < 24) g.strikes.push({ x: at.x, y: at.y, life: 0.46, max: 0.46, width: 10, color: hero.color, core: "#fff6c4", seed: Math.random() * 100, forks: 3, top: -H });
-          if (g.bolts.length < 44) g.bolts.push(randBolt(skyX, -40, at.x, at.y, hero.color2, 3, 0.36, wardNow));
-          if (g.bolts.length < 44) g.bolts.push(randBolt(at.x, at.y, at.x + 26, at.y - 40, hero.color2, 1.6, 0.22, wardNow));
+          if (g.arcs.length < 28) g.arcs.push(spawnArc(skyX, -46, at.x, at.y, "#ffe14d", 4.6, 0.46, { pace: 52, branches: 5 }));
+          if (g.arcs.length < 30) g.arcs.push(spawnArc(at.x, at.y, at.x + 26, at.y - 40, "#fff6a8", 1.7, 0.24, { pace: 64, branches: 3 }));
           shock(at.x, at.y, hero.color, 46, 0.5);
           ring(at.x, at.y, "#ffe14d", 42);
           glow(at.x, at.y, "#ffe14d", 58, 0.45);
@@ -5368,7 +5487,6 @@ export default function Battle({
       const bolts = 8 + Math.round(lv * 1.6);
       const chains = 2 + Math.floor(lv / 2);
       const dmg = (150 + 42 * g.round) * power;
-      const now2 = performance.now();
       for (let i = 0; i < bolts; i++) {
         const d = ((i + 0.5) / bolts) * PATH_LEN;
         const p = pathPos(d);
@@ -5385,9 +5503,9 @@ export default function Battle({
         for (let k = 1; k < Math.min(hit.length, chains + 1); k++) {
           const a = enemyPos(hit[k - 1]);
           const b = enemyPos(hit[k]);
-          if (g.bolts.length < 44) g.bolts.push(randBolt(a.x, a.y, b.x, b.y, hero.color2, 2, 0.26, now2));
+          if (g.arcs.length < 34) g.arcs.push(spawnArc(a.x, a.y, b.x, b.y, hero.color2, 2.6, 0.3, { pace: 64, branches: 4 }));
         }
-        g.strikes.push({ x: p.x, y: p.y, life: 0.42, max: 0.42, width: 9, color: hero.color, seed: (i * 17) % 90, forks: 2 });
+        if (g.arcs.length < 30) g.arcs.push(spawnArc(p.x + ((i % 3) - 1) * 9, -34, p.x, p.y, hero.color, 3.8, 0.42, { pace: 58, branches: 4 }));
         shock(p.x, p.y, hero.color, 34, 0.5);
         glow(p.x, p.y, hero.color2, 70, 0.35);
         stars(p.x, p.y, "#ffffff", 4, 40);
@@ -5413,8 +5531,8 @@ export default function Battle({
         const tp = enemyPos(target);
         for (let i = 0; i < 3; i++) shock(tp.x, tp.y, i % 2 ? hero.color : "#ffffff", 34 + i * 22, 0.7);
         glow(tp.x, tp.y, hero.color2, 170, 0.7);
-        g.strikes.push({ x: tp.x, y: tp.y, life: 0.66, max: 0.66, width: 26, color: "#fff6c4", seed: 3 + bi * 7, forks: 4, top: -140 });
-        g.strikes.push({ x: tp.x, y: tp.y, life: 0.5, max: 0.5, width: 14, color: "#ffffff", seed: 11 + bi * 5, forks: 2, top: -140 });
+        if (g.arcs.length < 30) g.arcs.push(spawnArc(tp.x + ((bi % 3) - 1) * 16 + (Math.random() - 0.5) * 30, -46, tp.x, tp.y, "#fff6c4", 8.5, 0.66, { pace: 46, branches: 7 }));
+        if (g.arcs.length < 32) g.arcs.push(spawnArc(tp.x, tp.y, tp.x + 34, tp.y - 52, "#ffe14d", 2.2, 0.3, { pace: 62, branches: 3 }));
         alive().forEach((e) => {
           if (hit.has(e)) return;
           const ep = enemyPos(e);
@@ -5528,6 +5646,11 @@ export default function Battle({
         b.life -= dt;
         jitBolt(b, now);
       }
+      for (const a of g.arcs) {
+        a.life -= dt;
+        jitArc(a, now, 4 + Math.round(a.w / 2));
+      }
+      g.arcs = g.arcs.filter((a) => a.life > 0);
       for (const st of g.strikes) st.life -= dt;
       g.strikes = g.strikes.filter((st) => st.life > 0);
       g.bolts = g.bolts.filter((b) => b.life > 0);
@@ -6206,13 +6329,11 @@ export default function Battle({
       // Bolt from the Blue: resolve the thin bolts queued by this frame's hits
       if (boltQueue.length) {
         const pending = boltQueue.splice(0, 10);
-        const power = heroPower(g.heroLv);
+        const power = heroPower(g.heroLv, g.heroId);
         for (const e of pending) {
           if (e.dead) continue;
           const p = enemyPos(e);
-          const now3 = performance.now();
-          if (g.strikes.length < 26) g.strikes.push({ x: p.x, y: p.y, life: 0.26, max: 0.26, width: 3, color: "#c9f7ff", seed: Math.random() * 90, forks: 1, top: -200 });
-          if (g.bolts.length < 44) g.bolts.push(randBolt(p.x, p.y - 120, p.x, p.y, "#c9f7ff", 1.4, 0.16, now3));
+          if (g.arcs.length < 34) g.arcs.push(spawnArc(p.x + (Math.random() - 0.5) * 30, -60, p.x, p.y, "#c9f7ff", 1.9, 0.26, { pace: 70, branches: 3 }));
           shock(p.x, p.y, "#7ce7ff", 18, 0.3);
           addText(p.x, p.y - 34, "BOLT", "#c9f7ff", 12, true);
           inductionStrike(e);
@@ -6546,7 +6667,10 @@ export default function Battle({
           t.cd -= dt;
           if (t.cd <= 0) {
             const baseCd = Math.max(0.4, (t.def.zeusCd || 2.5) - (t.def.upZeusCd || 0) * (t.menuLv - 1));
-            t.cd = baseCd / (1 + POINT_STEP * t.points);
+            // Upcoming Power: points convert to attack speed — +2.5% per point,
+            // +20% at MAX_POINTS
+            const zeusAsUp = Math.min(0.2, (t.points / MAX_POINTS) * 0.2);
+            t.cd = baseCd / (1 + zeusAsUp);
             zeusStrike(t);
             t.shots++;
           }
@@ -9415,6 +9539,61 @@ export default function Battle({
         ctx.restore();
       }
 
+      // ---------- bespoke divine arcs ----------
+      if (g.arcs.length) {
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        const arcCache: { x: number; y: number }[] = [];
+        for (const a of g.arcs) {
+          arcPts(a, arcCache);
+          if (arcCache.length < 2) continue;
+          const k = Math.max(0, a.life / a.max);
+          const flick = 0.78 + 0.22 * Math.sin(now / 23 + a.x1 * 0.11 + a.y1 * 0.07);
+          const alpha = Math.min(1, k + 0.2) * flick;
+          const pathOf = (pts: { x: number; y: number }[]) => {
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+            ctx.stroke();
+          };
+          // wide corona sheath
+          ctx.globalAlpha = alpha * 0.2;
+          ctx.strokeStyle = a.color;
+          ctx.lineWidth = a.w * 7;
+          pathOf(arcCache);
+          // electric body
+          ctx.globalAlpha = alpha * 0.62;
+          ctx.lineWidth = a.w * 2.4;
+          pathOf(arcCache);
+          // recursive branch segments, cooling with the arc's life
+          ctx.globalAlpha = alpha * 0.55 * k;
+          ctx.lineWidth = Math.max(0.7, a.w * 0.42);
+          for (const br of a.br) {
+            ctx.beginPath();
+            ctx.moveTo(br[0], br[1]);
+            ctx.lineTo(br[2], br[3]);
+            ctx.lineTo(br[4], br[5]);
+            ctx.stroke();
+          }
+          // white-hot core cools to blue-white as the stroke ages
+          ctx.globalAlpha = alpha * k;
+          ctx.strokeStyle = k > 0.55 ? "#ffffff" : a.color;
+          ctx.lineWidth = Math.max(0.9, a.w * 0.72);
+          pathOf(arcCache);
+          // landing flare
+          const tip = arcCache[arcCache.length - 1];
+          const gs = glowSprite(a.color);
+          if (gs) {
+            const fs = a.w * 9;
+            ctx.globalAlpha = alpha * 0.9;
+            ctx.drawImage(gs, tip.x - fs / 2, tip.y - fs / 2, fs, fs);
+          }
+        }
+        ctx.restore();
+      }
+
       // ---------- particles ----------
       // Everything flagged `add` is drawn in a second additive pass so glows,
       // shockwaves and sparkles stack into hot white cores instead of muddying.
@@ -10752,7 +10931,7 @@ export default function Battle({
         )}
         {g && (() => {
           const hLv = heroLevel(save, heroDef.id);
-          const total = Math.max(0.001, heroCooldown(heroDef.cd, hLv));
+          const total = Math.max(0.001, heroCooldown(heroDef.cd, hLv, heroDef.id));
           const frac = Math.max(0, Math.min(1, g.heroCd / total));
           const R = 32;
           const CIRC = 2 * Math.PI * R;
