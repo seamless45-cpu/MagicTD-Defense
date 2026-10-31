@@ -381,6 +381,24 @@ interface Judgement {
   seed: number;
 }
 
+/** a summoned cumulonimbus: rains lightning bolts on random spots inside its radius */
+interface Cloud {
+  x: number;
+  y: number;
+  r: number;
+  life: number;
+  max: number;
+  /** seconds until the next bolt */
+  tick: number;
+  /** awakening tier (drives the bolt cadence and duration) */
+  tier: number;
+  /** per-bolt damage as a fraction of the struck enemy's max HP */
+  dmgFrac: number;
+  owner: BT;
+  seed: number;
+  bolts: number;
+}
+
 interface Strike {
   x: number;
   y: number;
@@ -646,6 +664,8 @@ interface G {
   strikes: Strike[];
   /** live Electrical Judgement bolts */
   judges: Judgement[];
+  /** God of Zeus Cloud Annihilation clouds */
+  clouds: Cloud[];
   /** summons bought this run — drives the summon price */
   spSpend: number;
   enemies: Enemy[];
@@ -843,6 +863,7 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     meteors: [],
     strikes: [],
     judges: [],
+    clouds: [],
     final: null,
   };
   // no free placements: the opening SP is spent on summons by the player
@@ -2237,6 +2258,8 @@ export default function Battle({
     awn: sandboxCfg.awakened ? Object.fromEntries(Object.keys(save.levels).map((id) => [id, [5, 5] as [number, number]])) : save.awn,
   } : save;
   const [runSpeed, setRunSpeed] = useState<1 | 1.5 | 2>(1);
+  /** first tap on ABANDON arms it; the second tap really ends the run */
+  const [quitArmed, setQuitArmed] = useState(false);
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
   const speedRef = useRef<number>(runSpeed);
@@ -2371,16 +2394,20 @@ export default function Battle({
     const wrap = canvas.parentElement as HTMLElement;
     let centered = false;
     /**
-     * FULL-SCREEN FIT. The arena is scaled to COVER the whole viewport — the
-     * shorter side touches the edge and the longer side overflows, so there is
-     * no blank letterbox band on any screen shape. The overflow is panned (drag
-     * or scroll) and centred on first layout and on every zoom change. Zoom 100%
-     * is this cover fit; below it the arena shrinks and the blank band returns.
+     * FULL-SCREEN FIT. The arena is scaled to nearly fill the viewport: the
+     * contain scale (whole arena visible) is raised by 10%, and never past the
+     * cover scale. That keeps most of the battlefield on screen on tall phones
+     * and wide monitors, instead of cropping it hard, while leaving only a thin
+     * margin. The margin shows the page background, which can be a custom
+     * photo or video. The overflow is panned (drag or scroll) and centred on
+     * first layout and on every zoom change.
      */
     const fit = (recenter = false) => {
       const rw = wrap.clientWidth || 1;
       const rh = wrap.clientHeight || 1;
-      const s = Math.max(0.1, Math.max(rw / W, rh / H) * zoomRef.current);
+      const contain = Math.min(rw / W, rh / H);
+      const cover = Math.max(rw / W, rh / H);
+      const s = Math.max(0.1, Math.min(cover, contain * 1.1) * zoomRef.current);
       const cssW = Math.floor(W * s);
       const cssH = Math.floor(H * s);
       canvas.style.width = `${cssW}px`;
@@ -4878,38 +4905,9 @@ export default function Battle({
       const wasHeavenly = !!heavenlySource;
       const zeusSource = a.def.id === "godzeus" ? a : b.def.id === "godzeus" ? b : undefined;
       if (zeusSource) {
-        // UNPREDICTABLE RHYTHM — a wrathful lightning ball drops on the lane and
-        // detonates over a 900,000m blast (radius scales ×50 per tier; the
-        // shockwave wipes every enemy it catches).
+        // CLOUD ANNIHILATION — the merge may summon storm clouds over the field
         const t1 = saveRef.current.awn.godzeus?.[0] || 0;
-        if (t1 > 0 && Math.random() < zeusSource.def.awk1!.chance[t1 - 1]) {
-          const meters = Math.round(900000 * zeusSource.def.awk1!.mult[t1 - 1]);
-          const radius = Math.min(2400, 900 * zeusSource.def.awk1!.mult[t1 - 1]);
-          const doomed = g.enemies.filter((e) => !e.dead);
-          // the ball falls first, then the bespoke sky column lands with it
-          if (g.arcs.length < 26) g.arcs.push(spawnArc(p.x + (Math.random() - 0.5) * 60, -34, p.x, p.y, "#9fe4ff", 9, 0.56, { img: true, flip: Math.random() < 0.5 ? -1 : 1 }));
-          if (g.arcs.length < 28) g.arcs.push(spawnArc(p.x, p.y, p.x + 44, p.y - 64, "#c9ecff", 2.6, 0.34, { pace: 62, branches: 4 }));
-          ring(p.x, p.y, "#8ceaff", Math.min(1400, radius));
-          shock(p.x, p.y, "#3fb6ff", Math.min(1600, radius * 1.2), 0.95);
-          shock(p.x, p.y, "#ffffff", Math.min(900, radius * 0.7), 0.7);
-          glow(p.x, p.y, "#8ceaff", Math.min(1500, radius * 1.1), 0.8);
-          burst(p.x, p.y, "#c9ecff", 54, 700);
-          sparkAt(p.x, p.y, 44, 620);
-          flash("#1c3d63", 0.6);
-          punch(1, 1);
-          hitStop(0.18);
-          g.shake = saveRef.current.shakeFx ? Math.min(28, g.shake + 26) : 0;
-          addText(p.x, p.y - 104, `LIGHTNING BALL · ${meters.toLocaleString()}m`, "#9fe4ff", 22, true);
-          sfx.zeusThunder();
-          for (const enemy of doomed) {
-            if (enemy.dead) continue;
-            const ep2 = enemyPos(enemy);
-            if (Math.hypot(ep2.x - p.x, ep2.y - p.y) > radius) continue;
-            if (g.arcs.length < 40) g.arcs.push(spawnArc(ep2.x + (Math.random() - 0.5) * 50, -40, ep2.x, ep2.y, "#8ceaff", 5.6, 0.5, { pace: 54, branches: 5 }));
-            enemy.hp = 0;
-            killReward(enemy);
-          }
-        }
+        if (t1 > 0 && Math.random() < zeusSource.def.awk1!.chance[t1 - 1]) summonClouds(t1, zeusSource, p.x, p.y);
       }
       const demonSource = a.def.id === "demon" ? a : b.def.id === "demon" ? b : undefined;
       const demonPoints = demonSource?.points ?? 0;
@@ -5197,6 +5195,50 @@ export default function Battle({
       if (g.arcs.length < 30) g.arcs.push(spawnArc(j.x + (j.seed % 40) - 20, -34, j.x, j.y, j.color, JUDGEMENT_BOLT_WIDTH / 3, 0.36, { pace: 50, branches: 5 }));
       shock(j.x, j.y, j.color, Math.min(j.radius, 420), 0.5);
       glow(j.x, j.y, j.color, Math.min(j.radius, 300), 0.4);
+    };
+
+    /**
+     * CLOUD ANNIHILATION (God of Zeus awakening 1). Each cloud fires bolts on a
+     * random interval of 0.02–0.05s at tier 1, tightened by 0.005s per tier, for
+     * 10s plus 2.5s per tier. Every enemy inside a bolt's reach takes damage
+     * scaled to its own max HP, so no bolt can wipe a field on its own.
+     */
+    const cloudDuration = (tier: number) => 10 + 2.5 * (tier - 1);
+    const cloudInterval = (tier: number) => {
+      const shave = 0.005 * (tier - 1);
+      const lo = Math.max(0.01, 0.02 - shave);
+      const hi = Math.max(0.015, 0.05 - shave);
+      return lo + Math.random() * (hi - lo);
+    };
+    const CLOUD_MAX = 6;
+    const summonClouds = (tier: number, owner: BT, sx: number, sy: number) => {
+      const dmgFrac = owner.def.awk1!.mult[tier - 1];
+      const dur = cloudDuration(tier);
+      for (let i = 0; i < 2 && g.clouds.length < CLOUD_MAX; i++) {
+        const x = W * (0.18 + Math.random() * 0.64);
+        const y = H * (0.2 + Math.random() * 0.45);
+        g.clouds.push({ x, y, r: 150, life: dur, max: dur, tick: 0.12 + i * 0.1, tier, dmgFrac, owner, seed: Math.random() * 100, bolts: 0 });
+        shock(x, y, "#8ceaff", 130, 0.6);
+      }
+      sfx.zeusThunder();
+      addText(sx, sy - 104, "CLOUD ANNIHILATION", "#9fe4ff", 22, true);
+    };
+    const cloudBolt = (c: Cloud) => {
+      const a = Math.random() * Math.PI * 2;
+      const rr = c.r * Math.sqrt(Math.random());
+      const bx = c.x + Math.cos(a) * rr;
+      const by = c.y + Math.sin(a) * rr * 0.6;
+      c.bolts++;
+      // cheap visuals: a thin strike, no blur filters and no shadows per bolt
+      if (g.strikes.length < 16) g.strikes.push({ x: bx, y: by, life: 0.1, max: 0.1, width: 3, color: "#c9f7ff", seed: Math.random() * 100, forks: 1, top: -160 });
+      if (c.bolts % 4 === 0) sparkAt(bx, by, 4, 220);
+      if (c.bolts % 12 === 0) sfx.zeusThunder();
+      for (const enemy of g.enemies) {
+        if (enemy.dead) continue;
+        const ep = enemyPos(enemy);
+        if (Math.hypot(ep.x - bx, ep.y - by) > 56) continue;
+        dealDamage(enemy, enemy.max * c.dmgFrac, { tw: c.owner, color: "#9fe4ff", lightning: true, noCrit: true });
+      }
     };
 
     /**
@@ -5767,6 +5809,18 @@ export default function Battle({
           }
         }
         g.judges = g.judges.filter((j) => j.life > 0);
+      }
+      // ---- cloud annihilation: every cloud rains bolts on its own random beat ----
+      if (g.clouds.length) {
+        for (const c of g.clouds) {
+          c.life -= dt;
+          c.tick -= dt;
+          while (c.tick <= 0 && c.life > 0) {
+            c.tick += cloudInterval(c.tier);
+            cloudBolt(c);
+          }
+        }
+        g.clouds = g.clouds.filter((c) => c.life > 0);
       }
 
       // ---- hero cast timeline: fire every beat whose moment has arrived ----
@@ -8612,7 +8666,8 @@ export default function Battle({
 
       ctx.save();
       ctx.translate(p.x, p.y + bob);
-      const shadowOn = saveRef.current.shadowFx;
+      // canvas shadow blur is the costliest per-entity draw: keep it for bosses and elites only
+      const shadowOn = saveRef.current.shadowFx && (isBossType(e.type) || !!e.elite);
       drawEnemyBodySprite(ctx, e.type, et, R, cycle, flip, shadowOn);
       paintEnemyStatus(ctx, e, et, now);
       ctx.restore();
@@ -9209,6 +9264,36 @@ export default function Battle({
         }
       }
 
+      // ---------- storm clouds: body + falling rain, no blur or shadow passes ----------
+      for (const c of g.clouds) {
+        const fade = Math.min(1, (c.max - c.life) * 2, c.life * 2);
+        ctx.save();
+        ctx.globalAlpha = 0.9 * fade;
+        ctx.fillStyle = "#222b38";
+        for (let b = 0; b < 7; b++) {
+          const ang = (b / 7) * Math.PI * 2 + c.seed;
+          ctx.beginPath();
+          ctx.arc(c.x + Math.cos(ang) * c.r * 0.55, c.y + Math.sin(ang) * c.r * 0.3, c.r * 0.42, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = "#3a4659";
+        ctx.beginPath();
+        ctx.ellipse(c.x, c.y - c.r * 0.25, c.r * 0.95, c.r * 0.34, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(170,215,255,0.5)";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        for (let r = 0; r < 18; r++) {
+          const rx = c.x + (((r * 97.13 + c.seed * 13) % 1) - 0.5) * c.r * 1.7;
+          const fall = (now * 0.8 + r * 37.7 + c.seed * 9) % 170;
+          const ry = c.y + fall * 0.5;
+          ctx.moveTo(rx, ry);
+          ctx.lineTo(rx - 4, ry + 13);
+        }
+        ctx.stroke();
+        ctx.restore();
+      }
+
       // ---------- ground zones, drawn under everything that stands on them ----------
       for (const z of g.zones) {
         const life = Math.max(0, Math.min(1, z.life / z.max));
@@ -9618,8 +9703,10 @@ export default function Battle({
                 ctx.restore();
               };
               // realistic bloom: two blurred silhouette passes around the sharp core
-              drawPass(1.16, 0.32 * k, Math.max(8, L * 0.1));
-              drawPass(1.05, 0.5 * k, Math.max(4, L * 0.035));
+              if (fxQ() >= 0.8) {
+                drawPass(1.16, 0.32 * k, Math.max(8, L * 0.1));
+                drawPass(1.05, 0.5 * k, Math.max(4, L * 0.035));
+              }
               drawPass(1, 0.96, 0);
               ctx.filter = "none";
               ctx.globalAlpha = 1;
@@ -10862,10 +10949,10 @@ export default function Battle({
         <span>SANDBOX CONTROLS</span>
         <label><input type="checkbox" aria-label="Max level towers" checked={sandboxCfg.maxLevel} onChange={(e) => setSandboxCfg((c) => ({ ...c, maxLevel: e.target.checked }))} /> Max-level owned towers</label>
         <label><input type="checkbox" aria-label="Max awakening towers" checked={sandboxCfg.awakened} onChange={(e) => setSandboxCfg((c) => ({ ...c, awakened: e.target.checked }))} /> Max awakenings</label>
-        <label>Spawn interval <input type="range" min="0.15" max="2" step="0.05" value={sandboxCfg.interval} onChange={(e) => setSandboxCfg((c) => ({ ...c, interval: Number(e.target.value) }))} /> {sandboxCfg.interval.toFixed(2)}s</label>
-        <label>Enemy HP ×{sandboxCfg.hp.toFixed(1)} <input type="range" min="0.1" max="10" step="0.1" value={sandboxCfg.hp} onChange={(e) => setSandboxCfg((c) => ({ ...c, hp: Number(e.target.value) }))} /></label>
-        <label>Speed ×{sandboxCfg.speed.toFixed(1)} <input type="range" min="0.2" max="4" step="0.1" value={sandboxCfg.speed} onChange={(e) => setSandboxCfg((c) => ({ ...c, speed: Number(e.target.value) }))} /></label>
-        <label>Shield {Math.round(sandboxCfg.shield * 100)}% <input type="range" min="0" max="0.9" step="0.05" value={sandboxCfg.shield} onChange={(e) => setSandboxCfg((c) => ({ ...c, shield: Number(e.target.value) }))} /></label>
+        <label>Spawn interval <input className="orb-range" type="range" min="0.15" max="2" step="0.05" value={sandboxCfg.interval} onChange={(e) => setSandboxCfg((c) => ({ ...c, interval: Number(e.target.value) }))} /> {sandboxCfg.interval.toFixed(2)}s</label>
+        <label>Enemy HP ×{sandboxCfg.hp.toFixed(1)} <input className="orb-range" type="range" min="0.1" max="10" step="0.1" value={sandboxCfg.hp} onChange={(e) => setSandboxCfg((c) => ({ ...c, hp: Number(e.target.value) }))} /></label>
+        <label>Speed ×{sandboxCfg.speed.toFixed(1)} <input className="orb-range" type="range" min="0.2" max="4" step="0.1" value={sandboxCfg.speed} onChange={(e) => setSandboxCfg((c) => ({ ...c, speed: Number(e.target.value) }))} /></label>
+        <label>Shield {Math.round(sandboxCfg.shield * 100)}% <input className="orb-range" type="range" min="0" max="0.9" step="0.05" value={sandboxCfg.shield} onChange={(e) => setSandboxCfg((c) => ({ ...c, shield: Number(e.target.value) }))} /></label>
       </div>}
       {mode === "sandbox" && <div className="flex animate-[slideUp_.24s_ease-out] flex-wrap items-center gap-2 border-b border-[#9b7cff55] bg-[#120c24] px-3 py-2 text-[11px] font-bold text-[#d7ccff]" data-testid="sandbox-tools">
         <span>SANDBOX TOOLS</span>
@@ -11221,42 +11308,73 @@ export default function Battle({
       {/* PAUSE — the sim is held, the arena stays visible behind a light scrim */}
       {paused && g && !g.final && (
         <div className="battle-pause absolute inset-0 z-[80] flex items-center justify-center p-4" data-testid="pause-overlay">
-          <div className="panel anim-pop w-[380px] max-w-full p-5 text-center" style={{ borderColor: "#8ceaff88" }}>
-            <div className="font-disp text-3xl text-[#8ceaff]">PAUSED</div>
-            <div className="mt-1 text-[12px] font-semibold text-[var(--dim)]">
-              {mode === "gauntlet" ? "GAUNTLET" : mode === "endless" ? "ENDLESS" : mode === "hardcore" ? "HARDCORE" : mode === "superhardcore" ? "SUPER HARDCORE" : "BATTLE"} ·{" "}
-              {isRunMode(mode) ? "ROUND" : "WAVE"} {g.round} ·{" "}
-              <span className="num">{g.kills}</span> kills · <span className="num">{g.lives}</span> lives
+          <div className="pause-card anim-pop" role="dialog" aria-label="Battle paused">
+            <div className="pause-head">
+              <span className="pause-kicker">PAUSED</span>
+              <span className="pause-mode">
+                {mode === "gauntlet" ? "GAUNTLET" : mode === "endless" ? "ENDLESS" : mode === "hardcore" ? "HARDCORE" : mode === "superhardcore" ? "SUPER HARDCORE" : "BATTLE"}
+              </span>
             </div>
-            <div className="mt-4 flex flex-col gap-2">
-              <button
-                className="btn btn-cyan py-2.5 text-[14px]"
-                data-testid="resume-btn"
-                onClick={() => {
-                  sfx.click();
-                  setPaused(false);
-                }}
-              >
-                RESUME
-              </button>
-              <button
-                className="btn py-2 text-[12px]"
-                onClick={() => {
-                  sfx.click();
-                  setRunSpeed((s2) => (s2 === 1 ? 1.5 : s2 === 1.5 ? 2 : 1));
-                }}
-              >
-                SPEED ×{runSpeed} → ×{runSpeed === 1 ? 1.5 : runSpeed === 1.5 ? 2 : 1}
-              </button>
+            <div className="pause-stats">
+              <div>
+                <span>{isRunMode(mode) ? "Round" : "Wave"}</span>
+                <b className="num">{g.round}</b>
+              </div>
+              <div>
+                <span>Kills</span>
+                <b className="num">{g.kills}</b>
+              </div>
+              <div>
+                <span>Lives</span>
+                <b className="num">{g.lives}</b>
+              </div>
+              <div>
+                <span>Gold</span>
+                <b className="num">{g.gold}</b>
+              </div>
+            </div>
+            <button
+              className="pause-resume"
+              data-testid="resume-btn"
+              onClick={() => {
+                sfx.click();
+                setQuitArmed(false);
+                setPaused(false);
+              }}
+            >
+              ▶ RESUME
+            </button>
+            <div className="pause-section-label">GAME SPEED</div>
+            <div className="seg" role="group" aria-label="Game speed">
+              {([1, 1.5, 2] as const).map((sp) => (
+                <button
+                  key={sp}
+                  className={`seg-btn ${runSpeed === sp ? "on" : ""}`}
+                  aria-pressed={runSpeed === sp}
+                  data-testid={`pause-speed-${sp}`}
+                  onClick={() => {
+                    sfx.click();
+                    setRunSpeed(sp);
+                  }}
+                >
+                  ×{sp}
+                </button>
+              ))}
+            </div>
+            <div className="pause-foot">
               <button
                 className="btn btn-danger py-2 text-[12px]"
                 data-testid="quit-btn"
                 onClick={() => {
                   sfx.click();
+                  if (!quitArmed) {
+                    setQuitArmed(true);
+                    return;
+                  }
                   onExit();
                 }}
               >
-                ABANDON RUN
+                {quitArmed ? "TAP AGAIN TO ABANDON THE RUN" : "ABANDON RUN"}
               </button>
             </div>
           </div>

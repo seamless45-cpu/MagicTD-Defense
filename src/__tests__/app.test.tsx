@@ -437,13 +437,13 @@ describe("Settings", () => {
 });
 
 describe("Font vault", () => {
-  it("offers ninety-two previewable faces and applies the picked one", async () => {
+  it("offers one hundred and two previewable faces and applies the picked one", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
     // every tile carries data-font; the section/grid/count testids do not
-    expect(all("[data-font]").length).toBe(92);
+    expect(all("[data-font]").length).toBe(102);
     expect(document.body.textContent).toContain("Permanent Marker");
     expect(document.body.textContent).toContain("EDO");
 

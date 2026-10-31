@@ -5,12 +5,13 @@
  * here falls back to English, the same as the other languages.
  */
 import type { Language } from "./i18nExtras";
+import { MORE_LANGUAGES, lookupMoreRow, type MoreLanguage } from "./i18nMore";
 
-export type NewLanguage = "fil" | "ms" | "id" | "my" | "lo";
+export type NewLanguage = "fil" | "ms" | "id" | "my" | "lo" | MoreLanguage;
 export const NEW_LANGUAGES: NewLanguage[] = ["fil", "ms", "id", "my", "lo"];
 
 export function isNewLanguage(lang: Language): lang is NewLanguage {
-  return (NEW_LANGUAGES as Language[]).includes(lang);
+  return (NEW_LANGUAGES as Language[]).includes(lang) || (MORE_LANGUAGES as Language[]).includes(lang);
 }
 
 type NewRow = [string, string, string, string, string, string];
@@ -112,11 +113,13 @@ const NEW_ROWS: NewRow[] = [
   ["Interface language", "Wika ng interface", "Bahasa antara muka", "Bahasa antarmuka", "interface ဘာသာစကား", "ພາສາ interface"],
 ];
 
-const NEW_INDEX: Record<NewLanguage, number> = { fil: 1, ms: 2, id: 3, my: 4, lo: 5 };
+const NEW_INDEX: Partial<Record<NewLanguage, number>> = { fil: 1, ms: 2, id: 3, my: 4, lo: 5 };
 const NEW_TABLE: Partial<Record<NewLanguage, Map<string, string>>> = {};
 for (const row of NEW_ROWS) {
   for (const lang of NEW_LANGUAGES) {
-    const value = row[NEW_INDEX[lang]];
+    const idx = NEW_INDEX[lang];
+    if (idx === undefined) continue;
+    const value = row[idx];
     if (!value || value === row[0]) continue;
     let map = NEW_TABLE[lang];
     if (!map) NEW_TABLE[lang] = map = new Map();
@@ -126,5 +129,6 @@ for (const row of NEW_ROWS) {
 
 /** Look up one English interface string in the newer-language table. */
 export function lookupNewRow(text: string, lang: NewLanguage): string | undefined {
+  if ((MORE_LANGUAGES as string[]).includes(lang)) return lookupMoreRow(text, lang as MoreLanguage);
   return NEW_TABLE[lang]?.get(text);
 }

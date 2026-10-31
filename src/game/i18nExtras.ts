@@ -1,7 +1,8 @@
+import type { MoreLanguage } from "./i18nMore";
 import { isNewLanguage, lookupNewRow } from "./i18nNew";
-export type Language = "en" | "th" | "es" | "fr" | "de" | "ja" | "ko" | "zh" | "fil" | "ms" | "id" | "my" | "lo";
+export type Language = "en" | "th" | "es" | "fr" | "de" | "ja" | "ko" | "zh" | "fil" | "ms" | "id" | "my" | "lo" | MoreLanguage;
 /** the languages that have full per-language dictionaries */
-export type LegacyLanguage = Exclude<Language, "en" | "fil" | "ms" | "id" | "my" | "lo">;
+export type LegacyLanguage = Exclude<Language, "en" | "fil" | "ms" | "id" | "my" | "lo" | MoreLanguage>;
 export const LANGUAGES: { id: Language; label: string }[] = [
   { id: "en", label: "English" },
   { id: "th", label: "ไทย" },
@@ -16,6 +17,16 @@ export const LANGUAGES: { id: Language; label: string }[] = [
   { id: "id", label: "Bahasa Indonesia" },
   { id: "my", label: "မြန်မာ" },
   { id: "lo", label: "ລາວ" },
+  { id: "ar", label: "العربية" },
+  { id: "tr", label: "Türkçe" },
+  { id: "pl", label: "Polski" },
+  { id: "hi", label: "हिन्दी" },
+  { id: "nl", label: "Nederlands" },
+  { id: "bn", label: "বাংলা" },
+  { id: "pa", label: "ਪੰਜਾਬੀ" },
+  { id: "vi", label: "Tiếng Việt" },
+  { id: "km", label: "ខ្មែរ" },
+  { id: "isan", label: "ภาษาอีสาน" },
 ];
 const dictionaries: Record<LegacyLanguage, Record<string, string>> = {
   th: {

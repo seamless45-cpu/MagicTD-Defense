@@ -1108,11 +1108,12 @@ export const TOWERS: TowerDef[] = [
     zeusCd: 2.5, upZeusCd: 0.01,
     stun: 3, upStun: 0.1, ascStun: 0.5,
     awk1: {
-      name: "Unpredictable Rhythm",
-      desc: "When merging, chance to drop a wrathful lightning ball down on the lane: it detonates over a 900,000m blast and wipes every enemy the shockwave catches.",
+      name: "Cloud Annihilation",
+      desc: "When merging, chance to summon two cumulonimbus clouds over random spots of the field. They pour heavy rain and strike lightning bolts every 0.02–0.05s for 10 seconds (+2.5s per tier, bolts 0.005s faster per tier). Every enemy a bolt hits takes damage.",
       chance: [0.04, 0.08, 0.12, 0.16, 0.2, 0.24],
-      mult: [1, 50, 2500, 125000, 6250000, 312500000],
-      fmt: (m) => `${Math.round(900000 * m).toLocaleString()}m blast · wipes everything hit`,
+      /** per-bolt damage as a fraction of the enemy's maximum health */
+      mult: [0.003, 0.004, 0.005, 0.006, 0.007, 0.008],
+      fmt: (m) => `${(m * 100).toFixed(1)}% max HP per bolt · 10s +2.5s/tier`,
     },
     awk2: {
       name: "Electrical Death",

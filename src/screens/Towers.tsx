@@ -384,7 +384,7 @@ export default function Towers({
        with a pinned footer), which meant the box was never tall enough to reach
        the last rows on a phone. Now the page itself scrolls, the grid is free to
        be as tall as it likes and the filter row sticks to the top of it. */
-    <div className="tower-page flex h-full flex-col gap-2.5 overflow-y-auto scroll-thin pb-6 pr-1">
+    <div className="tower-page flex h-full flex-col gap-2.5 overflow-y-auto scroll-thin pb-6 pr-1 [&>*]:shrink-0">
       {/* SECTION SWITCH — the Towers tab is now two vaults: the tower roster
           and the crystal vault that feeds it account-wide buffs. */}
       <div className="flex flex-wrap items-center gap-1.5" data-testid="tower-sections">

@@ -217,8 +217,8 @@ export interface SaveData {
   liquidGlass: boolean;
   /** color palette selected in the theme picker */
   uiTheme: UiTheme;
-  language: "en" | "th" | "es" | "fr" | "de" | "ja" | "ko" | "zh" | "fil" | "ms" | "id" | "my" | "lo";
-  toggleStyle: "fluorescent" | "incandescent" | "led" | "halogen" | "edison";
+  language: "en" | "th" | "es" | "fr" | "de" | "ja" | "ko" | "zh" | "fil" | "ms" | "id" | "my" | "lo" | "ar" | "tr" | "pl" | "hi" | "nl" | "bn" | "pa" | "vi" | "km" | "isan";
+  toggleStyle: "fluorescent" | "incandescent" | "led" | "halogen" | "edison" | "rune";
   /** selected UI font id from the 80-font catalog in game/fonts.ts */
   font: string;
   /** crystal potions, spent on the crystal vault in the Towers tab */
@@ -257,6 +257,8 @@ export interface SaveData {
   upscale: "native" | "smooth" | "sharp";
   bloomFx: boolean;
   shadowFx: boolean;
+  /** darkening over the custom background photo or video, 0..0.9 */
+  bgDim: number;
   antiAlias: boolean;
   /** grid + range guides on the battlefield */
   guides: boolean;
@@ -377,7 +379,8 @@ export function defaultSave(): SaveData {
     pixelRatio: 1,
     upscale: "sharp",
     bloomFx: true,
-    shadowFx: true,
+    shadowFx: false,
+    bgDim: 0.55,
     antiAlias: true,
     guides: true,
     fastWaves: false,
@@ -474,11 +477,12 @@ function normalise(s: SaveData): SaveData {
   s.upscale = s.upscale === "native" || s.upscale === "smooth" ? s.upscale : "sharp";
   s.bloomFx = s.bloomFx !== false;
   s.shadowFx = s.shadowFx !== false;
+  s.bgDim = typeof s.bgDim === "number" && Number.isFinite(s.bgDim) ? Math.max(0, Math.min(0.9, s.bgDim)) : 0.55;
   s.antiAlias = s.antiAlias !== false;
   if (s.uiTheme === ("rift" as UiTheme) || !UI_THEMES.some((theme) => theme.id === s.uiTheme)) s.uiTheme = "moon";
   // keep any supported language; anything unknown falls back to English
-  s.language = (["en", "th", "es", "fr", "de", "ja", "ko", "zh", "fil", "ms", "id", "my", "lo"] as const).includes(s.language) ? s.language : "en";
-  if (!["fluorescent", "incandescent", "led", "halogen", "edison"].includes(s.toggleStyle)) s.toggleStyle = "led";
+  s.language = (["en", "th", "es", "fr", "de", "ja", "ko", "zh", "fil", "ms", "id", "my", "lo", "ar", "tr", "pl", "hi", "nl", "bn", "pa", "vi", "km", "isan"] as const).includes(s.language) ? s.language : "en";
+  if (!["fluorescent", "incandescent", "led", "halogen", "edison", "rune"].includes(s.toggleStyle)) s.toggleStyle = "led";
   s.autoSkipBossCut = s.autoSkipBossCut === true;
   s.heroAwn = s.heroAwn && typeof s.heroAwn === "object" ? s.heroAwn : {};
   // clamp every hero awakening track (up to three paths) into 0..HERO_AWAKENING_MAX_TIER
