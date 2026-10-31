@@ -218,6 +218,14 @@ describe("tower data", () => {
     const rows = towerStatRows(z, 15);
     expect(rows.find((r) => r.label === "Divine Wipe")?.value).toContain("wiped through immunity");
     expect(rows.find((r) => r.label === "Strike Interval")?.value).toContain("2.5s base");
+    expect(rows.find((r) => r.label === "Strike Interval")?.value).toContain("points → up to +20% attack speed");
+    // Upcoming Power: every 5 bolt hits → +1 point to all God of Zeus towers,
+    // points convert to attack speed up to +20%
+    expect(rows.find((r) => r.label === "Upcoming Power")?.value).toContain("Every 5 bolt hits");
+    expect(rows.find((r) => r.label === "Upcoming Power")?.value).toContain("+20% attack speed");
+    expect(z.desc).toContain("UPCOMING POWER");
+    expect(z.desc).toContain("every 5 bolt hits");
+    expect(z.desc).toContain("attack speed up to +20%");
   });
 
   it("boosts every Supervisor buff parameter by tenfold", () => {
@@ -579,6 +587,18 @@ describe("tower data", () => {
     expect(heroCooldown(cd, 1)).toBe(cd);
     expect(heroCooldown(cd, 6)).toBeLessThan(cd);
     expect(heroCooldown(cd, 99)).toBeGreaterThanOrEqual(cd * 0.6);
+    // Thunder God is the exception: +120% skill power per level and a cooldown
+    // that cuts all the way down to a hard 2.5s floor
+    const thunder = HERO_BY_ID.thunder;
+    expect(heroPower(1, "thunder")).toBe(1);
+    expect(heroPower(3, "thunder")).toBe(3.4); // 1 + 1.2 × 2 levels
+    expect(heroPower(3, "thunder")).toBeGreaterThan(heroPower(3, "nova"));
+    expect(heroCooldown(thunder.cd, 1, "thunder")).toBe(thunder.cd);
+    expect(heroCooldown(thunder.cd, 5, "thunder")).toBeLessThan(heroCooldown(thunder.cd, 5, "nova"));
+    expect(heroCooldown(thunder.cd, 19, "thunder")).toBe(2.5);
+    expect(heroCooldown(thunder.cd, 99, "thunder")).toBe(2.5);
+    // everyone else keeps the generic −3%/level, 60% floor
+    expect(heroCooldown(cd, 99, "nova")).toBeGreaterThanOrEqual(cd * 0.6);
 
     const s = defaultSave();
     s.gold = 1_000_000_000;

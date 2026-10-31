@@ -133,6 +133,9 @@ import {
   type ChipId,
 } from "../game/data";
 
+/** Thunder shows one decimal so the 2.5s floor reads true; others stay whole seconds */
+const fmtHeroCd = (sec: number, id: string) => (id === "thunder" ? sec.toFixed(1).replace(/\.0$/, "") : sec.toFixed(0));
+
 /**
  * PWA install prompt. Chrome/Edge fire `beforeinstallprompt`; we stash it so the
  * Settings row can trigger the real install flow on demand. Safari never fires
@@ -561,8 +564,8 @@ export function Home({
     toLv: from + 1,
     note: from + 1 >= HERO_MAX_LEVEL ? "MAX LEVEL" : note,
     stats: [
-      { label: "Skill power", from: `${Math.round(heroPower(from) * 100)}%`, to: `${Math.round(heroPower(from + 1) * 100)}%` },
-      { label: "Cooldown", from: `${heroCooldown(hero.cd, from).toFixed(0)}s`, to: `${heroCooldown(hero.cd, from + 1).toFixed(0)}s` },
+      { label: "Skill power", from: `${Math.round(heroPower(from, hero.id) * 100)}%`, to: `${Math.round(heroPower(from + 1, hero.id) * 100)}%` },
+      { label: "Cooldown", from: `${fmtHeroCd(heroCooldown(hero.cd, from, hero.id), hero.id)}s`, to: `${fmtHeroCd(heroCooldown(hero.cd, from + 1, hero.id), hero.id)}s` },
     ],
   });
 
@@ -722,13 +725,13 @@ export function Home({
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <span className="pill-dark text-[11px] text-[var(--dim)]">
                 <span className="num" style={{ color: "#5cffaa" }}>
-                  {Math.round(heroPower(lv) * 100)}%
+                  {Math.round(heroPower(lv, hero.id) * 100)}%
                 </span>
                 power
               </span>
               <span className="pill-dark text-[11px] text-[var(--dim)]">
                 <span className="num" style={{ color: "#8ceaff" }}>
-                  {heroCooldown(hero.cd, lv).toFixed(0)}s
+                  {fmtHeroCd(heroCooldown(hero.cd, lv, hero.id), hero.id)}s
                 </span>
                 cooldown
               </span>
@@ -841,7 +844,7 @@ export function Home({
                   {h.name}
                 </span>
                 <span className="text-[10px] font-bold text-[var(--dim)]">
-                  {on ? "EQUIPPED" : `${heroCooldown(h.cd, hl).toFixed(0)}s · ${h.kind}`}
+                  {on ? "EQUIPPED" : `${fmtHeroCd(heroCooldown(h.cd, hl, h.id), h.id)}s · ${h.kind}`}
                 </span>
               </button>
             );

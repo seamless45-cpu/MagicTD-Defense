@@ -178,8 +178,8 @@ export function estimateSquadDps(save: SaveData, wave: number, measured = 0): nu
   // hero casts are burst damage on a cooldown: model them as a flat DPS trickle
   const hero = HERO_BY_ID[save.hero] || HERO_BY_ID.nova;
   const hLv = heroLevel(save, hero.id);
-  const heroBurst = (220 + 55 * Math.max(1, wave)) * heroPower(hLv);
-  const heroDps = heroBurst / Math.max(4, heroCooldown(hero.cd, hLv));
+  const heroBurst = (220 + 55 * Math.max(1, wave)) * heroPower(hLv, hero.id);
+  const heroDps = heroBurst / Math.max(4, heroCooldown(hero.cd, hLv, hero.id));
 
   return Math.max(0, base * critFactor * (1 + crystals.atk) * auraMultiplier(save) + heroDps);
 }

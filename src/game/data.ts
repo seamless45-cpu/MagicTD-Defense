@@ -1103,7 +1103,7 @@ export const TOWERS: TowerDef[] = [
   {
     id: "godzeus", name: "God of Zeus", rarity: "mystical", kind: "godzeus", art: "godzeus", accent: "#8ceaff",
     target: "all", exotic: true, unlockFrags: 1,
-    desc: "Strikes one random enemy with a colossal lightning bolt that wipes bosses, elites and normals outright, straight through every immunity — then stuns the victim for 3 seconds. Cooldown: 2.5s. Attack, attack speed and other buffs do not affect it.",
+    desc: "Strikes one random enemy with a colossal lightning bolt that wipes bosses, elites and normals outright, straight through every immunity — then stuns the victim for 3 seconds. Cooldown: 2.5s. UPCOMING POWER: every 5 bolt hits give ALL God of Zeus towers +1 point, and points convert into attack speed up to +20%.",
     dmg: 0, upDmg: 0, ascDmg: 0, rate: 2.5, upRate: 0, ascRate: 0,
     zeusCd: 2.5, upZeusCd: 0.01,
     stun: 3, upStun: 0.1, ascStun: 0.5,
@@ -1375,7 +1375,8 @@ export function towerStatRows(def: TowerDef, menuLv: number, battleLv = 1): Stat
   }
   if (def.id === "godzeus") {
     rows.push({ label: "Divine Wipe", value: "One random enemy per strike · bosses, elites and normals wiped through immunity", better: "up" });
-    rows.push({ label: "Strike Interval", value: `${def.zeusCd || 2.5}s base · −${(def.upZeusCd || 0).toFixed(2)}s per level · cooldown cut by the points buff`, better: "down", maxed: true });
+    rows.push({ label: "Upcoming Power", value: "Every 5 bolt hits: ALL God of Zeus towers +1 point · points convert to up to +20% attack speed", better: "up" });
+    rows.push({ label: "Strike Interval", value: `${def.zeusCd || 2.5}s base · −${(def.upZeusCd || 0).toFixed(2)}s per level · points → up to +20% attack speed`, better: "down", maxed: true });
   }
   if (def.id === "supervisor") {
     rows.push({ label: "Kill Buff", value: "+1% ATK speed per kill · +2,000% cap", better: "up" });
@@ -2251,7 +2252,7 @@ export const HEROES: HeroDef[] = [
     skillName: "STORM SOVEREIGN",
     castTime: 2.4,
     desc: "A storm front walks the lane, marking everything it touches so deaths re-arc into the next target.",
-    scaling: "+1 bolt, +1 chain and +25% damage per level",
+    scaling: "+1 bolt, +1 chain and +120% skill power per level · cooldown cuts to a 2.5s floor",
     phases: [
       { at: 0, label: "STORM FRONT" },
       { at: 0.3, label: "BOLT WALK" },
@@ -2274,11 +2275,16 @@ export const HERO_BY_ID: Record<string, HeroDef> = Object.fromEntries(
 export const HERO_MAX_LEVEL = 25;
 /** gold needed to take a hero from `lv` to `lv + 1` */
 export const heroUpgradeCost = (lv: number) => Math.round(120 * Math.pow(1.2, Math.max(0, lv - 1)));
-/** every level adds 30% ability power (damage, burn, freeze/overdrive duration) */
-export const heroPower = (lv: number) => 1 + 0.3 * (Math.max(1, lv) - 1);
-/** and shaves 3% off the cooldown, down to a floor of 60% */
-export const heroCooldown = (cd: number, lv: number) =>
-  cd * Math.max(0.6, 1 - 0.03 * (Math.max(1, lv) - 1));
+/** every level adds 30% ability power (damage, burn, freeze/overdrive duration).
+ *  Thunder God is the exception: his storms scale +120% skill power per level. */
+export const heroPower = (lv: number, id = "") =>
+  id === "thunder" ? 1 + 1.2 * (Math.max(1, lv) - 1) : 1 + 0.3 * (Math.max(1, lv) - 1);
+/** and shaves 3% off the cooldown, down to a floor of 60%.
+ *  Thunder God is the exception: −5% per level all the way down to a hard 2.5s floor. */
+export const heroCooldown = (cd: number, lv: number, id = "") =>
+  id === "thunder"
+    ? Math.max(2.5, cd * (1 - 0.05 * (Math.max(1, lv) - 1)))
+    : cd * Math.max(0.6, 1 - 0.03 * (Math.max(1, lv) - 1));
 
 // ---------- hero awakenings ----------
 /**

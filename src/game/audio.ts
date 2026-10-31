@@ -787,6 +787,14 @@ const synthSfx = {
   calloutToggle: () => {
     stab([660, 880], 0.12, 0.08, 0, "sine");
   },
+  /** God of Zeus: a divine sky-tear — sharp crack, sub thunder roll, electric tail */
+  zeusThunder: () => {
+    noise(0.16, 0.3, 6800, { type: "highpass", q: 2.4, sweep: 0.7, verb: 0.7 });
+    noise(0.9, 0.3, 700, { sweep: 0.25, q: 1.1, noiseType: "brown", verb: 0.85 });
+    tone(58, 0.85, "sawtooth", 0.3, -24, 0, { sub: true, cutoff: 220, verb: 0.5 });
+    stab([1568, 1176, 2093], 0.2, 0.12, 0, "square");
+    boom(84, 0.7, 0.34, 0.02, 5);
+  },
   // thunder ward and forked bolts: a sharp crackle
   thunderCrack: () => {
     noise(0.18, 0.22, 4200, { type: "highpass", q: 2.2, sweep: 0.6, verb: 0.4 });
