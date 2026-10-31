@@ -49,6 +49,7 @@ import {
 import { useRecorder } from "../components/ScreenRecorder";
 import { GameSelect, type GameSelectOption } from "../components/GameSelect";
 import { startRecording, stopRecording } from "../game/recorder";
+import { BackgroundMediaRow } from "../components/MediaBackground";
 import { sfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost } from "../game/audio";
 
 /** interface languages as in-game picker options (native names, like before) */
@@ -691,7 +692,7 @@ export function Home({
   };
 
   return (
-    <div className="scroll-thin relative flex h-full flex-col gap-3 overflow-y-auto py-1 pr-1">
+    <div className="scroll-thin relative flex h-full flex-col gap-3 overflow-y-auto py-1 pr-1 [&>*]:shrink-0">
       <div className="anim-slideup text-center">
         <div
           className="font-disp text-3xl tracking-wide"
@@ -1235,7 +1236,7 @@ export function Specials({
   const [tab, setTab] = useState<"tasks" | "events" | "competition">("tasks");
   const ready = tasksReady(save);
   return (
-    <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1">
+    <div className="mx-auto flex h-full max-w-3xl flex-col gap-3 overflow-y-auto scroll-thin pr-1 [&>*]:shrink-0">
       <div className="flex flex-wrap items-center gap-2">
         <button
           className={`tab-btn relative shrink-0 ${tab === "tasks" ? "on" : ""}`}
@@ -2129,7 +2130,7 @@ export function SettingsModal({
       <div className="mt-2 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="toggle-style-picker">
         <div className="mb-2"><div className="font-bold">Toggle mechanism</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose how the switch looks and warms up when turned on.</div></div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {([ ["fluorescent", "Fluorescent tube", "Flicker-start glow"], ["incandescent", "Incandescent bulb", "Warm filament fade"], ["led", "LED bulb", "Instant diode"], ["halogen", "Halogen", "Quartz flash-on"], ["edison", "Edison bulb", "Carbon filament warms in steps"] ] as const).map(([id, label, desc]) => (
+          {([ ["fluorescent", "Fluorescent tube", "Flicker-start glow"], ["incandescent", "Incandescent bulb", "Warm filament fade"], ["led", "LED bulb", "Instant diode"], ["halogen", "Halogen", "Quartz flash-on"], ["rune", "Rune gem", "Diamond slides on a capsule"], ["edison", "Edison bulb", "Carbon filament warms in steps"] ] as const).map(([id, label, desc]) => (
             <button key={id} type="button" aria-pressed={save.toggleStyle === id} data-testid={`toggle-style-${id}`} onClick={() => { sfx.uiTab(); mutate((s) => { s.toggleStyle = id; }); }} className={`toggle-style-choice ${save.toggleStyle === id ? "active" : ""}`}><span className={`toggle-style-lamp lamp-${id}`} aria-hidden="true" /><span className="block text-[10px] font-bold leading-tight">{label}</span><span className="mt-0.5 block text-[9px] text-[var(--dim)]">{desc}</span></button>
           ))}
         </div>
@@ -2256,7 +2257,7 @@ export function SettingsModal({
             mutate((s) => { s.vol = v; });
             setVolume(v);
           }}
-          className="w-[150px] shrink-0 accent-[#8ceaff]"
+          className="orb-range w-[150px] shrink-0 accent-[#8ceaff]"
           aria-label="Master Volume"
         />
       </div>
@@ -2304,16 +2305,16 @@ export function SettingsModal({
         </div>
         <div className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
           <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Music volume <span className="ml-auto text-[var(--txt)]">{Math.round(save.musicVol * 100)}%</span>
-            <input className="w-28 accent-[#8ceaff]" type="range" min="0" max="100" value={Math.round(save.musicVol * 100)} aria-label="Music volume" onChange={(e) => { const volume = Number(e.target.value) / 100; mutate((s) => { s.musicVol = volume; }); setMusicSettings({ volume }); }} />
+            <input className="orb-range w-28 accent-[#8ceaff]" type="range" min="0" max="100" value={Math.round(save.musicVol * 100)} aria-label="Music volume" onChange={(e) => { const volume = Number(e.target.value) / 100; mutate((s) => { s.musicVol = volume; }); setMusicSettings({ volume }); }} />
           </label>
           <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Playback speed / pitch <span className="ml-auto text-[var(--txt)]">{save.musicRate.toFixed(2)}×</span>
-            <input className="w-28 accent-[#b6a0ff]" type="range" min="0.5" max="2" step="0.01" value={save.musicRate} aria-label="Music speed and pitch" onChange={(e) => { const rate = Number(e.target.value); mutate((s) => { s.musicRate = rate; }); setMusicSettings({ rate }); }} />
+            <input className="orb-range w-28 accent-[#b6a0ff]" type="range" min="0.5" max="2" step="0.01" value={save.musicRate} aria-label="Music speed and pitch" onChange={(e) => { const rate = Number(e.target.value); mutate((s) => { s.musicRate = rate; }); setMusicSettings({ rate }); }} />
           </label>
           <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Loop start <span className="ml-auto text-[var(--txt)]">{Math.min(save.musicStart, music.duration).toFixed(1)}s</span>
-            <input className="w-28 accent-[#8effc4]" type="range" min="0" max={Math.max(0.1, music.duration)} step="0.1" value={Math.min(save.musicStart, Math.max(0, music.duration))} disabled={!music.hasTrack || !music.duration} aria-label="Music loop start" onChange={(e) => { const start = Math.min(Number(e.target.value), Math.max(0, Math.min(save.musicEnd || music.duration, music.duration) - 0.1)); mutate((s) => { s.musicStart = start; }); setMusicSettings({ start }); }} />
+            <input className="orb-range w-28 accent-[#8effc4]" type="range" min="0" max={Math.max(0.1, music.duration)} step="0.1" value={Math.min(save.musicStart, Math.max(0, music.duration))} disabled={!music.hasTrack || !music.duration} aria-label="Music loop start" onChange={(e) => { const start = Math.min(Number(e.target.value), Math.max(0, Math.min(save.musicEnd || music.duration, music.duration) - 0.1)); mutate((s) => { s.musicStart = start; }); setMusicSettings({ start }); }} />
           </label>
           <label className="flex items-center gap-2 text-[11px] font-bold text-[var(--dim)]">Loop end <span className="ml-auto text-[var(--txt)]">{Math.min(save.musicEnd || music.duration, music.duration).toFixed(1)}s</span>
-            <input className="w-28 accent-[#ffd76a]" type="range" min={Math.min(music.duration, save.musicStart + 0.1)} max={Math.max(0.1, music.duration)} step="0.1" value={Math.min(save.musicEnd || music.duration, Math.max(save.musicStart + 0.1, music.duration))} disabled={!music.hasTrack || !music.duration} aria-label="Music loop end" onChange={(e) => { const end = Math.max(save.musicStart + 0.1, Number(e.target.value)); mutate((s) => { s.musicEnd = end; }); setMusicSettings({ end }); }} />
+            <input className="orb-range w-28 accent-[#ffd76a]" type="range" min={Math.min(music.duration, save.musicStart + 0.1)} max={Math.max(0.1, music.duration)} step="0.1" value={Math.min(save.musicEnd || music.duration, Math.max(save.musicStart + 0.1, music.duration))} disabled={!music.hasTrack || !music.duration} aria-label="Music loop end" onChange={(e) => { const end = Math.max(save.musicStart + 0.1, Number(e.target.value)); mutate((s) => { s.musicEnd = end; }); setMusicSettings({ end }); }} />
           </label>
         </div>
         <div className="mt-1 text-[10px] font-semibold text-[var(--dim)]">Track stored privately on this device. Playback loops between the trim points; speed changes also change pitch.</div>
@@ -2354,7 +2355,7 @@ export function SettingsModal({
               {label}
               <span className="ml-auto min-w-10 text-right text-[var(--txt)]">{save.eqBands[i] > 0 ? "+" : ""}{save.eqBands[i]} dB</span>
               <input
-                className="w-24 accent-[#b98bff]"
+                className="orb-range w-24 accent-[#b98bff]"
                 type="range"
                 min="-12"
                 max="12"
@@ -2378,6 +2379,7 @@ export function SettingsModal({
       )}
       {tab === "graphics" && (
         <div data-testid="settings-panel-graphics">
+          <BackgroundMediaRow save={save} mutate={mutate} />
           <div className="mt-1.5 space-y-3">
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3" data-testid="fxq-row">
           <SetIcon name="bolt" color="#ffd23f" />
@@ -2409,7 +2411,7 @@ export function SettingsModal({
       <div className="row-card mt-1.5" data-testid="pixel-ratio-row">
         <SetIcon name="perf" color="#54f4ff" />
         <div className="min-w-0 flex-1"><div className="font-bold">Pixel Ratio</div><div className="text-[11px] font-semibold text-[var(--dim)]">Canvas render resolution · {save.pixelRatio.toFixed(2)}× · 0.25 = fastest, 2.00 = sharpest</div></div>
-        <input className="w-36" type="range" min="0.25" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
+        <input className="orb-range w-36" type="range" min="0.25" max="2" step="0.25" value={save.pixelRatio} aria-label="Pixel ratio" onChange={(e) => { const value = Number(e.target.value); mutate((s) => { s.pixelRatio = value; }); }} />
       </div>
       <div className="row-card mt-1.5" data-testid="upscale-row">
         <SetIcon name="perf" color="#54f4ff" />
@@ -2480,7 +2482,7 @@ export function SettingsModal({
             <div className="text-xs font-semibold text-[var(--dim)]">How hard the arena kicks · {Math.round((save.shakeIntensity ?? 1) * 100)}%</div>
           </div>
           <input
-            className="w-40 accent-[#ff8a3d]"
+            className="orb-range w-40 accent-[#ff8a3d]"
             type="range"
             min="0"
             max="200"
@@ -2509,7 +2511,7 @@ export function SettingsModal({
             <div className="text-xs font-semibold text-[var(--dim)]">How fast the camera rattles · {save.shakeHz ?? 120} Hz</div>
           </div>
           <input
-            className="w-40 accent-[#8ceaff]"
+            className="orb-range w-40 accent-[#8ceaff]"
             type="range"
             min="40"
             max="720"
@@ -2551,15 +2553,14 @@ export function SettingsModal({
             <div className="font-bold">Motion Blur Strength</div>
             <div className="text-[11px] font-semibold text-[var(--dim)]">100% is the tuned default. Above 100% the smear gets heavy and can hide enemies.</div>
           </div>
-          <input
-            type="range"
+          <input             type="range"
             min="0"
             max="300"
             step="5"
             value={save.motionBlurAmt}
             aria-label="Motion blur strength"
             data-testid="motion-blur-amt"
-            className="w-36"
+            className="orb-range w-36"
             style={{ accentColor: save.motionBlurAmt > 100 ? "#ff315c" : "#8ceaff" }}
             onChange={(e) => { const motionBlurAmt = Number(e.target.value); mutate((s) => { s.motionBlurAmt = motionBlurAmt; }); }}
           />

@@ -16,7 +16,7 @@ Other scripts:
 ```bash
 npm run build      # bundles the game and updates the committed deploy artifact
 npm run preview    # serve the production build
-npm test           # vitest + jsdom suite (242 tests)
+npm test           # vitest + jsdom suite (250 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -38,6 +38,21 @@ serves the app at `/` (it rewrites `/` to `app.html`).
 
 **After changing game code, run `npm run build` and commit `index.html`**, otherwise the
 published site keeps serving the previous version.
+
+## Latest round 6 pass
+
+- **Cloud Annihilation** (God of Zeus, first awakening) replaces the lightning ball that wiped the field on merge. A merge can now summon two cumulonimbus clouds over random spots of the arena. They pour rain and strike bolts every 0.02–0.05s for 10s, +2.5s per awakening tier, with each tier shaving 0.005s off the bolt interval. Each enemy a bolt hits takes damage scaled to its own max HP, so no single bolt can wipe a field.
+- **Background media**: upload any photo or video as the background. Files stay in IndexedDB on the device. Videos always play muted. A Darken slider sits in Settings → Graphics.
+- **Fonts**: ten new faces (Noto Sans Arabic, Cairo, Noto Sans Devanagari/Bengali/Gurmukhi/Khmer, Sarabun, Be Vietnam Pro, Noto Sans, Tajawal). The catalogue is now 102.
+- **Languages**: Arabic (right-to-left), Turkish, Polish, Hindi, Dutch, Bangla, Punjabi, Vietnamese, Khmer and Isan. The first 86 shell, settings and battle strings are translated; anything else falls back to English.
+- **Pause menu** rebuilt: a stat strip (round or wave, kills, lives, gold), a large resume button, a segmented game-speed control, and a two-tap abandon.
+- **Rune gem toggle**: a new option in Settings → Toggle mechanism. Its diamond slides along the capsule.
+- **Orb sliders**: every slider now has a glowing orb thumb on a lit groove.
+- **Performance**: canvas shadow blur is only used for bosses and elites, and the default for new saves is off. The zeus bolt skips its blurred glow passes when the frame governor is throttling. The pause overlay and sticky tower header no longer run backdrop blur.
+- **Camera**: the arena fits the screen with a 10% margin over the contain scale, rather than a hard crop to cover. Tall phones no longer show only a quarter of the battlefield.
+- **Events**: the Specials tabs and the Towers and Menus scroll columns no longer shrink their cards vertically.
+- **Screen recording**: the error message now says why it failed: cancelled, blocked in an embedded preview, unsupported on the device, or no battle is open to record. It also retries without audio when audio capture is the thing that fails.
+- Service worker cache bumped to `magictd-v14`.
 
 ## Latest round 5 pass
 

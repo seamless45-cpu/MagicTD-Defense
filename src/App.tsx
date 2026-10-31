@@ -8,6 +8,7 @@ import { useUiLanguage } from "./game/i18n";
 import { CurrencyBar, Toasts, useToasts } from "./components/ui";
 import { ScreenStage } from "./components/ScreenStage";
 import { RecordingPill } from "./components/ScreenRecorder";
+import { MediaBackground } from "./components/MediaBackground";
 import { LaunchIntro, LoadingScreen, Home, Specials, SettingsModal, FullscreenButton, makeDefaults } from "./screens/Menus";
 import Shop from "./screens/Shop";
 import Towers from "./screens/Towers";
@@ -124,7 +125,27 @@ function BootErrors() {
   );
 }
 
+/** keeps the lit part of every orb slider (--p) in step with its value */
+function syncOrbRanges(root: ParentNode = document) {
+  root.querySelectorAll<HTMLInputElement>("input.orb-range").forEach((el) => {
+    const min = Number(el.min || 0);
+    const max = Number(el.max || 100) || 100;
+    const pct = ((Number(el.value) - min) / (max - min || 1)) * 100;
+    el.style.setProperty("--p", `${Math.max(0, Math.min(100, pct))}%`);
+  });
+}
+
 export default function App() {
+  // orb sliders: fill follows the value on every input and after every render
+  useEffect(() => {
+    syncOrbRanges();
+    const onInput = (e: Event) => {
+      const t = e.target as HTMLInputElement | null;
+      if (t && t.classList?.contains("orb-range")) syncOrbRanges(t.parentElement ?? document);
+    };
+    document.addEventListener("input", onInput);
+    return () => document.removeEventListener("input", onInput);
+  });
   // the cold open runs first: logo animation, then the loading car. Reduced
   // motion skips straight past it rather than holding a still frame for 3s.
   const [screen, setScreen] = useState<Screen>(() => (loadSave().reducedMotion ? "loading" : "intro"));
@@ -166,6 +187,7 @@ export default function App() {
     root.dataset.glassSheen = save.experimental?.glassSheen ? "on" : "off";
     root.dataset.cinematic = save.experimental?.cinematicTrans ? "on" : "off";
     root.lang = save.language;
+    root.dir = save.language === "ar" ? "rtl" : "ltr";
   }, [save.liquidGlass, save.uiTheme, save.reducedMotion, save.powerSaver, save.shadowFx, save.toggleStyle, save.language, save.experimental?.glassSheen, save.experimental?.cinematicTrans]);
 
   // the static splash in index.html is only there until the app has painted
@@ -259,6 +281,7 @@ export default function App() {
   return (
     <>
     <div className={`app-bg flex h-full flex-col ${save.reducedMotion ? "calm" : ""} ${save.powerSaver ? "power-saver" : ""}`}>
+      <MediaBackground dim={save.bgDim} paused={save.powerSaver} />
       <Toasts toasts={toasts} />
       <RecordingPill />
       {/* top bar — wraps on narrow screens so the settings button is never clipped */}

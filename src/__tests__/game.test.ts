@@ -204,12 +204,11 @@ describe("tower data", () => {
     expect(z.stun).toBe(3);
     expect(z.upStun).toBe(0.1);
     expect(z.ascStun).toBe(0.5);
-    // awakening 1 — Unpredictable Rhythm: 4%..24% merge chance, radius ×50 steps
-    expect(z.awk1?.name).toBe("Unpredictable Rhythm");
+    // awakening 1 — Cloud Annihilation: 4%..24% merge chance, 0.3%..0.8% max-HP per bolt
+    expect(z.awk1?.name).toBe("Cloud Annihilation");
     expect(z.awk1?.chance.slice(0, 6)).toEqual([0.04, 0.08, 0.12, 0.16, 0.2, 0.24]);
-    expect(z.awk1?.mult[0]).toBe(1);
-    expect(z.awk1?.mult[1]).toBe(50);
-    expect(z.awk1?.fmt?.(1, undefined)).toContain("900,000");
+    expect(z.awk1?.mult.slice(0, 6)).toEqual([0.003, 0.004, 0.005, 0.006, 0.007, 0.008]);
+    expect(z.awk1?.fmt?.(0.003, undefined)).toContain("0.3% max HP per bolt");
     // awakening 2 — Electrical Death: 12%..27% max-HP consume, 1s..2.25s stun
     expect(z.awk2?.name).toBe("Electrical Death");
     expect(z.awk2?.mult.slice(0, 6)).toEqual([0.12, 0.15, 0.18, 0.21, 0.24, 0.27]);
@@ -1726,8 +1725,8 @@ describe("boss skills", () => {
 
 // ---------- the font vault ----------
 describe("font vault", () => {
-  it("ships ninety-two faces with unique ids", () => {
-    expect(FONTS).toHaveLength(92);
+  it("ships one hundred and two faces with unique ids", () => {
+    expect(FONTS).toHaveLength(102);
     const ids = FONTS.map((f) => f.id);
     expect(new Set(ids).size).toBe(ids.length);
     // the three the brief called out by name

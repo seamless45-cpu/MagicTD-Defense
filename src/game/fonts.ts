@@ -1,7 +1,7 @@
 /**
  * FONT CATALOG
  *
- * MoonLightTD ships ninety-two UI fonts. Half of them are display faces (Permanent
+ * MoonLightTD ships one hundred and two UI fonts. Half of them are display faces (Permanent
  * Marker, EDO, Bungee, Press Start 2P …), the rest are clean readable text
  * faces for players who want the menus calmer. Every entry carries its own
  * fallback stack, so the game still renders correctly with no network at all.
@@ -136,6 +136,17 @@ export const FONTS: FontDef[] = [
   { id: "titillium", name: "Titillium Web", stack: '"Titillium Web", system-ui, sans-serif', google: "Titillium+Web:wght@400;700", group: "text" },
   { id: "play", name: "Play", stack: '"Play", system-ui, sans-serif', google: "Play:wght@400;700", group: "text" },
   { id: "share-tech-mono", name: "Share Tech Mono", stack: '"Share Tech Mono", ui-monospace, monospace', google: "Share+Tech+Mono", group: "mono" },
+  // ---------- script faces for the newer languages ----------
+  { id: "noto-arabic", name: "Noto Sans Arabic", stack: '"Noto Sans Arabic", system-ui, sans-serif', google: "Noto+Sans+Arabic:wght@400;700", group: "script" },
+  { id: "cairo", name: "Cairo", stack: '"Cairo", "Noto Sans Arabic", system-ui, sans-serif', google: "Cairo:wght@400;700;900", group: "script" },
+  { id: "noto-devanagari", name: "Noto Sans Devanagari", stack: '"Noto Sans Devanagari", system-ui, sans-serif', google: "Noto+Sans+Devanagari:wght@400;700", group: "script" },
+  { id: "noto-bengali", name: "Noto Sans Bengali", stack: '"Noto Sans Bengali", system-ui, sans-serif', google: "Noto+Sans+Bengali:wght@400;700", group: "script" },
+  { id: "noto-gurmukhi", name: "Noto Sans Gurmukhi", stack: '"Noto Sans Gurmukhi", system-ui, sans-serif', google: "Noto+Sans+Gurmukhi:wght@400;700", group: "script" },
+  { id: "noto-khmer", name: "Noto Sans Khmer", stack: '"Noto Sans Khmer", system-ui, sans-serif', google: "Noto+Sans+Khmer:wght@400;700", group: "script" },
+  { id: "sarabun", name: "Sarabun (Thai)", stack: '"Sarabun", "Noto Sans Thai", system-ui, sans-serif', google: "Sarabun:wght@400;700", group: "script" },
+  { id: "be-vietnam", name: "Be Vietnam Pro", stack: '"Be Vietnam Pro", system-ui, sans-serif', google: "Be+Vietnam+Pro:wght@400;700;900", group: "text" },
+  { id: "noto-sans", name: "Noto Sans", stack: '"Noto Sans", system-ui, sans-serif', google: "Noto+Sans:wght@400;700", group: "text" },
+  { id: "tajawal", name: "Tajawal", stack: '"Tajawal", "Noto Sans Arabic", system-ui, sans-serif', google: "Tajawal:wght@400;700;900", group: "text" },
 ];
 
 export const DEFAULT_FONT = "rajdhani";

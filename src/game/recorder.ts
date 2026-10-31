@@ -66,6 +66,29 @@ function pickSource(): MediaStream | null {
   return canvas.captureStream(60);
 }
 
+/** true when the game runs inside another page's frame (preview hosts, embeds) */
+function inFrame(): boolean {
+  try {
+    return window.top !== window.self;
+  } catch {
+    return true;
+  }
+}
+
+/** asks the browser for the screen, retrying video-only when audio capture is what failed */
+async function requestScreen(): Promise<MediaStream> {
+  const md = navigator.mediaDevices;
+  if (!md || typeof md.getDisplayMedia !== "function") throw Object.assign(new Error("no display capture"), { name: "NotSupportedError" });
+  try {
+    return await md.getDisplayMedia({ video: { frameRate: 60 }, audio: true });
+  } catch (err) {
+    const name = (err as { name?: string })?.name ?? "";
+    // only retry when the player did not refuse: a refusal stays a refusal
+    if (name === "NotAllowedError" || name === "AbortError") throw err;
+    return md.getDisplayMedia({ video: { frameRate: 60 }, audio: false });
+  }
+}
+
 /** Starts a recording. Returns false (with `error` set) when it could not start. */
 export async function startRecording(): Promise<boolean> {
   if (recorder) return true;
@@ -75,23 +98,26 @@ export async function startRecording(): Promise<boolean> {
   }
   let source: RecordSource = "screen";
   try {
-    if (navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === "function") {
-      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 60 }, audio: true });
-    } else {
-      throw new Error("no display capture");
-    }
+    stream = await requestScreen();
   } catch (err) {
     const name = (err as { name?: string })?.name ?? "";
-    // the player declined the prompt: say so rather than silently recording the canvas
     if (name === "NotAllowedError" || name === "AbortError") {
-      publish({ error: "Screen capture was cancelled" });
+      publish({
+        error: inFrame()
+          ? "Screen capture is blocked inside this embedded preview. Open the game in its own browser tab to record."
+          : "Screen capture was cancelled or blocked by the browser. Allow it and try again.",
+      });
       return false;
     }
-    // no screen capture here at all: record the battle canvas instead
+    // no screen capture on this device: record the battle canvas instead, if one is up
     stream = pickSource();
     source = "canvas";
     if (!stream) {
-      publish({ error: "Open a battle, or use a browser that can capture the screen" });
+      publish({
+        error: name === "NotSupportedError"
+          ? "This device cannot share its screen. Start a battle to record the battlefield."
+          : "Start a battle to record. Menus can only be recorded where the screen can be shared.",
+      });
       return false;
     }
   }
