@@ -59,8 +59,26 @@ import {
   UI_THEMES,
 } from "../game/save";
 import { useRecorder } from "../components/ScreenRecorder";
+import { GameSelect, type GameSelectOption } from "../components/GameSelect";
 import { startRecording, stopRecording } from "../game/recorder";
 import { sfx, setVolume, setVolumeBoost, setAudioEQ, setBassBoost, setTrebleBoost } from "../game/audio";
+
+/** interface languages as in-game picker options (native names, like before) */
+const LANGUAGE_OPTIONS: GameSelectOption[] = [
+  { value: "en", label: "English" },
+  { value: "th", label: "ไทย" },
+  { value: "es", label: "Español" },
+  { value: "fr", label: "Français" },
+  { value: "de", label: "Deutsch" },
+  { value: "ja", label: "日本語" },
+  { value: "ko", label: "한국어" },
+  { value: "zh", label: "简体中文" },
+];
+const UPSCALE_OPTIONS: GameSelectOption[] = [
+  { value: "native", label: "Native" },
+  { value: "smooth", label: "Smooth" },
+  { value: "sharp", label: "Sharp" },
+];
 
 /** equalizer presets: 60 · 250 · 1k · 4k · 12k Hz, in dB */
 const EQ_PRESETS: Record<string, number[]> = {
@@ -90,6 +108,7 @@ import {
   TowerIcon,
   TrophyIcon,
   UpgradeCeremony,
+  ViewportPortal,
   type SetIconName,
 } from "../components/ui";
 import {
@@ -2549,6 +2568,16 @@ export function SettingsModal({
   const musicFileRef = useRef<HTMLInputElement>(null);
   const closeTimer = useRef<number | null>(null);
   const { promptEvent, installed } = useInstallPrompt();
+  const [installOpen, setInstallOpen] = useState(false);
+  const [installClosing, setInstallClosing] = useState(false);
+  const closeInstall = () => {
+    if (installClosing) return;
+    setInstallClosing(true);
+    window.setTimeout(() => {
+      setInstallOpen(false);
+      setInstallClosing(false);
+    }, 240);
+  };
   const requestClose = () => {
     if (closing) return;
     setClosing(true);
@@ -2599,11 +2628,21 @@ export function SettingsModal({
     ["Liquid Glass UI", "liquidGlass", "Translucent layered surfaces, blur and specular glass highlights", "fx", "#8feaff"],
   ];
   return (
+    <>
     <Modal onClose={requestClose} closing={closing} w={470}>
       <div className="font-disp text-2xl text-[#ffd977]">Settings</div>
       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--line)] bg-black/25 p-3">
         <div><div className="font-bold">Language</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose the interface language</div></div>
-        <select aria-label="Language" title="Language" data-testid="language-select" className="rounded-lg border border-[var(--line)] bg-[#101329] px-3 py-2 text-sm font-bold" value={save.language} onChange={(e) => mutate((s) => { s.language = e.target.value as SaveData["language"]; })}><option value="en">English</option><option value="th">ไทย</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="zh">简体中文</option></select>
+        <GameSelect
+          ariaLabel="Language"
+          title="Language"
+          testId="language-select"
+          className="shrink-0"
+          triggerClassName="rounded-lg border border-[var(--line)] bg-[#101329] px-3 py-2 text-sm font-bold text-[var(--txt)]"
+          value={save.language}
+          options={LANGUAGE_OPTIONS}
+          onChange={(v) => mutate((st) => { st.language = v as SaveData["language"]; })}
+        />
       </div>
       <div className="mt-2 rounded-xl border border-[var(--line)] bg-black/25 p-3" data-testid="toggle-style-picker">
         <div className="mb-2"><div className="font-bold">Toggle mechanism</div><div className="text-[11px] font-semibold text-[var(--dim)]">Choose how the switch looks and warms up when turned on.</div></div>
@@ -2801,6 +2840,32 @@ export function SettingsModal({
             RESET
           </button>
         </div>
+        <div className="flex flex-wrap items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="shake-hz-row">
+          <SetIcon name="shake" color="#8ceaff" />
+          <div className="min-w-[150px] flex-1">
+            <div className="font-bold">Shake Frequency</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">How fast the camera rattles · {save.shakeHz ?? 120} Hz</div>
+          </div>
+          <input
+            className="w-40 accent-[#8ceaff]"
+            type="range"
+            min="40"
+            max="720"
+            step="10"
+            value={save.shakeHz ?? 120}
+            aria-label="Shake frequency"
+            data-testid="shake-hz"
+            disabled={!save.shakeFx}
+            onChange={(e) => { const shakeHz = Number(e.target.value); mutate((s) => { s.shakeHz = shakeHz; }); }}
+          />
+          <button
+            className="btn shrink-0 px-2.5 py-1 text-[11px]"
+            disabled={!save.shakeFx || (save.shakeHz ?? 120) === 120}
+            onClick={() => { sfx.uiTab(); mutate((s) => { s.shakeHz = 120; }); }}
+          >
+            RESET
+          </button>
+        </div>
         <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3">
           <SetIcon name="shake" color="#ff315c" />
           <div className="min-w-0 flex-1">
@@ -2838,8 +2903,29 @@ export function SettingsModal({
           />
           <span data-testid="motion-blur-amt-value" className="w-12 text-right font-bold" style={{ color: save.motionBlurAmt > 100 ? "#ff315c" : undefined }}>{save.motionBlurAmt}%</span>
         </div>
+        <div className="flex items-center gap-3 border-t border-[var(--line)] pt-3" data-testid="super-blur-row">
+          <SetIcon name="shake" color="#b6a0ff" />
+          <div className="min-w-0 flex-1">
+            <div className="font-bold">Super Blur</div>
+            <div className="text-xs font-semibold text-[var(--dim)]">Blends frames into one smooth blur instead of separated ghost frames. Heavy — costs an extra full-frame pass.</div>
+          </div>
+          <span className={save.motionBlur ? "" : "pointer-events-none opacity-40"}>
+            <KnobToggle
+              on={!!save.superBlur}
+              label="Super Blur"
+              testId="toggle-superBlur"
+              onToggle={() => {
+                if (!save.motionBlur) return;
+                const next = !save.superBlur;
+                mutate((s) => { s.superBlur = next; });
+                if (next) sfx.uiPop();
+                else sfx.uiOff();
+              }}
+            />
+          </span>
+        </div>
         <div className="text-[10px] font-semibold text-[var(--dim)]">
-          Shake is pure random offset per axis at 120 Hz — no sway, rotation or zoom. Intensity 0% keeps the FX but holds the camera still.
+          Shake is a pure random offset per axis at your chosen frequency (40–720 Hz) — no sway, rotation or zoom. Intensity 0% keeps the FX but holds the camera still.
         </div>
         {save.motionBlurAmt > 100 && (
           <div className="text-[10px] font-bold text-[#ff315c]" data-testid="motion-blur-warning">
@@ -2857,11 +2943,14 @@ export function SettingsModal({
       <div className="row-card mt-1.5" data-testid="upscale-row">
         <SetIcon name="perf" color="#54f4ff" />
         <div className="min-w-0 flex-1"><div className="font-bold">Upscale</div><div className="text-[11px] font-semibold text-[var(--dim)]">Presents the render at screen size · Sharp adds an edge-restoring GPU pass</div></div>
-        <select className="w-36 rounded-lg border border-[var(--line)] bg-black/40 px-2 py-1 font-bold" value={save.upscale} aria-label="Upscale" onChange={(e) => { const value = e.target.value as "native" | "smooth" | "sharp"; mutate((s) => { s.upscale = value; }); }}>
-          <option value="native">Native</option>
-          <option value="smooth">Smooth</option>
-          <option value="sharp">Sharp</option>
-        </select>
+        <GameSelect
+          className="shrink-0"
+          triggerClassName="w-36 rounded-lg border border-[var(--line)] bg-black/40 px-2 py-1 text-left font-bold text-[var(--txt)]"
+          value={save.upscale}
+          ariaLabel="Upscale"
+          options={UPSCALE_OPTIONS}
+          onChange={(v) => mutate((st) => { st.upscale = v as "native" | "smooth" | "sharp"; })}
+        />
       </div>
       <div className="row-card mt-1.5 border-[#f057ff55]" style={{ display: "block" }} data-testid="experimental-section">
         <div className="mb-2 text-[12px] font-bold tracking-[0.25em] text-[#f057ff]">EXPERIMENTAL</div>
@@ -3097,11 +3186,14 @@ export function SettingsModal({
         ))}
         <div className="flex items-center gap-3 rounded-lg border border-[var(--line)] bg-black/30 px-4 py-3">
           <div className="min-w-0 flex-1"><div className="font-bold">Interpolation Method</div><div className="text-xs font-semibold text-[var(--dim)]">Hermite uses velocity-aware, monotonic easing; Smoothstep or Linear remain available.</div></div>
-          <select aria-label="Interpolation Method" className="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-xs" value={save.interpolationMethod} onChange={(e) => mutate((s) => { const method = e.target.value; s.interpolationMethod = (INTERP_METHODS as readonly string[]).includes(method) ? (method as InterpMethod) : "smoothstep"; })}>
-            {INTERP_METHODS.map((m) => (
-              <option key={m} value={m}>{INTERP_LABELS[m]}</option>
-            ))}
-          </select>
+          <GameSelect
+            className="shrink-0"
+            triggerClassName="rounded border border-[var(--line)] bg-[#101329] px-2 py-1 text-left text-xs text-[var(--txt)]"
+            value={save.interpolationMethod}
+            ariaLabel="Interpolation Method"
+            options={INTERP_METHODS.map((m) => ({ value: m, label: INTERP_LABELS[m] }))}
+            onChange={(v) => mutate((st) => { st.interpolationMethod = (INTERP_METHODS as readonly string[]).includes(v) ? (v as InterpMethod) : "smoothstep"; })}
+          />
         </div>
       </div>
 
@@ -3143,8 +3235,10 @@ export function SettingsModal({
           className="btn btn-cyan shrink-0 px-4 py-1.5 text-sm"
           disabled={installed || !promptEvent}
           onClick={() => {
+            if (installed || !promptEvent) return;
             sfx.click();
-            promptEvent?.prompt();
+            setInstallClosing(false);
+            setInstallOpen(true);
           }}
         >
           {installed ? "Installed" : "Install"}
@@ -3340,6 +3434,41 @@ export function SettingsModal({
         Close
       </button>
     </Modal>
+    {installOpen && (
+      <ViewportPortal>
+        <div
+          className="fixed inset-0 z-[85] flex items-center justify-center bg-black/70 p-4"
+          data-testid="install-sheet"
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) closeInstall();
+          }}
+        >
+          <div className={`panel modal-slide ${installClosing ? "modal-slide-out" : "modal-slide-in"} w-[min(420px,94vw)] p-5`}>
+            <div className="font-disp text-2xl text-[#ffd977]">Install MoonLight TD</div>
+            <p className="mt-2 text-[13px] font-semibold text-[var(--dim)]">
+              Add the game to your home screen — full screen, offline play, no browser bar.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button className="btn px-3 py-1.5 text-sm" onClick={() => { sfx.uiOff(); closeInstall(); }}>
+                Later
+              </button>
+              <button
+                className="btn btn-cyan px-3 py-1.5 text-sm"
+                data-testid="install-confirm"
+                onClick={() => {
+                  sfx.click();
+                  closeInstall();
+                  window.setTimeout(() => promptEvent?.prompt(), 80);
+                }}
+              >
+                Install
+              </button>
+            </div>
+          </div>
+        </div>
+      </ViewportPortal>
+    )}
+    </>
   );
 }
 

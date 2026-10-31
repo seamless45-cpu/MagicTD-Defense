@@ -798,6 +798,8 @@ describe("save file", () => {
     expect(s.dmgNums).toBe(true);
     expect(s.shakeFx).toBe(true);
     expect(s.shakeIntensity).toBe(1);
+    expect(s.shakeHz).toBe(120);
+    expect(s.superBlur).toBe(false);
     expect(s.guides).toBe(true);
     expect(s.fastWaves).toBe(false);
     expect(s.reducedMotion).toBe(false);
@@ -808,7 +810,14 @@ describe("save file", () => {
     expect(back.gold).toBe(777);
     expect(back.vol).toBe(defaultSave().vol);
     expect(back.shakeIntensity).toBe(1);
+    expect(back.shakeHz).toBe(120);
+    expect(back.superBlur).toBe(false);
     expect(back.guides).toBe(true);
+    // out-of-range frequencies clamp into the 40..720 slider bounds
+    localStorage.setItem("magictd_save_v1", JSON.stringify({ gold: 1, shakeHz: 5000, superBlur: "yes" }));
+    const clamped = loadSave();
+    expect(clamped.shakeHz).toBe(720);
+    expect(clamped.superBlur).toBe(true);
   });
 
   it("imports an exported save blob and heals broken fields", () => {
