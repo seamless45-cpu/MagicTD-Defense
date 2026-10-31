@@ -217,6 +217,8 @@ export interface SaveData {
   motionBlur: boolean;
   /** motion blur strength in percent, 0..300; above 100 the slider turns red and warns */
   motionBlurAmt: number;
+  /** super blur: blend frames into a smooth blur instead of separated ghost taps (heavy) */
+  superBlur: boolean;
   /** one switch that cuts the heaviest effects and caps the arena at 60 FPS */
   superBoost: boolean;
   /** opt-in features that trade frame time for effect; every flag is off by default */
@@ -269,6 +271,8 @@ export interface SaveData {
   shakeFx: boolean;
   /** camera shake strength multiplier, 0 = off, 1 = 100%, 2 = 200% */
   shakeIntensity: number;
+  /** camera shake sample frequency in Hz, 40..720 (120 matches the classic feel) */
+  shakeHz: number;
   /** skip the boss cutscene card and jump straight into the fight */
   autoSkipBossCut: boolean;
   /** internal canvas resolution multiplier (0.25..2) */
@@ -366,6 +370,7 @@ export function defaultSave(): SaveData {
     powerSaver: false,
     motionBlur: false,
     motionBlurAmt: 100,
+    superBlur: false,
     superBoost: false,
     experimental: { adaptiveScale: false, hqMotionBlur: false, richLightning: false, particleBoost: false, frameHud: false, glassSheen: false, cinematicTrans: false },
     hideWaveCleared: false,
@@ -396,6 +401,7 @@ export function defaultSave(): SaveData {
     fxq: 0,
     shakeFx: true,
     shakeIntensity: 1,
+    shakeHz: 120,
     autoSkipBossCut: false,
     pixelRatio: 1,
     upscale: "sharp",
@@ -443,6 +449,7 @@ function normalise(s: SaveData): SaveData {
   s.powerSaver = !!s.powerSaver;
   s.motionBlur = !!s.motionBlur;
   s.motionBlurAmt = Math.round(Math.min(300, Math.max(0, Number.isFinite(s.motionBlurAmt) ? s.motionBlurAmt : 100)));
+  s.superBlur = !!s.superBlur;
   s.superBoost = !!s.superBoost;
   s.frameInterp = s.frameInterp !== false;
   s.experimental = {
@@ -492,6 +499,7 @@ function normalise(s: SaveData): SaveData {
   // the floor is a quarter-resolution render (0.25) for low-end phones
   s.pixelRatio = Math.round(Math.max(0.25, Math.min(2, Number.isFinite(s.pixelRatio) ? s.pixelRatio : 1)) * 4) / 4;
   s.shakeIntensity = Math.round(Math.max(0, Math.min(2, Number.isFinite(s.shakeIntensity) ? s.shakeIntensity : 1)) * 20) / 20;
+  s.shakeHz = Math.round(Math.max(40, Math.min(720, Number.isFinite(s.shakeHz) ? s.shakeHz : 120)) / 10) * 10;
   s.upscale = s.upscale === "native" || s.upscale === "smooth" ? s.upscale : "sharp";
   s.bloomFx = s.bloomFx !== false;
   s.shadowFx = s.shadowFx !== false;

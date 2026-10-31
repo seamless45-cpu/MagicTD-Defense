@@ -147,6 +147,7 @@ import {
 } from "../game/data";
 import { SKILLS } from "../game/skills";
 import { TowerIcon, useToasts, Toasts, CoinIcon, ChipIcon, HeroIcon, TrophyIcon, GemIcon, TokenIcon, ShardIcon, PotionIcon, ViewportPortal } from "../components/ui";
+import { GameSelect } from "../components/GameSelect";
 
 /**
  * The weekday event is resolved once per module load: it modifies enemy health,
@@ -398,6 +399,8 @@ interface Strike {
   jag?: number;
   /** lateral jitter multiplier (1 = standard) */
   jit?: number;
+  /** jaggedness envelope multiplier (1 = standard) */
+  jagAmp?: number;
   /** preallocated lateral offsets, refreshed at 100 Hz (10 ms) */
   jitter?: Float32Array;
   lastJit?: number;
@@ -492,6 +495,8 @@ interface Bolt {
   color: string;
   /** jitter multiplier (1 = standard) */
   jit?: number;
+  /** jaggedness envelope multiplier (1 = standard) */
+  jagAmp?: number;
 }
 /**
  * Bespoke divine lightning (God of Zeus + Thunder God): a multi-stroke trunk
@@ -516,6 +521,10 @@ interface Arc {
   max: number;
   w: number;
   color: string;
+  /** draw the whole photo sprite instead of the vector path (never segmented) */
+  img?: boolean;
+  /** horizontal flip applied when the sprite was spawned */
+  flip?: number;
 }
 
 interface Part {
@@ -850,7 +859,7 @@ function ptColor(p: number) {
 }
 
 // optimized tall jagged bolts: offsets live in a Float32Array, re-jittered only on the 5ms tick
-function randBolt(x0: number, y0: number, x1: number, y1: number, color: string, w: number, max: number, now: number, opts?: { jit?: number; jag?: number }): Bolt {
+function randBolt(x0: number, y0: number, x1: number, y1: number, color: string, w: number, max: number, now: number, opts?: { jit?: number; jag?: number; jagAmp?: number }): Bolt {
   const n = 12 + (opts?.jag ?? 0);
   const b: Bolt = {
     x0, y0, x1, y1, n,
@@ -861,6 +870,7 @@ function randBolt(x0: number, y0: number, x1: number, y1: number, color: string,
     w,
     color,
     jit: opts?.jit ?? 1,
+    jagAmp: opts?.jagAmp ?? 1,
   };
   jitBolt(b, now + 5);
   return b;
@@ -871,7 +881,7 @@ function jitBolt(b: Bolt, now: number) {
   const dx = b.x1 - b.x0;
   const dy = b.y1 - b.y0;
   const L = Math.max(1, Math.hypot(dx, dy));
-  const amp = Math.min(28.8, L * 0.12); // 20% above the original jaggedness envelope
+  const amp = Math.min(28.8, L * 0.12) * (b.jagAmp ?? 1); // envelope, per-bolt jaggedness multiplier
   const spread = amp * 1.3 * (b.jit ?? 1); // 30% more jitter, scaled per bolt
   for (let i = 0; i < b.n; i++) {
     if (i === 0 || i === b.n - 1) b.off[i] = 0;
@@ -891,6 +901,10 @@ function boltPts(b: Bolt, out: { x: number; y: number }[]) {
     });
   }
 }
+
+/** the divine bolt photo — ONE whole sprite for God of Zeus strikes, never sliced */
+const zeusBoltImg = new Image();
+zeusBoltImg.src = "img/zeus-bolt.png";
 
 function arcPts(a: Arc, out: { x: number; y: number }[]) {
   out.length = 0;
@@ -945,7 +959,7 @@ function spawnArc(
   color: string,
   w: number,
   max: number,
-  opts?: { pace?: number; branches?: number }
+  opts?: { pace?: number; branches?: number; img?: boolean; flip?: number }
 ): Arc {
   const a: Arc = {
     x0, y0, x1, y1,
@@ -959,8 +973,10 @@ function spawnArc(
     max,
     w,
     color,
+    img: opts?.img,
+    flip: opts?.flip,
   };
-  jitArc(a, performance.now() + 1e5, opts?.branches ?? 5);
+  if (!a.img) jitArc(a, performance.now() + 1e5, opts?.branches ?? 5);
   return a;
 }
 
@@ -2348,6 +2364,8 @@ export default function Battle({
     currentCanvas.height = trailCanvas.height;
     const currentCtx = currentCanvas.getContext("2d", { alpha: true })!;
     let lastShakeX = 0;
+    /** super blur: true while the temporal blend buffer holds live frames */
+    let blendInited = false;
     let lastShakeY = 0;
     const wrap = canvas.parentElement as HTMLElement;
     const fit = () => {
@@ -3460,7 +3478,8 @@ export default function Battle({
      * now picks ONE enemy (the furthest along the lane) instead of the whole
      * field. Regular enemies and elites are executed outright; bosses cannot be
      * executed, so they lose 50% of their max HP instead. The sky channel is
-     * deep red with 50% more jitter and one extra jag segment.
+     * deep red: ×1.8 jitter (+20% over the old ×1.5), three extra jag segments
+     * (+2) and a 15% wider jaggedness envelope.
      */
     const demonStrike = (t: BT, rank = 0) => {
       const now = performance.now();
@@ -3477,7 +3496,7 @@ export default function Battle({
       const deep = "#8c0018";
       const hotBlood = "#c4002c";
       const core = "#ff2b4f";
-      const jit = { jit: 1.5, jag: 1 };
+      const jit = { jit: 1.8, jag: 3, jagAmp: 1.15 };
       const hellTargets: { enemy: Enemy; x: number; y: number; knockMeters: number }[] = [];
 
       // Hell Dimensions opens a descending portal under an elite or boss that
@@ -3601,7 +3620,7 @@ export default function Battle({
 
       // bespoke divine strike: a re-striking sky bolt with recursive forks,
       // plus the connecting arc from the Zeus throne itself — nothing shared
-      if (g.arcs.length < 26) g.arcs.push(spawnArc(ep.x + (Math.random() - 0.5) * 70, -34, ep.x, ep.y, "#9fe4ff", 6.5, 0.5, { pace: 50, branches: 6 }));
+      if (g.arcs.length < 26) g.arcs.push(spawnArc(ep.x + (Math.random() - 0.5) * 70, -34, ep.x, ep.y, "#9fe4ff", 6.5, 0.5, { img: true, flip: Math.random() < 0.5 ? -1 : 1 }));
       if (g.arcs.length < 28) g.arcs.push(spawnArc(tp.x, tp.y - 6, ep.x, ep.y, "#8ceaff", 2.6, 0.34, { pace: 66, branches: 4 }));
       ring(ep.x, ep.y, "#8ceaff", 64);
       shock(ep.x, ep.y, "#3fb6ff", 150, 0.6);
@@ -4851,7 +4870,7 @@ export default function Battle({
           const radius = Math.min(2400, 900 * zeusSource.def.awk1!.mult[t1 - 1]);
           const doomed = g.enemies.filter((e) => !e.dead);
           // the ball falls first, then the bespoke sky column lands with it
-          if (g.arcs.length < 26) g.arcs.push(spawnArc(p.x + (Math.random() - 0.5) * 60, -34, p.x, p.y, "#9fe4ff", 9, 0.56, { pace: 48, branches: 7 }));
+          if (g.arcs.length < 26) g.arcs.push(spawnArc(p.x + (Math.random() - 0.5) * 60, -34, p.x, p.y, "#9fe4ff", 9, 0.56, { img: true, flip: Math.random() < 0.5 ? -1 : 1 }));
           if (g.arcs.length < 28) g.arcs.push(spawnArc(p.x, p.y, p.x + 44, p.y - 64, "#c9ecff", 2.6, 0.34, { pace: 62, branches: 4 }));
           ring(p.x, p.y, "#8ceaff", Math.min(1400, radius));
           shock(p.x, p.y, "#3fb6ff", Math.min(1600, radius * 1.2), 0.95);
@@ -5648,7 +5667,7 @@ export default function Battle({
       }
       for (const a of g.arcs) {
         a.life -= dt;
-        jitArc(a, now, 4 + Math.round(a.w / 2));
+        if (!a.img) jitArc(a, now, 4 + Math.round(a.w / 2));
       }
       g.arcs = g.arcs.filter((a) => a.life > 0);
       for (const st of g.strikes) st.life -= dt;
@@ -8906,7 +8925,7 @@ export default function Battle({
       if (!saveRef.current.shakeFx || intensity <= 0) return { x: 0, y: 0 };
       const amp = Math.min(38, g.shake * intensity);
       if (amp <= 0.25) return { x: 0, y: 0 };
-      const hz = saveRef.current.powerSaver ? 30 : 120;
+      const hz = saveRef.current.powerSaver ? 30 : Math.max(40, Math.min(720, saveRef.current.shakeHz ?? 120));
       const step = Math.floor(now / (1000 / hz));
       if (step !== shakeStep) {
         shakeStep = step;
@@ -9395,7 +9414,7 @@ export default function Battle({
         const jitMul = st.jit ?? 1;
         const coreColor = st.core ?? "#ffffff";
         const span = Math.max(40, st.y - top);
-        const sway = w * 1.9;
+        const sway = w * 1.9 * (st.jagAmp ?? 1);
         // Reuse a compact typed offset buffer and the point list. The bolt changes
         // shape at 100 Hz (10ms) rather than burning RNG and allocating per frame.
         if (!st.jitter || st.jitter.length !== segs + 1) st.jitter = new Float32Array(segs + 1);
@@ -9547,6 +9566,60 @@ export default function Battle({
         ctx.lineJoin = "round";
         const arcCache: { x: number; y: number }[] = [];
         for (const a of g.arcs) {
+          if (a.img) {
+            // ===== whole-picture divine bolt =====
+            const iw = zeusBoltImg.naturalWidth;
+            const ih = zeusBoltImg.naturalHeight;
+            if (iw > 0 && ih > 0 && a.life > 0) {
+              const k = Math.max(0, a.life / a.max);
+              const dx = a.x1 - a.x0;
+              const dy = a.y1 - a.y0;
+              const L = Math.max(1, Math.hypot(dx, dy));
+              const ang = Math.atan2(dy, dx) - Math.PI / 2;
+              const sy = (L * 1.12) / ih;
+              const sx = sy * (a.w / 6.5);
+              // bolt shakes laterally at 520 Hz, 0.05 intensity (× bolt length)
+              const sh = Math.sin((now / 1000) * 2 * Math.PI * 520) * 0.05 * L;
+              const ax = dx / L;
+              const ay = dy / L;
+              const flip = a.flip ?? 1;
+              const mx = (a.x0 + a.x1) / 2 - ay * sh * flip;
+              const my = (a.y0 + a.y1) / 2 + ax * sh * flip;
+              // brightness flicker with fast dropouts, like a real strike
+              const fl = 0.84 + 0.16 * Math.sin(now / 17 + a.x1 * 0.07);
+              const gate = (Math.floor(now / 80) * 2654435761 + Math.round(a.x1)) % 100;
+              const dim = gate < 16 ? 0.45 : 1;
+              const alpha = Math.min(1, k + 0.15) * fl * dim;
+              const drawPass = (scaleMul: number, alphaMul: number, blurPx: number) => {
+                ctx.globalAlpha = Math.max(0, Math.min(1, alpha * alphaMul));
+                ctx.filter = blurPx > 0 ? `blur(${blurPx}px)` : "none";
+                ctx.save();
+                ctx.translate(mx, my);
+                ctx.rotate(ang);
+                ctx.scale(flip * sx * scaleMul, sy * scaleMul);
+                ctx.drawImage(zeusBoltImg, -iw / 2, -ih / 2);
+                ctx.restore();
+              };
+              // realistic bloom: two blurred silhouette passes around the sharp core
+              drawPass(1.16, 0.32 * k, Math.max(8, L * 0.1));
+              drawPass(1.05, 0.5 * k, Math.max(4, L * 0.035));
+              drawPass(1, 0.96, 0);
+              ctx.filter = "none";
+              ctx.globalAlpha = 1;
+              // impact bloom: white-hot core melting into a wide electric halo
+              const br = Math.max(30, a.w * 13 * (1 + (1 - k) * 0.9));
+              const bloom = ctx.createRadialGradient(a.x1, a.y1, 1, a.x1, a.y1, br);
+              bloom.addColorStop(0, `rgba(255,255,255,${(0.85 * k * k).toFixed(3)})`);
+              bloom.addColorStop(0.3, `rgba(190,232,255,${(0.5 * k).toFixed(3)})`);
+              bloom.addColorStop(1, "rgba(140,200,255,0)");
+              ctx.fillStyle = bloom;
+              ctx.beginPath();
+              ctx.ellipse(a.x1, a.y1, br, br * 0.55, 0, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.globalAlpha = 1;
+            }
+            continue;
+          }
           arcPts(a, arcCache);
           if (arcCache.length < 2) continue;
           const k = Math.max(0, a.life / a.max);
@@ -10074,7 +10147,23 @@ export default function Battle({
       const th = trailCanvas.height;
       // world units -> trail-buffer pixels (the buffer is half resolution)
       const toTrail = tw / W;
-      if (useMotionBlur) {
+      if (useMotionBlur && saveRef.current.superBlur) {
+        // SUPER BLUR — temporal blend instead of discrete taps: every frame
+        // glides into an accumulation buffer (buffer = buffer*(1-a) + frame*a),
+        // so the blur reads as one smooth smear with no separated ghost frames.
+        // Costs an extra full-frame pass per update, hence the "heavy" warning.
+        const aBlend = Math.max(0.05, Math.min(0.6, 0.3 - blurAmt * 0.2));
+        currentCtx.globalAlpha = blendInited ? aBlend : 1;
+        currentCtx.drawImage(renderCanvas, 0, 0, tw, th);
+        currentCtx.globalAlpha = 1;
+        blendInited = true;
+        ctx.save();
+        ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        ctx.globalAlpha = Math.min(1, blurAmt * 1.4);
+        ctx.drawImage(currentCanvas, 0, 0, tw, th, 0, 0, W, H);
+        ctx.restore();
+      } else if (useMotionBlur) {
+        blendInited = false;
         currentCtx.clearRect(0, 0, tw, th);
         currentCtx.drawImage(renderCanvas, 0, 0, tw, th);
         // smear vector in trail pixels, clamped so a huge hit never tears the frame apart
@@ -10101,6 +10190,10 @@ export default function Battle({
         ctx.globalAlpha = Math.min(1, blurAmt * 1.4);
         ctx.drawImage(trailCanvas, 0, 0, tw, th, 0, 0, W, H);
         ctx.restore();
+      } else if (blendInited) {
+        // blur went quiet: drop the blend buffer so no stale ghosts survive
+        blendInited = false;
+        currentCtx.clearRect(0, 0, tw, th);
       }
       // present: upscale the finished frame onto the visible canvas
       if (upscaler) upscaler.draw(renderCanvas);
@@ -10758,13 +10851,16 @@ export default function Battle({
         <label>Speed ×{sandboxCfg.speed.toFixed(1)} <input type="range" min="0.2" max="4" step="0.1" value={sandboxCfg.speed} onChange={(e) => setSandboxCfg((c) => ({ ...c, speed: Number(e.target.value) }))} /></label>
         <label>Shield {Math.round(sandboxCfg.shield * 100)}% <input type="range" min="0" max="0.9" step="0.05" value={sandboxCfg.shield} onChange={(e) => setSandboxCfg((c) => ({ ...c, shield: Number(e.target.value) }))} /></label>
       </div>}
-      {mode === "sandbox" && <div className="flex flex-wrap items-center gap-2 border-b border-[#9b7cff55] bg-[#120c24] px-3 py-2 text-[11px] font-bold text-[#d7ccff]" data-testid="sandbox-tools">
+      {mode === "sandbox" && <div className="flex animate-[slideUp_.24s_ease-out] flex-wrap items-center gap-2 border-b border-[#9b7cff55] bg-[#120c24] px-3 py-2 text-[11px] font-bold text-[#d7ccff]" data-testid="sandbox-tools">
         <span>SANDBOX TOOLS</span>
-        <select aria-label="Spawn enemy type" className="rounded-md border border-[#9b7cff55] bg-black/60 px-2 py-1 text-[11px] font-bold text-[#f0eaff]" value={sandboxCfg.spawnType} onChange={(e) => setSandboxCfg((c) => ({ ...c, spawnType: Number(e.target.value) }))}>
-          {ENEMY_TYPES.map((t, i) => (
-            <option key={i} value={i}>{t.name}{isBossType(i) ? " (boss)" : ""}</option>
-          ))}
-        </select>
+        <GameSelect
+          ariaLabel="Spawn enemy type"
+          className="shrink-0"
+          triggerClassName="rounded-md border border-[#9b7cff55] bg-black/60 px-2 py-1 text-left text-[11px] font-bold text-[#f0eaff]"
+          value={String(sandboxCfg.spawnType)}
+          options={ENEMY_TYPES.map((t, i) => ({ value: String(i), label: `${t.name}${isBossType(i) ? " (boss)" : ""}` }))}
+          onChange={(v) => setSandboxCfg((c) => ({ ...c, spawnType: Number(v) }))}
+        />
         <button type="button" className="btn px-2 py-1 text-[11px]" data-testid="sandbox-spawn-1" onClick={() => sandboxSpawn(sandboxCfg.spawnType, 1)}>Spawn 1</button>
         <button type="button" className="btn px-2 py-1 text-[11px]" data-testid="sandbox-spawn-10" onClick={() => sandboxSpawn(sandboxCfg.spawnType, 10)}>Spawn 10</button>
         <button type="button" className="btn px-2 py-1 text-[11px]" data-testid="sandbox-clear" onClick={sandboxClear}>Clear field</button>

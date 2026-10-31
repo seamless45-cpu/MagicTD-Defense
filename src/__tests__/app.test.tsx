@@ -152,17 +152,16 @@ describe("MoonLightTD app shell", () => {
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
-    const language = document.querySelector('[data-testid="language-select"]') as HTMLSelectElement;
-    const setLanguage = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
-    setLanguage.call(language, "th");
-    language.dispatchEvent(new Event("change", { bubbles: true }));
+    click(document.querySelector('[data-testid="language-select"]') as HTMLElement);
+    await waitFor(() => document.querySelector('[data-testid="language-select-options"]'), "language popup open");
+    click(Array.from(document.querySelectorAll('[data-testid="language-select-options"] [role="option"]')).find((b) => b.textContent === "ไทย") as HTMLElement);
     await waitFor(() => saved().language === "th", "Thai language saved");
     expect(document.documentElement.lang).toBe("th");
     click(document.querySelector('[data-testid="toggle-style-fluorescent"]') as HTMLElement);
     await waitFor(() => saved().toggleStyle === "fluorescent", "fluorescent switch style saved");
-    const englishSelect = document.querySelector('[data-testid="language-select"]') as HTMLSelectElement;
-    setLanguage.call(englishSelect, "en");
-    englishSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    click(document.querySelector('[data-testid="language-select"]') as HTMLElement);
+    await waitFor(() => document.querySelector('[data-testid="language-select-options"]'), "language popup reopened");
+    click(Array.from(document.querySelectorAll('[data-testid="language-select-options"] [role="option"]')).find((b) => b.textContent === "English") as HTMLElement);
     await waitFor(() => saved().language === "en", "English language restored");
 
     expect(saved().sfx).not.toBe(false);
@@ -331,6 +330,12 @@ describe("Settings", () => {
     setter.call(eq, "5");
     eq.dispatchEvent(new Event("input", { bubbles: true }));
     await waitFor(() => saved().eqBands[0] === 5, "60 Hz EQ band saved");
+    // super blur rides on the motion blur row; shake frequency picks its Hz
+    click(document.querySelector('[data-testid="toggle-superBlur"]') as HTMLElement);
+    const hzInput = document.querySelector('[data-testid="shake-hz"]') as HTMLInputElement;
+    setter.call(hzInput, "240");
+    hzInput.dispatchEvent(new Event("input", { bubbles: true }));
+    await waitFor(() => saved().superBlur && saved().shakeHz === 240, "super blur + shake frequency saved");
     noErrors();
   });
 
