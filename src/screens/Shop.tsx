@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SaveData } from "../game/save";
-import { bumpQuest, bumpTask, grantLoot, lootLines, rollChest, type ChestLoot } from "../game/save";
+import { bumpTask, grantLoot, lootLines, rollChest, type ChestLoot } from "../game/save";
 import { sfx } from "../game/audio";
 import { CHESTS, CHIPS, HERO_BY_ID, TOWERS, TOWER_BY_ID, RARITY, eventBonus, eventForDate, monthlyEventBonus, monthlyEventForDate, type Rarity } from "../game/data";
 import { ChipIcon, CoinIcon, ClaimChest, GemIcon, Modal, RewardClaim, ShardIcon, TokenIcon, TowerIcon, type ClaimData } from "../components/ui";
@@ -56,7 +56,6 @@ export default function Shop({
     mutate((s) => {
       if (c.gem === 1) s.gems -= cost;
       else s.gold -= cost;
-      bumpQuest(s, "chests", 1);
       bumpTask(s, "chests", 1);
       if (c.gem !== 1) bumpTask(s, "spend", cost);
     });

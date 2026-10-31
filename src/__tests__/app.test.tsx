@@ -25,6 +25,12 @@ const byText = <T extends HTMLElement = HTMLElement>(sel: string, text: string) 
   all(sel).find((el) => (el.textContent || "").includes(text)) as T | undefined;
 
 const click = (el: HTMLElement) => el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+/** switch the Settings sheet to one of its tabs (general, audio, graphics, motion, performance, experimental, data) */
+const settingsTab = async (id: string) => {
+  const tabBtn = await waitFor(() => document.querySelector(`[data-testid="settings-tab-${id}"]`) as HTMLElement | null, `settings ${id} tab button`);
+  click(tabBtn);
+  await waitFor(() => document.querySelector(`[data-testid="settings-panel-${id}"]`), `settings ${id} tab`);
+};
 
 function pointer(type: string, target: EventTarget, x = 0, y = 0) {
   target.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y }));
@@ -130,9 +136,6 @@ describe("MoonLightTD app shell", () => {
     await waitFor(() => document.querySelector('[data-testid="ladder"]'), "competition ladder");
     expect(document.body.textContent).toContain("STANDINGS");
 
-    click(byText("button", "Guild")!);
-    await waitFor(() => byText("div", "Guild Hall"), "guild screen");
-
     click(byText("button", "Mail")!);
     await waitFor(() => byText("div", "MAILBOX"), "mail screen");
     expect(document.body.textContent).toContain("Welcome to the Watch");
@@ -165,6 +168,7 @@ describe("MoonLightTD app shell", () => {
     await waitFor(() => saved().language === "en", "English language restored");
 
     expect(saved().sfx).not.toBe(false);
+    await settingsTab("audio");
     click(document.querySelector('[data-testid="toggle-sfx"]') as HTMLElement);
     await waitFor(() => saved().sfx === false, "sfx toggle persisted");
 
@@ -237,6 +241,7 @@ describe("Boot sequence", () => {
   it("replays the whole boot sequence on demand from settings", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await settingsTab("data");
     await waitFor(() => byText("div", "Loading Screen"), "settings modal");
 
     click(byText("button", "Replay")!);
@@ -272,10 +277,16 @@ describe("Settings", () => {
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
-    // every new toggle is present and persisted
-    for (const label of ["Damage Numbers", "Screen Shake", "Battlefield Guides", "Auto-Start Waves", "Reduced Motion", "Performance HUD", "Auto-Skip Boss Cutscene"]) {
+    // every new toggle is present (each group lives on its own tab)
+    const tabFor: [string, string][] = [
+      ["general", "Damage Numbers"], ["general", "Battlefield Guides"], ["general", "Auto-Start Waves"], ["general", "Auto-Skip Boss Cutscene"],
+      ["motion", "Screen Shake"], ["motion", "Reduced Motion"], ["performance", "Performance HUD"],
+    ];
+    for (const [tab, label] of tabFor) {
+      await settingsTab(tab);
       expect(document.body.textContent, label).toContain(label);
     }
+    await settingsTab("general");
     // the label sits in a wrapper div inside its option row — walk up to the row
     const rowFor = (label: string) => {
       const lab = all("div").find((d) => (d.textContent || "").trim() === label)!;
@@ -289,13 +300,15 @@ describe("Settings", () => {
 
     click(rowFor("Auto-Start Waves").querySelector("button")!);
     await waitFor(() => saved().fastWaves === true, "auto-start on");
-    click(rowFor("Performance HUD").querySelector("button")!);
-    await waitFor(() => saved().perf === true, "perf hud on");
     // boss cutscenes can be retired for good from settings
     click(rowFor("Auto-Skip Boss Cutscene").querySelector("button")!);
     await waitFor(() => saved().autoSkipBossCut === true, "auto-skip boss cutscenes on");
+    await settingsTab("performance");
+    click(rowFor("Performance HUD").querySelector("button")!);
+    await waitFor(() => saved().perf === true, "perf hud on");
 
     // master volume slider
+    await settingsTab("audio");
     const slider = document.querySelector('input[type="range"]') as HTMLInputElement;
     expect(slider).toBeTruthy();
     // React tracks the value property, so drive the native setter like a real drag
@@ -305,6 +318,7 @@ describe("Settings", () => {
     await waitFor(() => Math.abs(saved().vol - 0.3) < 0.001, "volume persisted");
 
     // reduced motion class is applied to the shell
+    await settingsTab("motion");
     click(rowFor("Reduced Motion").querySelector("button")!);
     await waitFor(() => saved().reducedMotion === true, "reduced motion on");
     await waitFor(() => document.querySelector(".calm"), "calm class applied");
@@ -317,11 +331,14 @@ describe("Settings", () => {
   it("exposes motion blur, SFX EQ, bass/treble boosts and personal music controls", async () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
+    await settingsTab("audio");
     await waitFor(() => document.querySelector('[data-testid="music-player"]'), "music player");
     expect(document.querySelector('[data-testid="sound-eq"]')).toBeTruthy();
     expect(document.querySelector('[aria-label="Upload music file"]')).toBeTruthy();
     expect(document.querySelector('[aria-label="Music speed and pitch"]')?.getAttribute("step")).toBe("0.01");
+    await settingsTab("motion");
     click(document.querySelector('[data-testid="toggle-motionBlur"]') as HTMLElement);
+    await settingsTab("audio");
     click(document.querySelector('[data-testid="toggle-bassBoost"] [role="switch"]') as HTMLElement);
     click(document.querySelector('[data-testid="toggle-trebleBoost"] [role="switch"]') as HTMLElement);
     await waitFor(() => saved().motionBlur && saved().bassBoost && saved().trebleBoost, "audio and motion toggles saved");
@@ -331,6 +348,7 @@ describe("Settings", () => {
     eq.dispatchEvent(new Event("input", { bubbles: true }));
     await waitFor(() => saved().eqBands[0] === 5, "60 Hz EQ band saved");
     // super blur rides on the motion blur row; shake frequency picks its Hz
+    await settingsTab("motion");
     click(document.querySelector('[data-testid="toggle-superBlur"]') as HTMLElement);
     const hzInput = document.querySelector('[data-testid="shake-hz"]') as HTMLInputElement;
     setter.call(hzInput, "240");
@@ -346,15 +364,21 @@ describe("Settings", () => {
 
     // State text is now embedded inside the switch, rather than being a
     // separate ON/OFF action button.
-    const knobs = all(".knob");
-    expect(knobs.some((k) => /ON|OFF/.test(k.textContent || ""))).toBe(true);
-    expect(knobs.length, "one knob per option").toBeGreaterThanOrEqual(8);
-    for (const k of knobs) {
-      expect(k.getAttribute("role")).toBe("switch");
-      expect(k.getAttribute("aria-checked")).toMatch(/true|false/);
-      expect(k.querySelector(".knob-rail")).toBeTruthy();
-      expect(k.querySelector(".knob-head")).toBeTruthy();
+    let knobCount = 0;
+    for (const id of ["general", "audio", "graphics", "motion", "performance", "experimental", "data"]) {
+      await settingsTab(id);
+      const knobs = all(".knob");
+      knobCount += knobs.length;
+      expect(knobs.some((k) => /ON|OFF/.test(k.textContent || "")) || knobs.length === 0).toBe(true);
+      for (const k of knobs) {
+        expect(k.getAttribute("role")).toBe("switch");
+        expect(k.getAttribute("aria-checked")).toMatch(/true|false/);
+        expect(k.querySelector(".knob-rail")).toBeTruthy();
+        expect(k.querySelector(".knob-head")).toBeTruthy();
+      }
     }
+    expect(knobCount, "one knob per option").toBeGreaterThanOrEqual(15);
+    await settingsTab("general");
     // the head slides across the rail when the knob is thrown
     const off = all(".knob").find((k) => k.getAttribute("aria-checked") === "false")!;
     expect(off).toBeTruthy();
@@ -372,6 +396,7 @@ describe("Settings", () => {
     click(oceanTheme);
     await waitFor(() => saved().uiTheme === "ocean", "theme preference saved");
     await waitFor(() => document.documentElement.dataset.uiTheme === "ocean", "theme palette applied");
+    await settingsTab("graphics");
     const glass = document.querySelector('[data-testid="toggle-liquidGlass"]') as HTMLElement;
     expect(glass).toBeTruthy();
     expect(document.documentElement.dataset.uiGlass).toBe("off");
@@ -390,6 +415,7 @@ describe("Settings", () => {
 
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
+    await settingsTab("graphics");
     expect(document.body.textContent).toContain("Fullscreen");
     expect(document.querySelector('[data-testid="toggle-fullscreen"]')).toBeTruthy();
     click(byText("button", "Close")!);
@@ -831,6 +857,7 @@ describe("Frame settings", () => {
     await mountApp();
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
+    await settingsTab("performance");
     const row = await waitFor(() => document.querySelector('[data-testid="max-fps-row"]'), "max fps row");
     click(row.querySelector('[data-testid="fps-60"]') as HTMLElement);
     await waitFor(() => saved().maxFps === 60, "fps cap saved");
@@ -844,6 +871,7 @@ describe("Frame settings", () => {
 
     // effect quality is the manual version of what the frame governor does on
     // its own: ALL -> REDUCED -> MINIMAL, saved with the rest of the options
+    await settingsTab("graphics");
     const fxq = await waitFor(() => document.querySelector('[data-testid="fxq-row"]'), "effect quality row");
     click(fxq.querySelector('[data-testid="fxq-1"]') as HTMLElement);
     await waitFor(() => saved().fxq === 1, "effect quality saved");
@@ -1157,29 +1185,6 @@ describe("Trophies", () => {
     expect(card.textContent).toContain("+70");
     expect(card.textContent).toContain("-20");
     expect(card.textContent).toContain("Copper");
-    noErrors();
-  });
-});
-
-describe("Guild", () => {
-  it("joins a guild, donates and opens the daily guild chest", async () => {
-    await mountApp();
-    click(byText("button", "Guild")!);
-    await waitFor(() => document.querySelector('[data-testid="guild"]'), "guild screen");
-    expect(document.body.textContent).toContain("Arcane Vanguard");
-
-    click(byText("button", "Join Guild")!);
-    await waitFor(() => saved().guild.id === "vanguard", "joined the guild");
-    await waitFor(() => byText("button", "COIN STORE"), "guild tabs");
-
-    // the daily guild chest pays out through the claim ceremony
-    click(document.querySelector('[data-testid="guild-chest"]') as HTMLElement);
-    await waitFor(() => saved().guild.lastChest !== "", "guild chest opened");
-    await waitFor(() => document.querySelector('[data-testid="reward-claim"]'), "guild chest animation");
-    // the chest rattles open before the loot lands, so wait for the collect button
-    await waitFor(() => !(document.querySelector('[data-testid="claim-collect"]') as HTMLButtonElement).disabled, "chest opened");
-    click(document.querySelector('[data-testid="claim-collect"]') as HTMLElement);
-    await waitFor(() => !document.querySelector('[data-testid="reward-claim"]'), "claim dismissed");
     noErrors();
   });
 });
@@ -2076,6 +2081,7 @@ describe("Audio + power settings", () => {
     click(document.querySelector('[aria-label="Settings"]') as HTMLElement);
     await waitFor(() => byText("div", "Settings"), "settings modal");
 
+    await settingsTab("audio");
     const boostRow = await waitFor(
       () => document.querySelector('[data-testid="volume-boost-row"]') as HTMLElement,
       "volume booster row"
@@ -2086,6 +2092,7 @@ describe("Audio + power settings", () => {
     click(document.querySelector('[data-testid="toggle-volBoost"]') as HTMLElement);
     await waitFor(() => saved().volBoost === false, "booster off");
 
+    await settingsTab("performance");
     const power = document.querySelector('[data-testid="toggle-powerSaver"]') as HTMLElement;
     expect(power, "power saving toggle").toBeTruthy();
     click(power);

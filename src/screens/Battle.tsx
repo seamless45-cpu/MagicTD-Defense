@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { tr } from "../game/i18n";
 import type { EnemyType } from "../game/data";
 import type { InterpMethod, SaveData } from "../game/save";
-import { addChips, addMonthPoints, applyBattleTrophies, bumpQuest, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, heroLevel, weekStr } from "../game/save";
+import { addChips, addMonthPoints, applyBattleTrophies, bumpTask, clampZoom, collectGauntlet, gauntletChoices as offerBoons, heroLevel, weekStr } from "../game/save";
 import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import {
@@ -2277,7 +2277,7 @@ export default function Battle({
 
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
-  const fitRef = useRef<() => void>(() => {});
+  const fitRef = useRef<(recenter?: boolean) => void>(() => {});
   const changeZoom = useCallback(
     (next: number) => {
       const z = clampZoom(next);
@@ -2292,7 +2292,8 @@ export default function Battle({
     [mutate]
   );
   useEffect(() => {
-    fitRef.current();
+    // a zoom change re-centres the view on the arena
+    fitRef.current(true);
   }, [zoom]);
 
   // ---------- engine ----------
@@ -2368,14 +2369,30 @@ export default function Battle({
     let blendInited = false;
     let lastShakeY = 0;
     const wrap = canvas.parentElement as HTMLElement;
-    const fit = () => {
+    let centered = false;
+    /**
+     * FULL-SCREEN FIT. The arena is scaled to COVER the whole viewport — the
+     * shorter side touches the edge and the longer side overflows, so there is
+     * no blank letterbox band on any screen shape. The overflow is panned (drag
+     * or scroll) and centred on first layout and on every zoom change. Zoom 100%
+     * is this cover fit; below it the arena shrinks and the blank band returns.
+     */
+    const fit = (recenter = false) => {
       const rw = wrap.clientWidth || 1;
       const rh = wrap.clientHeight || 1;
-      const s = Math.max(0.1, Math.min(rw / W, rh / H) * zoomRef.current);
+      const s = Math.max(0.1, Math.max(rw / W, rh / H) * zoomRef.current);
       const cssW = Math.floor(W * s);
       const cssH = Math.floor(H * s);
       canvas.style.width = `${cssW}px`;
       canvas.style.height = `${cssH}px`;
+      if (recenter || !centered) {
+        centered = true;
+        // scrollLeft/Top only move when the arena overflows the viewport
+        requestAnimationFrame(() => {
+          wrap.scrollLeft = Math.max(0, (wrap.scrollWidth - wrap.clientWidth) / 2);
+          wrap.scrollTop = Math.max(0, (wrap.scrollHeight - wrap.clientHeight) / 2);
+        });
+      }
       // backing store: native keeps the render size (browser stretches it);
       // upscaled modes match the real device pixels so the present pass does the resample
       const bw = upscaler ? Math.max(64, Math.min(3072, Math.round(cssW * Math.min(2, window.devicePixelRatio || 1)))) : renderCanvas.width;
@@ -2387,7 +2404,7 @@ export default function Battle({
     };
     fitRef.current = fit;
     fit();
-    const ro = new ResizeObserver(fit);
+    const ro = new ResizeObserver(() => fit());
     ro.observe(wrap);
     const g = newGame(mode, saveRef.current, debugRound);
     gRef.current = g;
@@ -9577,14 +9594,14 @@ export default function Battle({
               const L = Math.max(1, Math.hypot(dx, dy));
               const ang = Math.atan2(dy, dx) - Math.PI / 2;
               const sy = (L * 1.12) / ih;
-              const sx = sy * (a.w / 6.5);
-              // bolt shakes laterally at 520 Hz, 0.05 intensity (× bolt length)
-              const sh = Math.sin((now / 1000) * 2 * Math.PI * 520) * 0.05 * L;
-              const ax = dx / L;
-              const ay = dy / L;
+              // SIDE SQUEEZE: the bolt's left and right edges close in on its
+              // centre line while it fades. No lateral wobble, no fixed-Hz
+              // oscillation — the width follows a smoothstep of the life left.
+              const squeeze = Math.max(0.001, k * k * (3 - 2 * k));
+              const sx = sy * (a.w / 6.5) * squeeze;
+              const mx = (a.x0 + a.x1) / 2;
+              const my = (a.y0 + a.y1) / 2;
               const flip = a.flip ?? 1;
-              const mx = (a.x0 + a.x1) / 2 - ay * sh * flip;
-              const my = (a.y0 + a.y1) / 2 + ax * sh * flip;
               // brightness flicker with fast dropouts, like a real strike
               const fl = 0.84 + 0.16 * Math.sin(now / 17 + a.x1 * 0.07);
               const gate = (Math.floor(now / 80) * 2654435761 + Math.round(a.x1)) % 100;
@@ -10350,7 +10367,8 @@ export default function Battle({
         dragRef.current = { kind: "field", uid: tower.uid, x: p.x, y: p.y, moved: false };
         try { canvas.setPointerCapture(e.pointerId); } catch { /* old WebViews */ }
         sfx.hover();
-      } else if (zoomRef.current > 1.01) {
+      } else if (wrap.scrollWidth > wrap.clientWidth + 1 || wrap.scrollHeight > wrap.clientHeight + 1) {
+        // the arena overflows the screen (cover fit or zoomed in): drag to pan
         panStart = { id: e.pointerId, x: e.clientX, y: e.clientY, left: wrap.scrollLeft, top: wrap.scrollTop };
         try { canvas.setPointerCapture(e.pointerId); } catch { /* old WebViews */ }
       }
@@ -10565,9 +10583,7 @@ export default function Battle({
         // Trophy gains rise by +5 per prior consecutive win (capped at +50); losses remain bounded at zero.
         applyBattleTrophies(s, f.won, EV_BONUS.trophyWin + trophyStreakBonus(s.streak), EV_BONUS.trophyLoss);
         s.streak = f.won ? s.streak + 1 : 0;
-        if (f.won) bumpQuest(s, "wins", 1);
       }
-      bumpQuest(s, "runs", 1);
       // daily tasks
       bumpTask(s, "play", 1);
       bumpTask(s, "waves", f.rounds);
@@ -10871,7 +10887,7 @@ export default function Battle({
         <label><input type="checkbox" aria-label="God mode" checked={sandboxCfg.godMode} onChange={(e) => setSandboxCfg((c) => ({ ...c, godMode: e.target.checked }))} /> God mode</label>
       </div>}
       <div className="relative min-h-0 flex-1">
-        <div className="scroll-thin h-full w-full overflow-auto">
+        <div className="scroll-thin h-full w-full overflow-auto" style={{ scrollbarWidth: "none" }}>
           <canvas
             ref={canvasRef}
             width={W}

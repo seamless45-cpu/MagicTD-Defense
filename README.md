@@ -16,7 +16,7 @@ Other scripts:
 ```bash
 npm run build      # bundles the game and updates the committed deploy artifact
 npm run preview    # serve the production build
-npm test           # vitest + jsdom suite (188 tests)
+npm test           # vitest + jsdom suite (242 tests)
 npm run typecheck  # tsc --noEmit
 ```
 
@@ -38,6 +38,15 @@ serves the app at `/` (it rewrites `/` to `app.html`).
 
 **After changing game code, run `npm run build` and commit `index.html`**, otherwise the
 published site keeps serving the previous version.
+
+## Latest round 5 pass
+
+- **God of Zeus bolt** no longer shakes side to side at a fixed 520 Hz. The bolt now closes in on its centre line from both sides, the left and right edges squeezing together while the strike fades out.
+- **Sound effects no longer distort.** Two causes were fixed. Clip normalisation could push a single sample past full scale (63 of 92 clips did), and the master bus ran a full-scale tanh curve that roughly doubled quiet signals and squashed every layer. Each clip now keeps its peak under 0.9 before its layer gain, and the master uses a transparent ceiling that is linear up to 0.8 and only rounds real overs.
+- **Settings are split into tabs**: General, Audio, Graphics, Motion, Performance, Experimental and Data. Every option keeps its key and save field. Only the layout changed.
+- **Guild removed.** The Guild tab, Guild Hall, guild chat, donations, guild chest, coin store and weekly quests are gone. Old saves drop the stale guild block on load. The standings no longer show guild tags.
+- **Full-screen arena.** The arena now covers the whole viewport instead of letterboxing. Zoom 100% is that cover fit, and it is centred when it loads and when the zoom changes. Drag to pan the overflow. Zooming out below 100% still shows the blank band on purpose.
+- The service worker cache is bumped to `magictd-v13` so installed copies pick up this build.
 
 ## Latest round 4 pass
 

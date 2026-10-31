@@ -2398,7 +2398,7 @@ export interface ChipDef {
 }
 
 export const CHIPS: ChipDef[] = [
-  { id: "basic", name: "Basic Chip Module", short: "Basic", color: "#8fe9ff", desc: "Standard arcane circuitry. Feeds tower ascension and guild crafting." },
+  { id: "basic", name: "Basic Chip Module", short: "Basic", color: "#8fe9ff", desc: "Standard arcane circuitry. Feeds tower ascension." },
   { id: "advanced", name: "Advanced Chip Module", short: "Advanced", color: "#c44dff", desc: "Refined lattice core. Worth five basic modules at the exchange." },
   { id: "elite", name: "Elite Chip Module", short: "Elite", color: "#ffc457", desc: "Competition-only module stamped by the arena marshals." },
 ];
@@ -3022,7 +3022,6 @@ export function competitionTier(rank: number): CompetitionTier | null {
 export interface Rival {
   name: string;
   trophies: number;
-  guild: string;
 }
 
 const RIVAL_NAMES = [
@@ -3035,8 +3034,6 @@ const RIVAL_NAMES = [
   "Tove", "Ulric", "Vanya", "Wrenn", "Xalia", "Ysolde", "Zarek", "Ardan",
   "Brisa", "Cael", "Delphi", "Eron",
 ];
-
-const RIVAL_GUILDS = ["Arcane Vanguard", "Storm Callers", "Ember Pact", "Null Sigil", "Gilded Spiral"];
 
 /** cheap 32-bit string hash so rival stats are stable per name + week */
 function hash32(str: string): number {
@@ -3055,13 +3052,12 @@ function hash32(str: string): number {
 export function competitionBoard(playerTrophies: number, weekStamp: string, playerName = "You"): Rival[] {
   const rivals: Rival[] = RIVAL_NAMES.map((name, i) => {
     const r = hash32(`${name}:${weekStamp}`);
-    const r2 = hash32(`${name}:${weekStamp}:g`);
     // spread rivals around the player so the ladder always feels competitive
     const spread = 1 - i / RIVAL_NAMES.length;
     const base = Math.round(playerTrophies * (0.45 + spread * 1.15) + (r - 0.5) * 420);
-    return { name, trophies: Math.max(0, base), guild: RIVAL_GUILDS[Math.floor(r2 * RIVAL_GUILDS.length)] };
+    return { name, trophies: Math.max(0, base) };
   });
-  rivals.push({ name: playerName, trophies: playerTrophies, guild: "—" });
+  rivals.push({ name: playerName, trophies: playerTrophies });
   return rivals.sort((a, b) => b.trophies - a.trophies);
 }
 
@@ -3132,140 +3128,13 @@ export const CHEST_BY_ID: Record<string, ChestDef> = Object.fromEntries(CHESTS.m
 /** shards needed to push a hero one level, regardless of current level */
 export const HERO_SHARD_COST = 12;
 
-// ---------- guild ----------
-export interface GuildDef {
-  id: string;
-  name: string;
-  tag: string;
-  members: number;
-  power: number;
-  trophyReq: number;
-  color: string;
-  motto: string;
-  perk: string;
-}
-
-export const GUILDS: GuildDef[] = [
-  {
-    id: "vanguard",
-    name: "Arcane Vanguard",
-    tag: "AVG",
-    members: 84,
-    power: 12480,
-    trophyReq: 0,
-    color: "#ffc457",
-    motto: "Hold the line, then move it forward.",
-    perk: "+10% gold from Battle runs",
-  },
-  {
-    id: "storm",
-    name: "Storm Callers",
-    tag: "STM",
-    members: 61,
-    power: 9310,
-    trophyReq: 400,
-    color: "#8ceaff",
-    motto: "Thunder answers to us.",
-    perk: "+1 gem per completed wave bracket",
-  },
-  {
-    id: "ember",
-    name: "Ember Pact",
-    tag: "EMB",
-    members: 47,
-    power: 7050,
-    trophyReq: 900,
-    color: "#ff5c70",
-    motto: "Burn bright, burn everything.",
-    perk: "+15% trophies on win streaks",
-  },
-  {
-    id: "null",
-    name: "Null Sigil",
-    tag: "NUL",
-    members: 93,
-    power: 15870,
-    trophyReq: 1800,
-    color: "#c44dff",
-    motto: "We unmake what the rift sends.",
-    perk: "+2 basic chips per guild chest",
-  },
-  { id: "astral", name: "Astral Cartographers", tag: "AST", members: 38, power: 6420, trophyReq: 250, color: "#63ffe1", motto: "Map the stars. Master the Rift.", perk: "+5% gems from completed runs" },
-  { id: "ironclad", name: "Ironclad Protocol", tag: "ICP", members: 72, power: 11040, trophyReq: 1200, color: "#a8b5d8", motto: "No breach goes unanswered.", perk: "+8% gold from completed runs" },
-];
-
-export const GUILD_BY_ID: Record<string, GuildDef> = Object.fromEntries(GUILDS.map((g) => [g.id, g]));
-
-export const GUILD_MAX_LEVEL = 20;
-/** xp needed to go from `level` to `level + 1` */
-export const guildXpFor = (level: number) => Math.round(400 * Math.pow(1.28, Math.max(0, level - 1)));
-
-export function guildLevel(xp: number): { level: number; into: number; need: number } {
-  let level = 1;
-  let rest = Math.max(0, xp);
-  while (level < GUILD_MAX_LEVEL && rest >= guildXpFor(level)) {
-    rest -= guildXpFor(level);
-    level++;
-  }
-  return { level, into: rest, need: level >= GUILD_MAX_LEVEL ? 0 : guildXpFor(level) };
-}
-
-export interface DonationTier {
-  id: string;
-  label: string;
-  gold: number;
-  xp: number;
-  coins: number;
-}
-
-export const GUILD_DONATIONS: DonationTier[] = [
-  { id: "small", label: "Supply Drop", gold: 500, xp: 60, coins: 25 },
-  { id: "medium", label: "War Chest", gold: 2500, xp: 340, coins: 140 },
-  { id: "large", label: "Relic Tribute", gold: 10000, xp: 1500, coins: 650 },
-];
-
-/** things guild coins buy at the guild store */
-export interface GuildShopItem {
-  id: string;
-  name: string;
-  coins: number;
-  desc: string;
-  color: string;
-  grant: { gold?: number; gems?: number; tokens?: number; chips?: ChipBag; frags?: { n: number; rarity: Rarity } };
-}
-
-export const GUILD_SHOP: GuildShopItem[] = [
-  { id: "gcoin-gold", name: "Bullion Crate", coins: 80, desc: "8,000 gold straight into the vault.", color: "#ffd977", grant: { gold: 8000 } },
-  { id: "gcoin-gem", name: "Gem Pouch", coins: 150, desc: "450 gems from the guild treasury.", color: "#8ceaff", grant: { gems: 450 } },
-  { id: "gcoin-chip", name: "Workshop Pallet", coins: 220, desc: "6 basic and 2 advanced chip modules.", color: "#c44dff", grant: { chips: { basic: 6, advanced: 2 } } },
-  { id: "gcoin-frag", name: "Relic Shard Case", coins: 400, desc: "4 legendary tower fragments.", color: "#ffc457", grant: { frags: { n: 4, rarity: "legendary" } } },
-  { id: "gcoin-token", name: "Token Satchel", coins: 260, desc: "12 Magic Tokens for awakenings.", color: "#b6a0ff", grant: { tokens: 12 } },
-];
-
-export interface GuildQuest {
-  id: string;
-  name: string;
-  desc: string;
-  need: number;
-  xp: number;
-  coins: number;
-}
-
-/** weekly guild war objectives, tracked against lifetime counters */
-export const GUILD_QUESTS: GuildQuest[] = [
-  { id: "runs", name: "Deployment Orders", desc: "Finish runs for the guild", need: 5, xp: 240, coins: 60 },
-  { id: "wins", name: "Hold The Line", desc: "Win Battle runs", need: 3, xp: 420, coins: 110 },
-  { id: "donate", name: "Quartermaster", desc: "Donate to the guild vault", need: 2, xp: 300, coins: 80 },
-  { id: "chests", name: "Lockpicker", desc: "Open chests of any grade", need: 6, xp: 260, coins: 70 },
-];
-
 // ---------- mail ----------
 /**
  * The mailbox. Messages are static content with an optional attachment; the save
  * only records which ones have been read and which rewards were taken, so a new
  * message can be shipped simply by adding a row here.
  */
-export type MailKind = "system" | "reward" | "season" | "guild" | "gift";
+export type MailKind = "system" | "reward" | "season" | "gift";
 
 export interface MailItem {
   id: string;
@@ -3285,7 +3154,6 @@ export const MAIL_KIND: Record<MailKind, { label: string; color: string; glyph: 
   system: { label: "SYSTEM", color: "#8fb0ff", glyph: "⚙" },
   reward: { label: "REWARD", color: "#ffd977", glyph: "★" },
   season: { label: "SEASON", color: "#b6a0ff", glyph: "◈" },
-  guild: { label: "GUILD", color: "#5cffaa", glyph: "✉" },
   gift: { label: "GIFT", color: "#8ceaff", glyph: "✦" },
 };
 

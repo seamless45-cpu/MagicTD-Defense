@@ -106,15 +106,6 @@ export function PotionIcon({ size = 18, color = "#b98bff" }: { size?: number; co
   );
 }
 
-export function GuildIcon({ size = 18, color = "#ffc457" }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 20 20">
-      <path d="M10 1.8 17 4.4v5.3c0 4.2-2.9 7.3-7 8.5-4.1-1.2-7-4.3-7-8.5V4.4z" fill="#140d33" stroke={color} strokeWidth="1.5" />
-      <path d="M10 5.2 11.7 8.7l3.8.5-2.8 2.6.7 3.8L10 13.8l-3.4 1.8.7-3.8-2.8-2.6 3.8-.5z" fill={color} />
-    </svg>
-  );
-}
-
 /** the icon that matches a reward line */
 export function RewardIcon({ line, size = 26 }: { line: RewardLine; size?: number }) {
   if (line.kind === "gold") return <CoinIcon size={size} />;

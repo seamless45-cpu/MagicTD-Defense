@@ -13,8 +13,6 @@ import {
   monthlyTiers,
   GAUNTLET_BOONS,
   type GauntletBoon,
-  GUILD_BY_ID,
-  GUILD_QUESTS,
   HERO_BY_ID,
   HERO_MAX_LEVEL,
   HERO_SHARD_COST,
@@ -53,7 +51,6 @@ import {
   type MailItem,
   type SeasonTier,
   type DailyReward,
-  type GuildShopItem,
   type Rarity,
   type TaskId,
 } from "./data";
@@ -92,25 +89,6 @@ export interface SeasonState {
   claimed: number[];
   /** season points banked from previous seasons (flavour only) */
   best: number;
-}
-
-export interface GuildState {
-  /** id of the guild the player belongs to, or null */
-  id: string | null;
-  /** total contribution xp poured into the guild */
-  xp: number;
-  /** guild coins, spent in the guild store */
-  coins: number;
-  /** game-day stamp of the last donation */
-  lastDonate: string;
-  /** how many donations were made on `lastDonate` */
-  donatesToday: number;
-  /** game-day stamp of the last claimed guild chest */
-  lastChest: string;
-  /** lifetime counters the weekly quests read from */
-  quests: Record<string, number>;
-  /** quest ids already cashed in this week, prefixed with the week stamp */
-  questsDone: string[];
 }
 
 export const UI_THEMES = [
@@ -177,8 +155,6 @@ export interface SaveData {
   bestTrophies: number;
   /** week stamps of competition payouts already collected */
   compClaimed: string[];
-  /** guild membership + contribution state */
-  guild: GuildState;
   /** game-day stamp of the last claimed daily event bonus */
   lastEvent: string;
   /** daily objectives, reset with the 07:00 game-day */
@@ -296,7 +272,7 @@ export interface SaveData {
   dailyStreak: number;
   lastDaily: string;
   lastSeen: number;
-  /** arena zoom multiplier, 1 = fitted to the screen */
+  /** arena zoom multiplier, 1 = covers the whole screen (full-screen fit) */
   zoom: number;
 }
 
@@ -323,10 +299,6 @@ export function emptySeason(number = seasonNumber()): SeasonState {
   return { number, claimed: [], best: 0 };
 }
 
-export function emptyGuild(): GuildState {
-  return { id: null, xp: 0, coins: 0, lastDonate: "", donatesToday: 0, lastChest: "", quests: {}, questsDone: [] };
-}
-
 export function defaultSave(): SaveData {
   return {
     gold: 100,
@@ -347,7 +319,6 @@ export function defaultSave(): SaveData {
     trophies: 0,
     bestTrophies: 0,
     compClaimed: [],
-    guild: emptyGuild(),
     lastEvent: "",
     tasks: emptyTasks(),
     mail: emptyMail(),
@@ -416,7 +387,7 @@ export function defaultSave(): SaveData {
     dailyStreak: 0,
     lastDaily: "",
     lastSeen: 0,
-    zoom: 1.1,
+    zoom: 1,
   };
 }
 
@@ -544,10 +515,8 @@ function normalise(s: SaveData): SaveData {
   s.hideNotifs = s.hideNotifs === true;
   s.hideWaveCleared = s.hideWaveCleared === true;
   s.compClaimed = Array.isArray(s.compClaimed) ? s.compClaimed.map(String) : [];
-  s.guild = { ...emptyGuild(), ...(s.guild && typeof s.guild === "object" ? s.guild : {}) };
-  s.guild.quests = s.guild.quests && typeof s.guild.quests === "object" ? s.guild.quests : {};
-  s.guild.questsDone = Array.isArray(s.guild.questsDone) ? s.guild.questsDone.map(String) : [];
-  if (s.guild.id && !GUILD_BY_ID[s.guild.id]) s.guild.id = null;
+  // the guild feature was removed: drop its stale state from older saves
+  delete (s as Partial<SaveData> & { guild?: unknown }).guild;
   s.tasks = { ...emptyTasks(), ...(s.tasks && typeof s.tasks === "object" ? s.tasks : {}) };
   s.tasks.prog = s.tasks.prog && typeof s.tasks.prog === "object" ? s.tasks.prog : {};
   s.tasks.claimed = Array.isArray(s.tasks.claimed) ? (s.tasks.claimed as TaskId[]) : [];
@@ -796,7 +765,7 @@ export function rollSeason(s: SaveData): boolean {
 // ---------- the 07:00 game-day ----------
 /**
  * A "game day" starts at 07:00 local time. Everything daily (reward streak,
- * event bonus, guild donations, free chest) keys off this stamp, so claiming at
+ * event bonus, free chest) keys off this stamp, so claiming at
  * 06:59 and again at 07:01 counts as two different days — which is the whole
  * point of a 7 A.M. reset.
  */
@@ -872,7 +841,7 @@ export function weekStr(d = new Date()) {
 export const ZOOM_MIN = 0.75;
 export const ZOOM_MAX = 2.5;
 export function clampZoom(z: number) {
-  if (!Number.isFinite(z)) return 1.1;
+  if (!Number.isFinite(z)) return 1;
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 20) / 20));
 }
 
@@ -1417,87 +1386,6 @@ export function claimMonthTier(s: SaveData, idx: number): ChestLoot | null {
 }
 
 export const MONTH_TRACK_EVENTS = MONTHLY_EVENTS.length;
-
-// ---------- guild ----------
-export function joinGuild(s: SaveData, id: string): boolean {
-  const g = GUILD_BY_ID[id];
-  if (!g || s.trophies < g.trophyReq) return false;
-  s.guild.id = id;
-  return true;
-}
-
-export function leaveGuild(s: SaveData) {
-  s.guild.id = null;
-}
-
-export const GUILD_DONATIONS_PER_DAY = 3;
-
-export function donationsLeft(s: SaveData): number {
-  if (s.guild.lastDonate !== todayStr()) return GUILD_DONATIONS_PER_DAY;
-  return Math.max(0, GUILD_DONATIONS_PER_DAY - s.guild.donatesToday);
-}
-
-export function donateToGuild(s: SaveData, gold: number, xp: number, coins: number): boolean {
-  if (!s.guild.id || s.gold < gold || donationsLeft(s) <= 0) return false;
-  if (s.guild.lastDonate !== todayStr()) {
-    s.guild.lastDonate = todayStr();
-    s.guild.donatesToday = 0;
-  }
-  s.gold -= gold;
-  s.guild.xp += xp;
-  s.guild.coins += coins;
-  s.guild.donatesToday++;
-  bumpQuest(s, "donate", 1);
-  return true;
-}
-
-export function buyGuildItem(s: SaveData, item: GuildShopItem): boolean {
-  if (!s.guild.id || s.guild.coins < item.coins) return false;
-  s.guild.coins -= item.coins;
-  const g = item.grant;
-  if (g.gold) s.gold += g.gold;
-  if (g.gems) s.gems += g.gems;
-  if (g.tokens) s.tokens += g.tokens;
-  if (g.chips) addChips(s, g.chips);
-  if (g.frags) for (let i = 0; i < g.frags.n; i++) addFrag(s, randFrag(rarityBias(g.frags.rarity)), 1);
-  return true;
-}
-
-export function guildChestReady(s: SaveData): boolean {
-  return !!s.guild.id && s.guild.lastChest !== todayStr();
-}
-
-/** the free daily guild chest; Null Sigil members get bonus chips */
-export function claimGuildChest(s: SaveData): ChestLoot | null {
-  if (!guildChestReady(s)) return null;
-  let loot = rollChest("support");
-  if (s.guild.id === "null") loot = mergeLoot(loot, { ...emptyLoot(), chips: { basic: 2 } });
-  grantLoot(s, loot);
-  s.guild.lastChest = todayStr();
-  bumpQuest(s, "chests", 1);
-  return loot;
-}
-
-export function bumpQuest(s: SaveData, id: string, n = 1) {
-  s.guild.quests[id] = (s.guild.quests[id] || 0) + n;
-}
-
-export function questProgress(s: SaveData, id: string): number {
-  return s.guild.quests[id] || 0;
-}
-
-export function questDone(s: SaveData, id: string): boolean {
-  return s.guild.questsDone.includes(`${weekStr()}:${id}`);
-}
-
-export function claimQuest(s: SaveData, id: string): boolean {
-  const q = GUILD_QUESTS.find((x) => x.id === id);
-  if (!q || !s.guild.id || questDone(s, id) || questProgress(s, id) < q.need) return false;
-  s.guild.xp += q.xp;
-  s.guild.coins += q.coins;
-  s.guild.questsDone = [...s.guild.questsDone, `${weekStr()}:${id}`];
-  return true;
-}
 
 // ---------- competition ----------
 export function compClaimed(s: SaveData): boolean {
