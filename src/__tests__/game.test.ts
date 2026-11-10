@@ -389,8 +389,17 @@ describe("tower data", () => {
     expect(byRarity("epic")).toHaveLength(2);
     expect(byRarity("legendary")).toHaveLength(2);
     // the roster includes the established towers, the Mystical Supervisor,
-    // the two mystical summons (Eclipse Oracle / Astral Seraph) and God of Zeus
-    expect(TOWERS).toHaveLength(66);
+    // the two mystical summons (Eclipse Oracle / Astral Seraph), God of Zeus,
+    // and the two newest mystical towers below them
+    expect(TOWERS).toHaveLength(68);
+    expect(TOWERS[TOWERS.length - 1].id).toBe("gravity-phyxic");
+    expect(TOWERS[TOWERS.length - 2].id).toBe("electrical-protector");
+    expect(TOWER_BY_ID["electrical-protector"].rarity).toBe("mystical");
+    expect(TOWER_BY_ID["electrical-protector"].awk1?.name).toBe("Shield Amplifier");
+    expect(TOWER_BY_ID["electrical-protector"].awk2?.name).toBe("Sonic Boom");
+    expect(TOWER_BY_ID["gravity-phyxic"].rarity).toBe("mystical");
+    expect(TOWER_BY_ID["gravity-phyxic"].awk1?.name).toBe("Pressure Waves");
+    expect(TOWER_BY_ID["gravity-phyxic"].awk2?.name).toBe("End of Life");
     expect(TOWER_BY_ID.supervisor.rarity).toBe("mystical");
     expect(TOWER_BY_ID.supervisor.unlockFrags).toBe(1);
     expect(TOWER_BY_ID.meteor.awk1?.name).toBe("Asteroid Drop");

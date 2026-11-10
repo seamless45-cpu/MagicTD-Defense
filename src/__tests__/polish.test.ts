@@ -52,6 +52,7 @@ describe("guild removal", () => {
 });
 
 // ---------- round 6 ----------
+import { readFileSync } from "node:fs";
 import { classifyBgFile, MAX_IMAGE_BYTES, MAX_VIDEO_BYTES } from "../game/mediaBg";
 import { lookupMoreRow, MORE_LANGUAGES, RTL_LANGUAGES } from "../game/i18nMore";
 import { lookupInterface } from "../game/i18nTable";
@@ -61,7 +62,8 @@ import { DAILY_TASKS } from "../game/data";
 import { TOWER_BY_ID } from "../game/data";
 
 describe("background media upload", () => {
-  it("accepts photos and videos and reports their kind", () => {
+  // videos are disabled for uploads; classify still understands legacy records
+  it("accepts photos and still classifies legacy video records", () => {
     expect(classifyBgFile({ type: "image/png", size: 1000 })).toEqual({ kind: "image" });
     expect(classifyBgFile({ type: "video/mp4", size: 1000 })).toEqual({ kind: "video" });
   });
@@ -80,6 +82,40 @@ describe("ten more interface languages", () => {
     const ids = LANGUAGES.map((l) => l.id);
     for (const id of MORE_LANGUAGES) expect(ids).toContain(id);
     expect(LANGUAGES).toHaveLength(23);
+  });
+
+  // every English string the shared table knows has its own row (10 translations).
+  // Rows whose text is identical to English are dropped by the lookup on purpose,
+  // so coverage is checked against the row keys themselves.
+  it("covers every shared interface string in all ten languages", () => {
+    const tableSrc = readFileSync("src/game/i18nTable.ts", "utf8");
+    const tableBody = tableSrc.match(/const ROWS: Row\[\] = \[([\s\S]*?)\n\];/)![1];
+    const english = new Set(
+      [...tableBody.matchAll(/^\s*\["((?:[^"\\]|\\.)*)"/gm)].map((m) => m[1])
+    );
+
+    const moreSrc = readFileSync("src/game/i18nMore.ts", "utf8");
+    const moreBody = moreSrc.match(/const MORE_ROWS: string\[\]\[\] = \[([\s\S]*?)\n\];/)![1];
+    const rows = moreBody.split("\n").filter((l) => l.trim().startsWith('["'));
+    const translated = new Set<string>();
+    for (const row of rows) {
+      const first = row.match(/^\s*\["((?:[^"\\]|\\.)*)"/);
+      if (!first) continue;
+      const cells = row.match(/"(?:[^"\\]|\\.)*"/g) ?? [];
+      // a row only counts when it carries a value for every one of the ten languages
+      if (cells.length === 11) translated.add(first[1]);
+    }
+    expect([...english].filter((k) => !translated.has(k))).toEqual([]);
+  });
+
+  it("keeps every row at ten translations", () => {
+    const src = readFileSync("src/game/i18nMore.ts", "utf8");
+    const body = src.match(/const MORE_ROWS: string\[\]\[\] = \[([\s\S]*?)\n\];/)![1];
+    const rows = body.split("\n").filter((l) => l.trim().startsWith('["'));
+    for (const row of rows) {
+      const cells = row.match(/"(?:[^"\\]|\\.)*"/g) ?? [];
+      expect(cells.length).toBe(11); // English + 10 languages
+    }
   });
 
   it("translates the shell and falls back to English for unlisted strings", () => {
