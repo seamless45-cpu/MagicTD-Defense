@@ -52,11 +52,7 @@ export function MediaBackground({ dim, paused }: { dim: number; paused: boolean 
   if (!bg) return null;
   return (
     <div className="media-bg" aria-hidden="true" data-testid="media-bg">
-      {bg.kind === "video" ? (
-        <video ref={videoRef} src={bg.url} muted loop playsInline autoPlay preload="auto" />
-      ) : (
-        <img src={bg.url} alt="" draggable={false} />
-      )}
+      <img src={bg.url} alt="" draggable={false} />
       <div className="media-bg-dim" style={{ background: `rgba(2, 1, 8, ${Math.max(0, Math.min(0.9, dim))})` }} />
     </div>
   );
@@ -84,20 +80,24 @@ export function BackgroundMediaRow({ save, mutate }: { save: SaveData; mutate: (
       <div className="min-w-0 flex-1">
         <div className="font-bold">Background media</div>
         <div className="text-xs font-semibold text-[var(--dim)]">
-          Put your own photo or video behind the game. Videos always play silently. Files stay on this device.
+          Put your own photo behind the game. Files stay on this device.
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <label className="btn cursor-pointer px-3 py-1.5 text-xs">
-            {busy ? "SAVING…" : "UPLOAD PHOTO / VIDEO"}
+            {busy ? "SAVING…" : "UPLOAD PHOTO"}
             <input
               type="file"
-              accept="image/*,video/*"
+              accept="image/*"
               className="sr-only"
               data-testid="media-bg-input"
-              aria-label="Upload background photo or video"
+              aria-label="Upload background photo"
               disabled={busy}
               onChange={(e) => {
                 void pick(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+          </label>
                 e.target.value = "";
               }}
             />
