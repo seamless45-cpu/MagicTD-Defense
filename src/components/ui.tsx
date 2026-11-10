@@ -1432,11 +1432,11 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
   const jackpot = gold >= GOLD_RAIN_MIN || gems >= GEM_RAIN_MIN;
 
   // the open sequence, beat by beat:
-  // wind     the arena dims and every mote of light is dragged into the lock
-  // rattle   the chest fights back — violent shake, lid hammering, floor cracks
-  // crack    the seams split and beams tear out of the gaps
-  // burst    the lid is torn clean off, a light column erupts, shards fly
-  // loot     the haul lands tile by tile with a rising chime cascade
+  // wind     the arena dims and every mote of light is dragged into the lock (dramatic sci-fi/rpg)
+  // rattle   the chest fights back — violent shake, lid hammering, floor cracks (dramatic sci-fi/rpg)
+  // crack    the seams split and beams tear out of the gaps (dramatic sci-fi/rpg)
+  // burst    the lid is torn clean off, a light column erupts, shards fly (dramatic sci-fi/rpg)
+  // loot     the haul lands tile by tile with a rising chime cascade (dramatic sci-fi/rpg)
   useEffect(() => {
     if (!wantsChest) return;
     sfx.chestWind();
@@ -1463,7 +1463,7 @@ export function RewardClaim({ data, onClose }: { data: ClaimData; onClose: () =>
     return () => ts.forEach(clearTimeout);
   }, [wantsChest, data.lines.length]);
 
-  // the jackpot rain and its sound fire the instant the loot is revealed
+  // the jackpot rain and its sound fire the instant the loot is revealed (dramatic sci-fi/rpg)
   useEffect(() => {
     if (phase !== "loot" || !jackpot) return;
     if (gold >= GOLD_RAIN_MIN) sfx.goldRain();

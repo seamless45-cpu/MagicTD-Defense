@@ -62,6 +62,9 @@ export default function Shop({
     setOpening(id);
     setStage("closed");
     setLoot(null);
+    // DRAMATIC SCI-FI/RPG SOUND: chest wind + rattle
+    setTimeout(() => sfx.chestWind(), 50);
+    setTimeout(() => sfx.chestRattle(), 750);
     setTimeout(() => setStage("shaking"), 500);
   };
 
@@ -110,22 +113,25 @@ export default function Shop({
     push(`+${tokens} Magic Tokens`, "#b6a0ff");
   };
 
-  /** roll + bank the chest, then hand the exact loot to the claim animation */
-  const smash = () => {
-    if (!chest) return;
-    const rolled = rollChest(chest.id, bonus.chestFragBonus + monthBonus.chestFragBonus, bonus.fragBias + monthBonus.fragBias);
-    setLoot(rolled);
-    setStage("reward");
-    sfx.gem();
-    mutate((s) => grantLoot(s, rolled));
-    setClaim({
-      title: chest.name.toUpperCase(),
-      subtitle: bonus.chestPriceMul < 1 ? `${ev.name} discount applied` : chest.blurb,
-      color: chest.color,
-      chest: true,
-      lines: lootLines(rolled),
-    });
-  };
+    /** roll + bank the chest, then hand the exact loot to the claim animation */
+    const smash = () => {
+      if (!chest) return;
+      const rolled = rollChest(chest.id, bonus.chestFragBonus + monthBonus.chestFragBonus, bonus.fragBias + monthBonus.fragBias);
+      setLoot(rolled);
+      setStage("reward");
+      // DRAMATIC SCI-FI/RPG SOUND: chest blast + crack + loot
+      sfx.chestBlast();
+      sfx.chestCrack();
+      sfx.chestLoot(rolled.lines.length || 3);
+      mutate((s) => grantLoot(s, rolled));
+      setClaim({
+        title: chest.name.toUpperCase(),
+        subtitle: bonus.chestPriceMul < 1 ? `${ev.name} discount applied` : chest.blurb,
+        color: chest.color,
+        chest: true,
+        lines: lootLines(rolled),
+      });
+    };
 
   const legendaries = TOWERS.filter((t) => t.rarity === "legendary");
 
@@ -408,8 +414,13 @@ export default function Shop({
             setClaim(null);
             setOpening(null);
             setLoot(null);
+            // DRAMATIC SCI-FI/RPG SOUND: coin + gold/gem rain
             sfx.coin();
-            if (loot) push(`Banked ${lootLines(loot).length} reward${lootLines(loot).length === 1 ? "" : "s"}`, chest?.color || "#ffd977");
+            if (loot) {
+              if (loot.gold >= GOLD_RAIN_MIN) sfx.goldRain();
+              if (loot.gems >= GEM_RAIN_MIN) sfx.gemRain();
+              push(`Banked ${lootLines(loot).length} reward${lootLines(loot).length === 1 ? "" : "s"}`, chest?.color || "#ffd977");
+            }
           }}
         />
       )}
