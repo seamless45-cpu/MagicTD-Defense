@@ -3036,34 +3036,44 @@ export default function Battle({
      * GAUNTLET BOON: the run's only progression axis. Every cleared wave stops
      * the sim and offers three of these; the pick is banked in `g.boons` and the
      * next wave starts immediately (no countdown) so a run never loses rhythm.
+     *
+     * REWORKED: boons stack up to 10x, and new boons (Shield, Sonic, Pressure,
+     * Asteroid, Rift, Nova, Singularity, Celestial, Supernova) are added.
      */
     const applyBoon = (b: GauntletBoon) => {
+      // Count existing stacks of the same boon
+      const stack = g.boons.filter((x) => x.id === b.id).length;
+      const nextStack = stack + 1;
+      const maxStack = 10;
+      const eff = Math.min(nextStack, maxStack);
+
       g.boons.push(b);
+
       switch (b.id) {
         case "power":
-          g.dmgBonus += 0.18;
+          g.dmgBonus += 0.18 * eff;
           break;
         case "haste":
-          g.bonusAspd += 0.12;
+          g.bonusAspd += 0.12 * eff;
           break;
         case "edge":
-          g.critRate += 0.08;
-          g.critDmg += 0.35;
+          g.critRate += 0.08 * eff;
+          g.critDmg += 0.35 * eff;
           break;
         case "greed":
-          g.goldMul *= 1.25;
+          g.goldMul *= Math.pow(1.25, eff);
           break;
         case "mana":
-          g.spGainMul = Math.min(3, g.spGainMul + 0.2);
+          g.spGainMul = Math.min(3, g.spGainMul + 0.2 * eff);
           break;
         case "ward":
-          g.lives += 4;
+          g.lives += 4 * eff;
           break;
         case "barrage": {
           const live = g.towers.filter((t) => t.cell);
           for (let i = 0; i < 3 && live.length; i++) {
             const t = live[Math.floor(Math.random() * live.length)];
-            t.points += 2;
+            t.points += 2 * eff;
             const p = cellCenter(t.cell!.c, t.cell!.r);
             glow(p.x, p.y, b.color, 60, 0.5);
           }
@@ -3074,7 +3084,7 @@ export default function Battle({
           if (live.length) {
             const t = live[Math.floor(Math.random() * live.length)];
             // battle levels cap at 5 (see run shop); the boon respects the cap
-            t.bLv = Math.min(5, t.bLv + 1);
+            t.bLv = Math.min(5, t.bLv + eff);
             const p = cellCenter(t.cell!.c, t.cell!.r);
             ring(p.x, p.y, b.color, 70);
             glow(p.x, p.y, b.color, 90, 0.6);
@@ -3082,10 +3092,47 @@ export default function Battle({
           break;
         }
         case "bounty":
-          g.gold += 500;
+          g.gold += 500 * eff;
+          break;
+        case "shield":
+          // Electrical Shield: protects towers for 8s +1s per stack
+          g.shieldDuration = 8 + eff;
+          break;
+        case "sonic":
+          // Sonic Boom: knockback enemies to start +1m per stack
+          g.knockbackDist = 1 + eff;
+          break;
+        case "pressure":
+          // Pressure Waves: purple pit drags enemies +0.2s per stack
+          g.dragDuration = 0.2 * eff;
+          break;
+        case "asteroid":
+          // End of Life: +1 asteroid +0.8m radius per stack
+          g.asteroidCount += eff;
+          g.asteroidRadius += 0.8 * eff;
+          break;
+        case "rift":
+          // Eclipse Rift: +15% HP burn per stack
+          g.hpBurn += 0.15 * eff;
+          break;
+        case "nova":
+          // Astral Nova: +15% crit per stack
+          g.critRate += 0.15 * eff;
+          break;
+        case "singularity":
+          // God Zeus Singularity: +15% HP consume per stack
+          g.hpConsume += 0.15 * eff;
+          break;
+        case "celestial":
+          // Heavenly Laser: +15% laser range per stack
+          g.laserRange += 0.15 * eff;
+          break;
+        case "supernova":
+          // Supervisor Doomsday: +15% amplification per stack
+          g.amplification += 0.15 * eff;
           break;
       }
-      toastRef.current(`${b.glyph} ${b.name} · ${b.desc}`, b.color);
+      toastRef.current(`${b.glyph} ${b.name} · ${b.desc} (Stack ${eff}/${maxStack})`, b.color);
     };
 
     const takeBoon = (b: GauntletBoon) => {

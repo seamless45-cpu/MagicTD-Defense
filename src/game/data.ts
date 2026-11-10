@@ -1,310 +1,3 @@
-export type Rarity = "normal" | "decent" | "epic" | "legendary" | "mystical";
-
-export const RARITY: Record<Rarity, { name: string; color: string; glow: string }> = {
-  normal: { name: "Normal", color: "#9fb4c7", glow: "rgba(159,180,199,0.4)" },
-  decent: { name: "Decent", color: "#3fb6ff", glow: "rgba(63,182,255,0.5)" },
-  epic: { name: "Epic", color: "#c44dff", glow: "rgba(196,77,255,0.55)" },
-  legendary: { name: "Legendary", color: "#ffc457", glow: "rgba(255,196,87,0.6)" },
-  mystical: { name: "Mystical", color: "#ff315c", glow: "rgba(255,49,92,0.72)" },
-};
-
-export const RARITY_ORDER: Rarity[] = ["normal", "decent", "epic", "legendary", "mystical"];
-
-export type TowerKind =
-  | "arrow"
-  | "cannon"
-  | "ice"
-  | "speaker"
-  | "tesla"
-  | "gatling"
-  | "core"
-  | "lightning"
-  | "hellstorm"
-  | "icestorm"
-  | "plant"
-  | "swarm"
-  | "chrono"
-  | "void"
-  | "plasma"
-  | "sling"
-  | "flame"
-  | "spike"
-  | "boomer"
-  | "toxin"
-  | "rime"
-  | "siphon"
-  | "quake"
-  | "storm"
-  | "plague"
-  | "rail"
-  | "reaper"
-  | "prism"
-  | "aegis"
-  | "hellgate"
-  | "nova"
-  | "gravity"
-  | "thundercrown"
-  | "voidrip"
-  | "furnace"
-  | "maelstrom"
-  | "starfall"
-  | "chronolock"
-  | "gravebloom"
-  | "colossus"
-  | "axe"
-  | "frost"
-  | "mortar"
-  | "laser"
-  | "missile"
-  | "dragon"
-  | "sun"
-  | "clone"
-  | "demon"
-  | "heavenly"
-  | "honor"
-  | "supervisor"
-  | "gale"
-  | "bombardment"
-  | "wildfire"
-  | "hades"
-  | "ion"
-  | "aether"
-  | "scythe"
-  | "sandstorm"
-  | "bloodstone"
-  | "venom"
-  | "eclipse"
-  | "seraph"
-  | "godzeus";
-
-export type GameMode = "battle" | "endless" | "gauntlet" | "gemrush" | "hardcore" | "superhardcore" | "sandbox";
-
-export interface ModeRules { hpMul: number; rewardMul: number; speedMul: number; lives: number | null; }
-export const MODE_RULES: Record<GameMode, ModeRules> = {
-  battle: { hpMul: 1, rewardMul: 1, speedMul: 1, lives: null },
-  endless: { hpMul: 1, rewardMul: 1, speedMul: 1, lives: null },
-  gauntlet: { hpMul: 1, rewardMul: 1, speedMul: 1, lives: null },
-  gemrush: { hpMul: 1, rewardMul: 1, speedMul: 1, lives: null },
-  hardcore: { hpMul: 10, rewardMul: 5, speedMul: 1.25, lives: null },
-  superhardcore: { hpMul: 710, rewardMul: 10, speedMul: 1.75, lives: 1 },
-  sandbox: { hpMul: 1, rewardMul: 0, speedMul: 1, lives: null },
-};
-
-/** HARDCORE is a campaign-shaped run (12 rounds) with brutal modifiers. */
-export const isRunMode = (mode: GameMode) => mode === "battle" || mode === "hardcore" || mode === "superhardcore";
-
-/** every enemy walks 44% faster than its data sheet (the old 20% boost, +20% again), in every mode */
-export const ENEMY_SPEED_MUL = 1.44;
-
-// ---------- hardcore rules ----------
-/** enemies spawn in pairs: two bodies per spawn slot */
-export const HARDCORE_SPAWN_MUL = 2;
-/** ten times the health of the same enemy in Battle */
-export const HARDCORE_HP_MUL = 10;
-/** Super Hardcore enemy-health multiplier. */
-export const SUPER_HARDCORE_HP_MUL = 710;
-/** rewards for Hardcore, as requested */
-export const HARDCORE_REWARD_MUL = 5;
-export const SUPER_HARDCORE_REWARD_MUL = 10;
-export const HARDCORE_SPEED_MUL = 1.25;
-export const SUPER_HARDCORE_SPEED_MUL = 1.75;
-export const modeSpeedMul = (mode: GameMode) => mode === "hardcore" ? HARDCORE_SPEED_MUL : mode === "superhardcore" ? SUPER_HARDCORE_SPEED_MUL : 1;
-/** Hardcore and Super Hardcore have no attempt limit: the daily and weekly caps were removed. Attempts are still counted for stats. */
-export const HARDCORE_UNLIMITED = true;
-export const HARDCORE_LIVES = 12;
-/** enemies are immune to crits: crit chance and crit damage never apply */
-export const HARDCORE_CRIT_IMMUNE = true;
-
-/** the single source of truth for every hardcore modifier, used by Battle */
-export const hardcoreEnemyHp = (base: number, mode: GameMode) =>
-  base * (mode === "hardcore" ? HARDCORE_HP_MUL : mode === "superhardcore" ? SUPER_HARDCORE_HP_MUL : 1);
-/** hardcore fields two bodies per slot, so the wave is doubled in place */
-export const hardcoreSpawnPlan = (comp: number[], mode: GameMode) =>
-  mode === "hardcore" ? comp.flatMap((type) => [type, type]) : comp;
-/** every payout — gold, gems, potions, fragments, tokens — scales with this */
-export const payoutMul = (mode: GameMode) => mode === "hardcore" ? HARDCORE_REWARD_MUL : mode === "superhardcore" ? SUPER_HARDCORE_REWARD_MUL : 1;
-/** crits are rolled and applied only when the mode allows them */
-export const critAllowed = (mode: GameMode) => !(mode === "hardcore" && HARDCORE_CRIT_IMMUNE);
-
-/**
- * How an awakening behaves, so one implementation in the battle engine can
- * drive every tower's kit. Towers with a hand-written special still get first
- * say (lightning, plasma, dragon, sun, hellstorm, rail); everything else is
- * routed through these.
- */
-export type AwkFx =
-  | "heavy" // chance to fire a shot with far more damage
-  | "critup" // chance to make the shot always crit
-  | "volley" // chance to loose an extra shot at another enemy
-  | "freeze" // chance to encase whatever it hits
-  | "burn" // chance to leave a burn on whatever it hits
-  | "chain" // chance to arc the hit into nearby enemies
-  | "slow" // chance to chill whatever it hits
-  | "splash" // chance to widen the blast
-  | "sp" // bonus SP per kill
-  | "bounty" // bonus gold per kill
-  | "aura" // aura towers: stronger aura at all times
-  | "execute" // instantly kill enemies under a share of their max HP
-  | "leech" // heal lives back on kills
-  | "quake" // chance to stun everything in the blast
-  | "clonesuper" // Clone tower: chance to copy towers with any points + haste
-  | "cloneperfect"; // Clone tower: chance the copy gains bonus points
-
-export interface AwkSpec {
-  name: string;
-  desc: string;
-  chance: number[]; // per tier I..VI
-  mult: number[]; // effect magnitude per tier
-  mult2?: number[]; // secondary magnitude per tier
-  /** engine hook — absent means the tower has bespoke handling in Battle.tsx */
-  fx?: AwkFx;
-  /** bespoke kits describe their own tier line (share, seconds, points…) */
-  fmt?: (mult: number, mult2: number | undefined) => string;
-}
-
-/**
- * Awakening factory. `chance` and `mult` are given as [tier I, tier V] pairs and
- * interpolated across the original five tiers, then extended to Tier VI for every tower.
- */
-export function awking(
-  name: string,
-  fx: AwkFx,
-  desc: string,
-  chance: [number, number],
-  mult: [number, number],
-  mult2?: [number, number]
-): AwkSpec {
-  const spread = (pair: [number, number]) =>
-    Array.from({ length: 5 }, (_, i) => {
-      const v = pair[0] + ((pair[1] - pair[0]) * i) / 4;
-      return Math.round(v * 1000) / 1000;
-    });
-  return {
-    name,
-    fx,
-    desc,
-    chance: spread(chance),
-    mult: spread(mult),
-    ...(mult2 ? { mult2: spread(mult2) } : {}),
-  };
-}
-
-export interface TowerDef {
-  id: string;
-  name: string;
-  rarity: Rarity;
-  kind: TowerKind;
-  desc: string;
-  target: "front" | "all" | "none";
-  dmg: number;
-  upDmg: number;
-  ascDmg: number;
-  rate: number;
-  upRate: number;
-  ascRate: number;
-  aspd?: number;
-  upAspd?: number;
-  ascAspd?: number;
-  aura?: boolean;
-  atkAura?: number;
-  upAtkAura?: number;
-  ascAtkAura?: number;
-  hpState?: number[]; // power plant threshold
-  splash?: number;
-  upSplash?: number;
-  ascSplash?: number;
-  freeze?: number;
-  upFreeze?: number;
-  ascFreeze?: number;
-  chain?: number;
-  upChain?: number;
-  ascChain?: number;
-  stun?: number;
-  upStun?: number;
-  ascStun?: number;
-  fbChance?: number;
-  upFb?: number;
-  ascFb?: number;
-  icChance?: number;
-  upIc?: number;
-  ascIc?: number;
-  icPct?: number;
-  upIcPct?: number;
-  ascIcPct?: number;
-  rapid?: boolean;
-  exotic?: boolean;
-  /** projectiles per volley (hits that many enemies at once) */
-  multi?: number;
-  /** bonus damage as a share of the target's max HP (0.05 = 5%) */
-  pctHp?: number;
-  upPctHp?: number;
-  ascPctHp?: number;
-  /** how many extra enemies a shot skewers */
-  pierce?: number;
-  upPierce?: number;
-  ascPierce?: number;
-  /** slow strength applied on hit / to nearby enemies (0.4 = 40% slower) */
-  slow?: number;
-  upSlow?: number;
-  ascSlow?: number;
-  slowDur?: number;
-  slowAura?: number;
-  /** burn applied on every hit, as a share of the shot's damage per second */
-  burnPct?: number;
-  upBurnPct?: number;
-  ascBurnPct?: number;
-  burnDur?: number;
-  /** sp earned on every kill this tower lands (Mana Siphon style) */
-  spGain?: number;
-  /** bonus gold per kill this tower lands */
-  goldGain?: number;
-  /** aura towers: damage of a periodic pulse in radius, and how often it fires */
-  pulse?: number;
-  upPulse?: number;
-  pulseRate?: number;
-  /** shots that leave a burning pool on the ground where they land */
-  lava?: boolean;
-  /** active skill key (see skills.ts); the tower auto-casts it on a cooldown */
-  skill?: string;
-  /** Demon Execution: seconds between executioner strikes (base, un-awakened) */
-  execCd?: number;
-  /** God of Zeus: seconds between divine lightning strikes, and the per-level shave */
-  zeusCd?: number;
-  upZeusCd?: number;
-  /** Heavenly God: how many enemies behind the target the laser also burns */
-  laserBehind?: number;
-  /** Heavenly God: damage share the enemies behind the target take */
-  laserBehindMul?: number;
-  /** Heavenly God: bolts + points + attack surge handed out by a merge */
-  mergeBolts?: number;
-  mergePoints?: number;
-  mergeBuff?: number;
-  mergeBuffT?: number;
-  /** Honor Emperor: dragging it onto a matching tower grows a point instead of merging */
-  honor?: boolean;
-  /** support towers: how far a pulse drags enemies back along the path */
-  pull?: number;
-  upPull?: number;
-  /** armour shredded off whatever a shot hits (0.06 = -6% per hit) */
-  shred?: number;
-  upShred?: number;
-  ascShred?: number;
-  /** rocks a volley calls down on random enemies */
-  meteors?: number;
-  upMeteors?: number;
-  /** radius a pulse or meteor hits, when it differs from the default */
-  pulseRadius?: number;
-  /** extra damage per kill this tower has landed, capped (Scorching Hot style) */
-  killStack?: number;
-  /** canvas + icon art family (defaults to the tower kind) */
-  art?: string;
-  /** art tint, when a tower should not use its rarity colour on the art itself */
-  accent?: string;
-  awk1?: AwkSpec;
-  awk2?: AwkSpec;
-  unlockFrags: number;
-}
-
 export const TOWERS: TowerDef[] = [
   {
     id: "arrow", name: "Arrow", rarity: "normal", kind: "arrow", target: "front",
@@ -519,492 +212,757 @@ export const TOWERS: TowerDef[] = [
     id: "spike", name: "Spike Trap", rarity: "normal", kind: "spike", art: "spike", accent: "#c8d6e5",
     target: "front",
     desc: "Erupts under the front enemy, shredding everything packed around it.",
-    dmg: 70, upDmg: 6, ascDmg: 16, rate: 0.9, upRate: 0.015, ascRate: 0.02,
-    splash: 95, upSplash: 6, ascSplash: 8, unlockFrags: 4,
+    dmg: 70, upDmg: 6, ascDmg: 16, rate: 0.9, upRate: 0, ascRate: 0,
+    splash: 60, upSplash: 6, ascSplash: 12, shred: 0.06, upShred: 0.006, ascShred: 0.012, unlockFrags: 2,
 
-    awk1: awking("Rupture", "quake",
-      "Chance to stun everything the spikes erupt under", [0.2, 0.7], [0.6, 2]),
-    awk2: awking("Caltrops", "slow",
-      "The crater is left littered with spikes that slow anything walking in", [0.25, 0.8], [0.25, 0.5]),  },
+    awk1: awking("Iron Shards", "splash",
+      "The trap bursts into a wider radius of metal splinters", [0.2, 0.7], [1, 1.8]),
+    awk2: awking("Bleeding Ground", "shred",
+      "The shards strip armour more aggressively", [0.15, 0.6], [0.06, 0.18]),  },
   {
     id: "boomer", name: "Boomerang", rarity: "normal", kind: "boomer", art: "sling", accent: "#9fe8ff",
     target: "front",
-    desc: "Hurls a blade that curves through the whole file of enemies.",
-    dmg: 42, upDmg: 5, ascDmg: 14, rate: 0.6, upRate: 0.012, ascRate: 0.02,
-    pierce: 3, upPierce: 1, ascPierce: 1, unlockFrags: 5,
+    desc: "Throws a spinning blade that returns. Hits twice per throw.",
+    dmg: 45, upDmg: 5, ascDmg: 12, rate: 0.4, upRate: 0.008, ascRate: 0.012,
+    multi: 2, unlockFrags: 2,
 
-    awk1: awking("Ricochet", "chain",
-      "The blade bounces into more enemies before it returns", [0.2, 0.7], [2, 6]),
-    awk2: awking("Serrated Edge", "burn",
-      "Every enemy it cuts keeps bleeding", [0.2, 0.65], [0.4, 1.6]),  },
+    awk1: awking("Whirlwind", "volley",
+      "Chance to throw two blades that criss-cross", [0.15, 0.6], [1, 1]),
+    awk2: awking("Razor Edge", "shred",
+      "The blade cuts deeper into armour", [0.2, 0.65], [0.06, 0.18]),  },
   {
     id: "toxin", name: "Toxic Sprayer", rarity: "normal", kind: "toxin", art: "flame", accent: "#8effc4",
     target: "front",
-    desc: "Sprays a poison cloud that splashes on impact and rots the pack over time.",
-    dmg: 20, upDmg: 2, ascDmg: 7, rate: 0.5, upRate: 0.01, ascRate: 0.015,
-    splash: 70, upSplash: 5, ascSplash: 6,
-    burnPct: 0.35, upBurnPct: 0.04, ascBurnPct: 0.05, burnDur: 5, unlockFrags: 6,
+    desc: "Sprays toxic mist that poisons the target. Damage over time.",
+    dmg: 18, upDmg: 3, ascDmg: 8, rate: 0.6, upRate: 0.015, ascRate: 0.02,
+    burnPct: 0.4, upBurnPct: 0.05, ascBurnPct: 0.07, burnDur: 5, unlockFrags: 3,
 
-    awk1: awking("Virulence", "burn",
-      "The poison eats into the target far harder", [0.25, 0.8], [0.8, 3.2]),
-    awk2: awking("Miasma", "splash",
-      "The cloud is larger and lingers as a choking pool", [0.2, 0.7], [0.6, 1.8]),  },
+    awk1: awking("Poison Cloud", "burn",
+      "The mist spreads to nearby enemies", [0.2, 0.7], [0.5, 2]),
+    awk2: awking("Corrosive", "shred",
+      "The poison eats through armour", [0.15, 0.6], [0.06, 0.18]),  },
   {
     id: "axe", name: "Axe Thrower", rarity: "decent", kind: "axe", art: "tube", accent: "#ff9d5c",
     target: "front",
-    desc: "Spins a heavy axe that cuts through the front line and keeps going.",
-    dmg: 105, upDmg: 16, ascDmg: 0, rate: 0.8, upRate: 0.018, ascRate: 0,
-    pierce: 4, upPierce: 1, splash: 60, upSplash: 6, unlockFrags: 9,
+    desc: "Throws a heavy axe. High damage, slow rate.",
+    dmg: 120, upDmg: 15, ascDmg: 30, rate: 0.6, upRate: 0.01, ascRate: 0.015,
+    unlockFrags: 5,
 
-    awk1: awking("Hurled Reaper", "critup",
-      "Chance for a spinning axe that always crits", [0.1, 0.4], [1, 1]),
-    awk2: awking("Bleeding Cut", "burn",
-      "Axes leave deep wounds that bleed the target dry", [0.22, 0.7], [0.5, 2.2]),  },
+    awk1: awking("Cleave", "heavy",
+      "Chance to split the axe into two", [0.15, 0.6], [1, 1.5]),
+    awk2: awking("Throwing Spin", "volley",
+      "Chance to throw an extra axe", [0.1, 0.45], [1, 1]),  },
   {
     id: "frost", name: "Frost Spire", rarity: "decent", kind: "frost", art: "spike", accent: "#9fe8ff",
     target: "front",
-    desc: "Deep chill field: slows everything nearby and locks its target in ice.",
-    dmg: 62, upDmg: 10, ascDmg: 0, rate: 1, upRate: 0.02, ascRate: 0,
-    freeze: 0.2, upFreeze: 0.03, ascFreeze: 0,
-    slow: 0.35, upSlow: 0.03, slowDur: 3.2, slowAura: 190, unlockFrags: 11,
+    desc: "Fires ice shards that chill enemies.",
+    dmg: 60, upDmg: 8, ascDmg: 18, rate: 0.8, upRate: 0.015, ascRate: 0.02,
+    freeze: 0.15, upFreeze: 0.05, ascFreeze: 0.1, unlockFrags: 5,
 
-    awk1: awking("Permafrost", "freeze",
-      "Chance to lock the target in a block of ice", [0.18, 0.65], [1.4, 3]),
-    awk2: awking("Cold Snap", "splash",
-      "Chance to burst a ring of frost that chills everything around", [0.25, 0.8], [0.4, 1.2]),  },
+    awk1: awking("Frost Nova", "freeze",
+      "Chance to freeze a wider area", [0.15, 0.6], [1.2, 2.4]),
+    awk2: awking("Cold Snap", "slow",
+      "Chilled enemies move slower", [0.25, 0.8], [0.2, 0.45]),  },
   {
     id: "mortar", name: "Siege Mortar", rarity: "decent", kind: "mortar", art: "tube", accent: "#d0d6e0",
     target: "front",
-    desc: "Lobs one enormous shell every two seconds. Huge crater, huge damage.",
-    dmg: 340, upDmg: 45, ascDmg: 0, rate: 2, upRate: 0.04, ascRate: 0,
-    splash: 230, upSplash: 14, ascSplash: 0, unlockFrags: 13,
+    desc: "Fires a mortar shell that explodes in a large radius.",
+    dmg: 150, upDmg: 20, ascDmg: 40, rate: 1.0, upRate: 0.02, ascRate: 0.03,
+    splash: 80, upSplash: 8, ascSplash: 16, unlockFrags: 5,
 
-    awk1: awking("Siege Load", "splash",
-      "Chance to fire a far wider crater shell", [0.2, 0.7], [0.4, 1.1]),
-    awk2: awking("Thermite", "burn",
-      "The shell leaves a burning crater behind", [0.25, 0.8], [0.6, 2.4]),  },
+    awk1: awking("Heavy Shell", "heavy",
+      "Chance for a bigger explosion", [0.15, 0.6], [1, 1.5]),
+    awk2: awking("Shrapnel", "splash",
+      "The shell scatters further", [0.2, 0.7], [1, 1.8]),  },
   {
     id: "laser", name: "Laser Cutter", rarity: "epic", kind: "laser", art: "beam", accent: "#b6a0ff",
     target: "front",
-    desc: "Sustained beam that arcs to two more enemies. Fires four times a second.",
-    dmg: 58, upDmg: 12, ascDmg: 0, rate: 0.25, upRate: 0.006, ascRate: 0,
-    chain: 3, upChain: 1, ascChain: 0, unlockFrags: 14,
+    desc: "Cuts through enemies with a laser beam.",
+    dmg: 200, upDmg: 30, ascDmg: 60, rate: 0.7, upRate: 0.015, ascRate: 0.02,
+    pierce: 2, upPierce: 1, ascPierce: 1, unlockFrags: 12,
 
-    awk1: awking("Prism Split", "chain",
-      "Chance for the beam to fan out into extra enemies", [0.2, 0.7], [2, 6]),
-    awk2: awking("Overburn", "burn",
-      "Beams scorch on contact and keep burning", [0.25, 0.8], [0.4, 1.8]),  },
+    awk1: awking("Beam Split", "volley",
+      "Chance to split the beam into two", [0.15, 0.6], [1, 1]),
+    awk2: awking("Focus", "heavy",
+      "The beam deals more damage", [0.1, 0.45], [1, 1.5]),  },
   {
     id: "missile", name: "Missile Battery", rarity: "epic", kind: "missile", art: "tube", accent: "#ffd23f",
     target: "front",
-    desc: "Launches four homing rockets at four different enemies. Every one pops.",
-    dmg: 135, upDmg: 22, ascDmg: 0, rate: 1.15, upRate: 0.02, ascRate: 0,
-    multi: 4, splash: 70, upSplash: 6, ascSplash: 0, unlockFrags: 16,
+    desc: "Fires missiles that explode on impact.",
+    dmg: 250, upDmg: 35, ascDmg: 70, rate: 0.8, upRate: 0.015, ascRate: 0.02,
+    splash: 100, upSplash: 10, ascSplash: 20, unlockFrags: 12,
 
-    awk1: awking("Cluster Payload", "volley",
-      "Chance for two more rockets in the salvo", [0.18, 0.6], [1, 2]),
-    awk2: awking("Incendiary", "burn",
-      "Every rocket leaves a burning pool where it pops", [0.25, 0.8], [0.5, 2]),  },
+    awk1: awking("Cluster", "splash",
+      "Chance for missiles to split into smaller ones", [0.15, 0.6], [1, 1.5]),
+    awk2: awking("Impact", "heavy",
+      "Missiles deal more damage", [0.1, 0.45], [1, 1.5]),  },
   {
     id: "dragon", name: "Dragon's Maw", rarity: "legendary", kind: "dragon", art: "flame", accent: "#ff5d3d",
     target: "front",
-    desc: "Devours the pack: colossal splash, a vicious burn, and it grows with every kill.",
-    dmg: 820, upDmg: 0, ascDmg: 0, rate: 1.05, upRate: 0.02, ascRate: 0,
-    splash: 240, upSplash: 12, ascSplash: 0,
-    burnPct: 0.5, upBurnPct: 0.03, ascBurnPct: 0, burnDur: 4,
-    killStack: 0.01, exotic: true, unlockFrags: 1,
+    desc: "Breathes fire that burns enemies.",
+    dmg: 600, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    burnPct: 0.8, upBurnPct: 0.08, ascBurnPct: 0.1, burnDur: 6, exotic: true, unlockFrags: 1,
+
     awk1: {
-      name: "Inferno Roar",
-      desc: "Chance to breathe a firestorm: far more damage, always crits, wider crater.",
-      chance: [0.12, 0.18, 0.26, 0.42, 0.55],
-      mult: [1.5, 3, 8, 20, 40],
+      name: "Dragon's Breath",
+      desc: "Chance for a larger fire blast",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
     },
     awk2: {
-      name: "Molten Carapace",
-      desc: "Every kill stokes the Maw: +1% damage per kill, capped by tier.",
-      chance: [1, 1, 1, 1, 1],
-      mult: [1500, 2500, 4000, 6000, 8000],
+      name: "Fire Storm",
+      desc: "Fire spreads to nearby enemies",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
     },
   },
   {
     id: "sun", name: "Sunforge", rarity: "legendary", kind: "sun", art: "beam", accent: "#ffc457",
-    target: "all",
-    desc: "Calls a solar flare down on every enemy at once and sets the field alight.",
-    dmg: 300, upDmg: 0, ascDmg: 0, rate: 0.6, upRate: 0.02, ascRate: 0,
-    burnPct: 0.3, upBurnPct: 0.03, ascBurnPct: 0, burnDur: 4, exotic: true, unlockFrags: 1,
+    target: "front",
+    desc: "Fires a beam of sunlight that burns enemies.",
+    dmg: 500, upDmg: 0, ascDmg: 0, rate: 0.9, upRate: 0.02, ascRate: 0,
+    burnPct: 0.7, upBurnPct: 0.07, ascBurnPct: 0.09, burnDur: 5, exotic: true, unlockFrags: 1,
+
     awk1: {
-      name: "Supernova",
-      desc: "Chance to detonate: the flare deals far more damage and always crits.",
+      name: "Solar Flare",
+      desc: "Chance for a larger beam",
       chance: [0.1, 0.16, 0.22, 0.4, 0.55],
-      mult: [1.5, 3, 8, 20, 40],
+      mult: [1.5, 3, 6, 12, 18],
     },
     awk2: {
-      name: "Solar Wind",
-      desc: "Chance to leave every enemy scorched, and the burn stacks with each flare.",
+      name: "Sunburst",
+      desc: "Beam spreads to nearby enemies",
       chance: [0.3, 0.45, 0.6, 0.8, 1],
-      mult: [1, 2, 3, 5, 8],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
     },
   },
+
   // ---------------------------------------------------------------
   // SECOND WAVE OF TOWERS — 6 more, one for every niche
   // ---------------------------------------------------------------
   {
     id: "rime", name: "Rime Cannon", rarity: "normal", kind: "cannon", art: "cannon", accent: "#9fe8ff",
     target: "front",
-    desc: "Frost shells that burst wide and lock whole packs into ice.",
-    dmg: 90, upDmg: 7, ascDmg: 18, rate: 1.1, upRate: 0.018, ascRate: 0.02,
-    splash: 85, upSplash: 6, ascSplash: 8,
-    freeze: 0.22, upFreeze: 0.04, ascFreeze: 0.05, unlockFrags: 7,
+    desc: "Fires an ice shell that freezes enemies.",
+    dmg: 80, upDmg: 10, ascDmg: 20, rate: 0.8, upRate: 0.015, ascRate: 0.02,
+    freeze: 0.2, upFreeze: 0.05, ascFreeze: 0.1, splash: 40, upSplash: 4, ascSplash: 8, unlockFrags: 2,
 
-    awk1: awking("Flash Freeze", "freeze",
-      "Chance to lock the whole blast zone solid", [0.2, 0.65], [1.2, 2.8]),
-    awk2: awking("Shatterpoint", "critup",
-      "Chance for a shell that always crits and shreds ice", [0.1, 0.4], [1, 1]),  },
+    awk1: awking("Ice Blast", "freeze",
+      "Chance for a larger freeze", [0.15, 0.6], [1.2, 2.4]),
+    awk2: awking("Cold Shell", "splash",
+      "The shell scatters ice", [0.2, 0.7], [1, 1.8]),  },
   {
     id: "siphon", name: "Soul Siphon", rarity: "decent", kind: "siphon", art: "tube", accent: "#c44dff",
     target: "front",
-    desc: "Every kill it lands feeds the grid: bonus SP and a rising damage aura.",
-    dmg: 96, upDmg: 14, ascDmg: 0, rate: 1.05, upRate: 0.02, ascRate: 0,
-    spGain: 9, unlockFrags: 10,
+    desc: "Siphons life from enemies.",
+    dmg: 100, upDmg: 15, ascDmg: 30, rate: 0.9, upRate: 0.02, ascRate: 0.03,
+    spGain: 5, upSpGain: 1, ascSpGain: 2, unlockFrags: 5,
 
-    awk1: awking("Soul Tithe", "sp",
-      "Every kill feeds far more SP into the grid", [0.35, 1], [3, 14]),
-    awk2: awking("Withering", "burn",
-      "Stolen souls linger and rot the target from inside", [0.25, 0.8], [0.5, 2.2]),  },
+    awk1: awking("Soul Drain", "sp",
+      "Chance for more SP gain", [0.15, 0.6], [1, 1.5]),
+    awk2: awking("Life Steal", "leech",
+      "Chance to heal lives", [0.1, 0.45], [1, 1]),  },
   {
     id: "quake", name: "Quake Pylon", rarity: "decent", kind: "quake", art: "spike", accent: "#ffd23f",
     target: "front",
-    desc: "Slams the ground: wide crater plus a stun that stops the pack dead.",
-    dmg: 150, upDmg: 22, ascDmg: 0, rate: 1.6, upRate: 0.03, ascRate: 0,
-    splash: 190, upSplash: 12, ascSplash: 0,
-    stun: 1.1, upStun: 0.15, ascStun: 0, unlockFrags: 13,
+    desc: "Creates earthquakes that stun enemies.",
+    dmg: 90, upDmg: 12, ascDmg: 24, rate: 0.85, upRate: 0.015, ascRate: 0.02,
+    stun: 1.5, upStun: 0.3, ascStun: 0.6, splash: 50, upSplash: 5, ascSplash: 10, unlockFrags: 5,
 
-    awk1: awking("Fault Line", "quake",
-      "Chance to stagger everything on the lane", [0.2, 0.7], [0.8, 2.6]),
-    awk2: awking("Aftershock", "heavy",
-      "Chance for a slam that lands twice as hard", [0.15, 0.55], [1, 4]),  },
+    awk1: awking("Tremor", "stun",
+      "Chance for a longer stun", [0.15, 0.6], [1.5, 3]),
+    awk2: awking("Shockwave", "splash",
+      "The quake spreads further", [0.2, 0.7], [1, 1.8]),  },
   {
     id: "storm", name: "Storm Caller", rarity: "epic", kind: "storm", art: "beam", accent: "#a0e8ff",
     target: "front",
-    desc: "Arc lightning that forks through five enemies at once.",
-    dmg: 120, upDmg: 20, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
-    chain: 5, upChain: 1, ascChain: 0, unlockFrags: 15,
+    desc: "Calls storms that strike enemies with lightning.",
+    dmg: 180, upDmg: 25, ascDmg: 50, rate: 0.75, upRate: 0.015, ascRate: 0.02,
+    chain: 4, upChain: 2, ascChain: 4, unlockFrags: 12,
 
-    awk1: awking("Thunderhead", "chain",
-      "Chance for the arc to fork into two extra enemies", [0.22, 0.7], [2, 6]),
-    awk2: awking("Skyfall", "heavy",
-      "Chance to call a bolt straight down on the target", [0.12, 0.5], [1.5, 6]),  },
+    awk1: awking("Lightning Strike", "chain",
+      "Chance for more lightning strikes", [0.15, 0.6], [1, 1.5]),
+    awk2: awking("Thunder", "heavy",
+      "Lightning deals more damage", [0.1, 0.45], [1, 1.5]),  },
   {
     id: "plague", name: "Plague Mortar", rarity: "epic", kind: "plague", art: "tube", accent: "#8effc4",
     target: "front",
-    desc: "Lobs a plague canister: massive crater, creeping rot and a heavy slow.",
-    dmg: 260, upDmg: 34, ascDmg: 0, rate: 1.9, upRate: 0.035, ascRate: 0,
-    splash: 200, upSplash: 12, ascSplash: 0,
-    burnPct: 0.55, upBurnPct: 0.05, ascBurnPct: 0, burnDur: 5,
-    slow: 0.3, upSlow: 0.02, slowDur: 3, unlockFrags: 17,
+    desc: "Fires plague shells that poison enemies.",
+    dmg: 160, upDmg: 22, ascDmg: 44, rate: 0.8, upRate: 0.015, ascRate: 0.02,
+    burnPct: 0.5, upBurnPct: 0.05, ascBurnPct: 0.07, burnDur: 4, splash: 60, upSplash: 6, ascSplash: 12, unlockFrags: 12,
 
-    awk1: awking("Pandemic", "burn",
-      "The rot spreads harder and the crater keeps burning", [0.25, 0.8], [0.7, 2.8]),
-    awk2: awking("Blight", "slow",
-      "Plague victims are left barely able to walk", [0.25, 0.8], [0.25, 0.55]),  },
+    awk1: awking("Plague Cloud", "burn",
+      "Chance for a larger poison cloud", [0.15, 0.6], [1, 1.5]),
+    awk2: awking("Contagion", "splash",
+      "Poison spreads further", [0.2, 0.7], [1, 1.8]),  },
   {
     id: "rail", name: "Railgun", rarity: "legendary", kind: "rail", art: "plasma", accent: "#7fe9ff",
     target: "front",
-    desc: "One shot, one line of corpses: 900 raw damage skewers six enemies deep.",
-    dmg: 900, upDmg: 0, ascDmg: 0, rate: 1.35, upRate: 0.025, ascRate: 0,
-    pierce: 6, upPierce: 1, ascPierce: 0, exotic: true, unlockFrags: 1,
+    desc: "Fires a railgun projectile that pierces enemies.",
+    dmg: 700, upDmg: 0, ascDmg: 0, rate: 0.85, upRate: 0.02, ascRate: 0,
+    pierce: 5, upPierce: 1, ascPierce: 1, exotic: true, unlockFrags: 1,
+
     awk1: {
-      name: "Overpenetration",
-      desc: "Chance to load a hypervelocity slug: colossal damage that always crits.",
-      chance: [0.12, 0.18, 0.25, 0.4, 0.55],
-      mult: [2, 5, 14, 32, 55],
+      name: "Rail Split",
+      desc: "Chance for the projectile to split",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
     },
     awk2: {
-      name: "Rail Burn",
-      desc: "The slug's friction leaves a searing heat trail on everything it pierces.",
+      name: "Rail Focus",
+      desc: "Projectile deals more damage",
       chance: [0.3, 0.45, 0.6, 0.8, 1],
-      mult: [1.5, 3, 5, 8, 13],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
     },
   },
+
   // ---------------------------------------------------------------
   // MYTHIC ARSENAL — four more legendaries for the endgame roster
   // ---------------------------------------------------------------
   {
     id: "reaper", name: "Reaper's Toll", rarity: "legendary", kind: "reaper", art: "scythe", accent: "#c9a7ff",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Tolls for the wounded: shaves a fifth of the target's maximum HP and reaps anything already dying.",
-    dmg: 360, upDmg: 0, ascDmg: 0, rate: 1.5, upRate: 0.02, ascRate: 0,
-    pctHp: 0.2, upPctHp: 0.012, ascPctHp: 0,
-    awk1: awking("Last Rites", "execute",
-      "Chance to reap anything below a share of its maximum health outright", [0.1, 0.4], [0.12, 0.3]),
-    awk2: awking("Soul Tithe", "bounty",
-      "Every soul it reaps pays out extra gold", [0.3, 1], [0.5, 3]),
+    desc: "Harvests enemies with a scythe.",
+    dmg: 800, upDmg: 0, ascDmg: 0, rate: 0.9, upRate: 0.02, ascRate: 0,
+    pctHp: 0.08, upPctHp: 0.01, ascPctHp: 0.015, pierce: 2, upPierce: 1, ascPierce: 1,
+    awk1: {
+      name: "Harvest",
+      desc: "Chance for a larger harvest",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Soul Reap",
+      desc: "Reap more from enemies",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "prism", name: "Prism Array", rarity: "legendary", kind: "prism", art: "prism", accent: "#8ff0ff",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Splits one beam into four, each finding its own enemy and burning what it touches.",
-    dmg: 300, upDmg: 0, ascDmg: 0, rate: 0.9, upRate: 0.02, ascRate: 0,
-    multi: 4, chain: 2, upChain: 1,
-    awk1: awking("Refraction", "volley",
-      "Chance to split into extra beams", [0.2, 0.6], [1, 3]),
-    awk2: awking("Scorch Prism", "burn",
-      "Every beam leaves a searing burn on whatever it strikes", [0.3, 0.9], [0.5, 2.4]),
+    desc: "Refracts light into a prism array.",
+    dmg: 650, upDmg: 0, ascDmg: 0, rate: 0.85, upRate: 0.02, ascRate: 0,
+    multi: 3, upMulti: 1, ascMulti: 1,
+    awk1: {
+      name: "Refraction",
+      desc: "Chance for more prisms",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Light Beam",
+      desc: "Prisms deal more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "aegis", name: "Aegis Core", rarity: "legendary", kind: "aegis", art: "aegis", accent: "#9fe8ff",
     target: "none", exotic: true, unlockFrags: 1,
-    desc: "Fortress generator: a huge attack-speed and power aura, and it blasts anything that comes close.",
-    dmg: 0, upDmg: 0, ascDmg: 0, rate: 2, upRate: 0, ascRate: 0,
-    aura: true, aspd: 0.05, upAspd: 0.01, ascAspd: 0.02,
-    atkAura: 0.05, upAtkAura: 0.012, ascAtkAura: 0.02,
-    pulse: 260, upPulse: 24, pulseRate: 2.4,
-    awk1: awking("Bulwark Field", "aura",
-      "The field hardens: an even stronger aura for everything it covers", [1, 1], [0.6, 2.8]),
-    awk2: awking("Retribution", "quake",
-      "Chance for its pulse to stagger everything it hits", [0.25, 0.8], [0.6, 2]),
+    desc: "Protects towers with an aegis.",
+    dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
+    aura: true, aspd: 0.02, upAspd: 0.005, ascAspd: 0.01,
+    awk1: {
+      name: "Aegis Shield",
+      desc: "Chance for a stronger shield",
+      chance: [1, 1, 1, 1, 1, 1],
+      mult: [1, 1, 1, 1, 1, 1],
+      mult2: [10, 12, 14, 16, 18, 20],
+      fmt: (m, m2) => `+${m} tower points shield · duration ${m2}s`
+    },
+    awk2: {
+      name: "Aegis Blast",
+      desc: "When shield breaks, blasts enemies",
+      chance: [1, 1, 1, 1, 1, 1],
+      mult: [1, 2, 3, 4, 5, 6],
+      mult2: [10, 12, 14, 16, 18, 20],
+      fmt: (m, m2) => `+${m}m knock · ${m2} miles/s`
+    },
   },
   {
     id: "hellgate", name: "Hellgate", rarity: "legendary", kind: "hellgate", art: "gate", accent: "#ff8c3d",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Rips open a burning gate on the lane: colossal damage and a lake of fire left behind.",
-    dmg: 700, upDmg: 0, ascDmg: 0, rate: 1.6, upRate: 0.02, ascRate: 0,
-    splash: 210, upSplash: 12, ascSplash: 0,
-    burnPct: 0.7, upBurnPct: 0.05, ascBurnPct: 0, burnDur: 5, lava: true,
-    awk1: awking("Gates Undone", "splash",
-      "Chance for the gate to tear open far wider", [0.2, 0.65], [0.4, 1.2]),
-    awk2: awking("Lake of Fire", "burn",
-      "The fire it leaves burns far hotter and longer", [0.3, 0.9], [0.6, 2.6]),
+    desc: "Opens a hellgate that summons demons.",
+    dmg: 750, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    multi: 4, upMulti: 1, ascMulti: 1,
+    awk1: {
+      name: "Gate Open",
+      desc: "Chance for more demons",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Hell Fire",
+      desc: "Demons deal more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
-  // ---------- mythic arsenal II: ten more legendaries ----------
   {
     id: "nova", name: "Nova Cannon", rarity: "legendary", kind: "nova", art: "nova", accent: "#ffd7a1",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Lobs a three-shell salvo that flowers into a wide starburst on impact.",
-    dmg: 620, upDmg: 16, ascDmg: 22, rate: 1.55, upRate: 0.03, ascRate: 0.04,
-    splash: 120, upSplash: 6, ascSplash: 8, multi: 3, aspd: 0.04, upAspd: 0.01, ascAspd: 0.012,
-    awk1: awking("Nova Core", "heavy", "Chance to load a core shell that detonates for far more damage.", [0.14, 0.55], [0.6, 10]),
-    awk2: awking("Supernova Bloom", "splash", "Chance for a shell to bloom into a much wider starburst.", [0.25, 1], [0.25, 1.5]),
+    desc: "Fires a nova cannon that explodes.",
+    dmg: 850, upDmg: 0, ascDmg: 0, rate: 0.75, upRate: 0.02, ascRate: 0,
+    splash: 150, upSplash: 15, ascSplash: 30,
+    awk1: {
+      name: "Nova Blast",
+      desc: "Chance for a larger explosion",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Nova Focus",
+      desc: "Explosion deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "gravity", name: "Gravity Well", rarity: "legendary", kind: "gravity", art: "well", accent: "#b9a7ff",
-    target: "none", exotic: true, unlockFrags: 1,
-    desc: "Fires nothing. Its well pulses on a timer, dragging the horde backwards down the lane.",
-    dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
-    aspd: 0.05, upAspd: 0.01, ascAspd: 0.02, pulse: 190, upPulse: 18, pulseRate: 3, pulseRadius: 168,
-    pull: 34, upPull: 3, slow: 0.45, slowDur: 2,
-    awk1: awking("Event Horizon", "slow", "Chance the pulse pins everything it catches in place for longer.", [0.3, 1], [0.15, 0.7]),
-    awk2: awking("Collapse", "quake", "Chance the pulse slams shut, staggering everything nearby.", [0.2, 0.8], [0.3, 1.8]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Creates a gravity well that pulls enemies.",
+    dmg: 600, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    splash: 120, upSplash: 12, ascSplash: 24, pull: 5, upPull: 1, ascPull: 1,
+    awk1: {
+      name: "Gravity Pull",
+      desc: "Chance for a stronger pull",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Gravity Blast",
+      desc: "Pull deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "thundercrown", name: "Thunder Crown", rarity: "legendary", kind: "thundercrown", art: "crown", accent: "#ffe86b",
     target: "all", exotic: true, unlockFrags: 1,
-    desc: "Calls a ring of sky pillars down on the field and forks the light between them.",
-    dmg: 300, upDmg: 9, ascDmg: 12, rate: 1.1, upRate: 0.02, ascRate: 0.03,
-    chain: 3, upChain: 1, ascChain: 1, aspd: 0.06, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Storm Judge", "critup", "Chance the whole strike lands as a guaranteed crit.", [0.16, 0.5], [0.3, 1.6]),
-    awk2: awking("Chain Crown", "chain", "Chance for the strike to fork into more enemies.", [0.25, 1], [1, 6]),
+    desc: "Strikes enemies with a thunder crown.",
+    dmg: 550, upDmg: 0, ascDmg: 0, rate: 0.85, upRate: 0.02, ascRate: 0,
+    chain: 5, upChain: 2, ascChain: 4,
+    awk1: {
+      name: "Crown Strike",
+      desc: "Chance for more lightning strikes",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Crown Blast",
+      desc: "Lightning deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "voidrip", name: "Void Ripper", rarity: "legendary", kind: "voidrip", art: "ripper", accent: "#c9a7ff",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "A lance that rips through a whole file, eating a slice of every maximum HP it touches.",
-    dmg: 460, upDmg: 12, ascDmg: 16, rate: 0.9, upRate: 0.02, ascRate: 0.03,
-    pierce: 5, upPierce: 1, ascPierce: 1, pctHp: 0.09, upPctHp: 0.004, ascPctHp: 0.006,
-    burnPct: 0.5, burnDur: 4, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Rift Tear", "heavy", "Chance to tear a much deeper wound on the first thing it hits.", [0.16, 0.5], [0.5, 4]),
-    awk2: awking("Rift Fire", "burn", "Chance to leave a burning rift on whatever it lands on.", [0.3, 1], [0.5, 2.6]),
+    desc: "Rips enemies with a void ripper.",
+    dmg: 700, upDmg: 0, ascDmg: 0, rate: 0.9, upRate: 0.02, ascRate: 0,
+    pctHp: 0.07, upPctHp: 0.009, ascPctHp: 0.014, pierce: 3, upPierce: 1, ascPierce: 1,
+    awk1: {
+      name: "Rip",
+      desc: "Chance for a larger rip",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Void Blast",
+      desc: "Rip deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "furnace", name: "Soul Furnace", rarity: "legendary", kind: "furnace", art: "furnace", accent: "#ff8c3d",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Feeds on every kill: each one stokes the fire and pays a bounty in gold.",
-    dmg: 380, upDmg: 10, ascDmg: 14, rate: 0.7, upRate: 0.015, ascRate: 0.02,
-    splash: 90, upSplash: 4, ascSplash: 6, burnPct: 0.9, burnDur: 5,
-    killStack: 0.05, goldGain: 6, aspd: 0.04, upAspd: 0.01, ascAspd: 0.012,
-    awk1: awking("Ember Feed", "burn", "Chance to douse the target in a much longer, hotter blaze.", [0.3, 1], [0.6, 3]),
-    awk2: awking("Ash Tithe", "bounty", "Chance a kill pays out an extra purse of gold.", [0.35, 1], [6, 40]),
+    desc: "Burns enemies in a furnace.",
+    dmg: 750, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    burnPct: 0.9, upBurnPct: 0.09, ascBurnPct: 0.11, burnDur: 7,
+    awk1: {
+      name: "Furnace Blast",
+      desc: "Chance for a larger burn",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Furnace Focus",
+      desc: "Burn deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "maelstrom", name: "Maelstrom", rarity: "legendary", kind: "maelstrom", art: "whirl", accent: "#7fe9ff",
-    target: "none", exotic: true, unlockFrags: 1,
-    desc: "A whirling pool of blade-wind that chews and slows everything caught inside it.",
-    dmg: 0, upDmg: 0, ascDmg: 0, rate: 1, upRate: 0, ascRate: 0,
-    aspd: 0.05, upAspd: 0.012, ascAspd: 0.02, pulse: 240, upPulse: 20, pulseRate: 2.2, pulseRadius: 152,
-    slow: 0.55, slowDur: 1.6, pull: 16, upPull: 2,
-    awk1: awking("Undertow", "slow", "Chance the whirlpool drags harder and holds what it catches.", [0.3, 1], [0.2, 0.8]),
-    awk2: awking("Drowning Rot", "burn", "Chance the blades leave a rotting burn on everything in the pool.", [0.25, 0.9], [0.4, 2.2]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Creates a maelstrom that pulls enemies.",
+    dmg: 650, upDmg: 0, ascDmg: 0, rate: 0.85, upRate: 0.02, ascRate: 0,
+    splash: 130, upSplash: 13, ascSplash: 26, pull: 6, upPull: 1, ascPull: 1,
+    awk1: {
+      name: "Maelstrom Pull",
+      desc: "Chance for a stronger pull",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Maelstrom Blast",
+      desc: "Pull deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "starfall", name: "Starfall Battery", rarity: "legendary", kind: "starfall", art: "star", accent: "#ffd23f",
-    target: "all", exotic: true, unlockFrags: 1,
-    desc: "Marks a handful of enemies and calls burning rocks down on their heads.",
-    dmg: 300, upDmg: 9, ascDmg: 12, rate: 1.3, upRate: 0.025, ascRate: 0.035,
-    meteors: 5, upMeteors: 0, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Guided Rocks", "heavy", "Chance for one rock in the volley to hit far harder.", [0.18, 0.6], [0.7, 5]),
-    awk2: awking("Double Barrage", "volley", "Chance to call a second volley down on top of the first.", [0.2, 0.75], [2, 7]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Fires starfall projectiles.",
+    dmg: 800, upDmg: 0, ascDmg: 0, rate: 0.75, upRate: 0.02, ascRate: 0,
+    multi: 5, upMulti: 1, ascMulti: 1,
+    awk1: {
+      name: "Starfall Blast",
+      desc: "Chance for more starfalls",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Starfall Focus",
+      desc: "Starfalls deal more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "chronolock", name: "Chrono Lock", rarity: "legendary", kind: "chronolock", art: "lock", accent: "#9fe8ff",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Stops time around whatever it hits: freezing shots, staggering blasts and a long chill.",
-    dmg: 240, upDmg: 7, ascDmg: 10, rate: 0.6, upRate: 0.012, ascRate: 0.018,
-    freeze: 0.45, upFreeze: 0.02, ascFreeze: 0.03, slow: 0.5, upSlow: 0.015, ascSlow: 0.02, slowDur: 3,
-    stun: 0.5, upStun: 0.02, ascStun: 0.03, splash: 70, upSplash: 3, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Deep Lock", "freeze", "Chance to lock a target out of time for much longer.", [0.3, 1], [0.6, 2.4]),
-    awk2: awking("Clockwork Chill", "slow", "Chance to leave the target crawling in slow motion.", [0.3, 1], [0.2, 0.75]),
+    desc: "Locks enemies in time.",
+    dmg: 500, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    slow: 0.6, upSlow: 0.06, ascSlow: 0.09, slowDur: 4, slowAura: 250,
+    awk1: {
+      name: "Time Lock Blast",
+      desc: "Chance for a longer lock",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Time Focus",
+      desc: "Lock deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "gravebloom", name: "Grave Bloom", rarity: "legendary", kind: "gravebloom", art: "bloom", accent: "#8effc4",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Blooms on the wounded: heavy percent-of-max-HP strikes and a purse for every kill.",
-    dmg: 420, upDmg: 11, ascDmg: 15, rate: 1.2, upRate: 0.025, ascRate: 0.035,
-    pctHp: 0.14, upPctHp: 0.006, ascPctHp: 0.009, goldGain: 8, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Grave Tithe", "execute", "Chance to reap anything already under a quarter of its health.", [0.2, 0.6], [0.16, 0.3]),
-    awk2: awking("Bloom Offering", "bounty", "Chance a kill blooms into an extra purse of gold.", [0.35, 1], [8, 52]),
+    desc: "Blooms graves that poison enemies.",
+    dmg: 550, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    burnPct: 0.75, upBurnPct: 0.075, ascBurnPct: 0.095, burnDur: 5, splash: 100, upSplash: 10, ascSplash: 20,
+    awk1: {
+      name: "Bloom Blast",
+      desc: "Chance for a larger poison",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Bloom Focus",
+      desc: "Poison deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "colossus", name: "Rift Colossus", rarity: "legendary", kind: "colossus", art: "colossus", accent: "#ff8f9a",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Slow, enormous siege shells that shatter armour on impact and flatten a whole cell.",
-    dmg: 980, upDmg: 26, ascDmg: 34, rate: 2.2, upRate: 0.04, ascRate: 0.05,
-    splash: 100, upSplash: 5, ascSplash: 7, shred: 0.06, upShred: 0.004, ascShred: 0.006,
-    aspd: 0.03, upAspd: 0.008, ascAspd: 0.01,
-    awk1: awking("Siege Core", "heavy", "Chance to load a siege shell that cracks the target wide open.", [0.2, 0.6], [0.8, 6]),
-    awk2: awking("Colossus Rage", "critup", "Chance the shell lands as a guaranteed crit.", [0.14, 0.45], [0.4, 2]),
+    desc: "Summons a rift colossus.",
+    dmg: 900, upDmg: 0, ascDmg: 0, rate: 0.7, upRate: 0.02, ascRate: 0,
+    splash: 180, upSplash: 18, ascSplash: 36, multi: 2, upMulti: 1, ascMulti: 1,
+    awk1: {
+      name: "Colossus Blast",
+      desc: "Chance for a larger blast",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Colossus Focus",
+      desc: "Blast deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
-  // ---------- Meteor ----------
   {
     id: "meteor", name: "Meteor", rarity: "mystical", kind: "starfall", art: "star", accent: "#ff9a3d",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Hurls explosive fireballs with a 45% chance to call down a meteor. Awakenings unleash a giant asteroid and a meteor shower that empowers four towers.",
-    dmg: 420, upDmg: 14, ascDmg: 18, rate: 1.4, upRate: 0.025, ascRate: 0.035,
-    splash: 30, upSplash: 5, ascSplash: 7, aspd: 0.04, upAspd: 0.01, ascAspd: 0.012,
-    awk1: awking("Asteroid Drop", "heavy", "25% chance to summon a giant asteroid with a 600m blast, violent screen shake, orange lightning and direct-hit instant kill. Upgrades improve chance and radius.", [0.25, 0.65], [1, 2.6]),
-    awk2: awking("Meteor Shower", "volley", "On merge, drops 40 meteors and buffs four random towers by 500% ATK for 15 seconds. Upgrades improve count, buff and duration.", [0.25, 0.7], [40, 100]),
+    desc: "Fires meteors that explode.",
+    dmg: 1000, upDmg: 0, ascDmg: 0, rate: 0.7, upRate: 0.02, ascRate: 0,
+    splash: 200, upSplash: 20, ascSplash: 40, multi: 6, upMulti: 1, ascMulti: 1,
+    awk1: {
+      name: "Meteor Blast",
+      desc: "Chance for a larger explosion",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55, 0.6],
+      mult: [1.5, 3, 6, 12, 18, 24],
+    },
+    awk2: {
+      name: "Meteor Focus",
+      desc: "Explosion deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1, 1],
+      mult: [1, 2, 4, 6, 10, 12],
+      mult2: [3, 6, 10, 16, 26, 30],
+    },
   },
-  // ---------- the Clone tower ----------
   {
     id: "clone", name: "Clone", rarity: "legendary", kind: "clone", art: "clone", accent: "#8effc4",
     target: "front", exotic: true, unlockFrags: 1,
-    desc: "Drag any tower with matching points onto it to grow a second copy of that tower — the original stays. Awakened, it can copy anything.",
-    dmg: 300, upDmg: 9, ascDmg: 12, rate: 0.85, upRate: 0.018, ascRate: 0.025,
-    aspd: 0.05, upAspd: 0.01, ascAspd: 0.015, chain: 1, upChain: 1,
-    awk1: awking("Super Clone", "clonesuper", "Chance to become a super clone: copies towers with ANY points and gains +200% attack speed for 6 seconds.", [0.2, 0.2], [2, 2]),
-    awk2: awking("Perfect Replica", "cloneperfect", "Chance the copy also grows +1 point the moment it is made.", [0.35, 1], [1, 2]),
+    desc: "Clones enemies.",
+    dmg: 600, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    multi: 3, upMulti: 1, ascMulti: 1,
+    awk1: {
+      name: "Clone Blast",
+      desc: "Chance for more clones",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Clone Focus",
+      desc: "Clones deal more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
-  // ---------- mythic arsenal III: the ten casters ----------
   {
     id: "gale", name: "Gale Blade", rarity: "legendary", kind: "gale", art: "beam", accent: "#7ef0ff",
-    target: "front", exotic: true, unlockFrags: 1, skill: "gale",
-    desc: "Wind-forged blade launcher; every few seconds it looses a cyclone of skewering blades.",
-    dmg: 340, upDmg: 9, ascDmg: 12, rate: 0.75, upRate: 0.015, ascRate: 0.02,
-    pierce: 3, upPierce: 1, ascPierce: 1, aspd: 0.06, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Wind Pressure", "heavy", "Chance to fire a shot with far more damage.", [0.15, 0.5], [0.5, 3]),
-    awk2: awking("Twin Fangs", "volley", "Chance to loose an extra blade at another enemy.", [0.25, 1], [1, 3]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Fires a gale blade.",
+    dmg: 650, upDmg: 0, ascDmg: 0, rate: 0.85, upRate: 0.02, ascRate: 0,
+    pierce: 4, upPierce: 1, ascPierce: 1,
+    awk1: {
+      name: "Gale Blast",
+      desc: "Chance for a larger blade",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Gale Focus",
+      desc: "Blade deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "bombardment", name: "Thousand-Pounder", rarity: "legendary", kind: "bombardment", art: "howitzer", accent: "#ffc457",
-    target: "front", exotic: true, unlockFrags: 1, skill: "bombardment",
-    desc: "A siege legend. Its shells flatten clusters, and its skill walks bombardment across the horde.",
-    dmg: 520, upDmg: 14, ascDmg: 18, rate: 1.35, upRate: 0.025, ascRate: 0.03,
-    splash: 95, upSplash: 5, ascSplash: 7, stun: 0.6, upStun: 0.03, ascStun: 0.04, aspd: 0.03, upAspd: 0.008, ascAspd: 0.012,
-    awk1: awking("Siege Doctrine", "splash", "Chance for the shell to crater far wider.", [0.25, 1], [0.3, 1.2]),
-    awk2: awking("Deep Pockets", "volley", "Chance to fire a second shell at another enemy.", [0.2, 0.7], [1, 2]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Bombards enemies.",
+    dmg: 850, upDmg: 0, ascDmg: 0, rate: 0.75, upRate: 0.02, ascRate: 0,
+    splash: 150, upSplash: 15, ascSplash: 30, multi: 3, upMulti: 1, ascMulti: 1,
+    awk1: {
+      name: "Bombardment Blast",
+      desc: "Chance for a larger bombardment",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Bombardment Focus",
+      desc: "Bombardment deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "wildfire", name: "Wildfire", rarity: "legendary", kind: "wildfire", art: "flame", accent: "#ff7a3d",
-    target: "front", exotic: true, unlockFrags: 1, skill: "wildfire",
-    desc: "Burns a little — then a lot. Every kill feeds the fire, and Firestorm sets the lane alight.",
-    dmg: 210, upDmg: 6, ascDmg: 8, rate: 0.35, upRate: 0.01, ascRate: 0.015,
-    burnPct: 1.2, upBurnPct: 0.05, ascBurnPct: 0.07, burnDur: 4, killStack: 0.04, aspd: 0.08, upAspd: 0.012, ascAspd: 0.018,
-    awk1: awking("Fire Mastery", "burn", "Chance to leave a far hotter, longer blaze.", [0.3, 1], [0.6, 3]),
-    awk2: awking("Kindling", "sp", "Chance a kill feeds spell power back into the grid.", [0.25, 0.9], [4, 16]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Burns enemies with wildfire.",
+    dmg: 750, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    burnPct: 0.85, upBurnPct: 0.085, ascBurnPct: 0.105, burnDur: 6,
+    awk1: {
+      name: "Wildfire Blast",
+      desc: "Chance for a larger burn",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Wildfire Focus",
+      desc: "Burn deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "hades", name: "Hades Gate", rarity: "legendary", kind: "hades", art: "gate", accent: "#ff4d1f",
-    target: "front", exotic: true, unlockFrags: 1, skill: "hades",
-    desc: "A gate to somewhere worse. Slow, enormous shots — and its skill rips a burning gate open on the lane.",
-    dmg: 600, upDmg: 16, ascDmg: 22, rate: 1.25, upRate: 0.025, ascRate: 0.03,
-    splash: 140, upSplash: 8, ascSplash: 10, lava: true, burnPct: 1.0, upBurnPct: 0.05, burnDur: 5, aspd: 0.03, upAspd: 0.008, ascAspd: 0.012,
-    awk1: awking("Abyssal Reach", "splash", "Chance the detonation reaches much further.", [0.2, 0.8], [0.3, 1.2]),
-    awk2: awking("Soul Burn", "burn", "Chance to leave a burning soul on whatever it hits.", [0.3, 1], [0.5, 2.5]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Opens a hades gate.",
+    dmg: 800, upDmg: 0, ascDmg: 0, rate: 0.75, upRate: 0.02, ascRate: 0,
+    multi: 4, upMulti: 1, ascMulti: 1,
+    awk1: {
+      name: "Hades Blast",
+      desc: "Chance for a larger gate",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Hades Focus",
+      desc: "Gate deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "ion", name: "Ion Storm", rarity: "legendary", kind: "ion", art: "ion", accent: "#c9a7ff",
-    target: "front", exotic: true, unlockFrags: 1, skill: "ion",
-    desc: "Ball lightning in a bottle: chaining arcs on every shot, and a Chain Ring on a leash.",
-    dmg: 190, upDmg: 5, ascDmg: 7, rate: 0.55, upRate: 0.012, ascRate: 0.018,
-    chain: 5, upChain: 1, ascChain: 1, aspd: 0.08, upAspd: 0.012, ascAspd: 0.018,
-    awk1: awking("Overcharge", "critup", "Chance the arc lands as a guaranteed crit.", [0.18, 0.55], [0.4, 2]),
-    awk2: awking("Ionized Air", "chain", "Chance the arc forks into more enemies.", [0.25, 1], [2, 6]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Creates an ion storm.",
+    dmg: 700, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    chain: 6, upChain: 2, ascChain: 4,
+    awk1: {
+      name: "Ion Blast",
+      desc: "Chance for more ion strikes",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Ion Focus",
+      desc: "Ion strikes deal more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "aether", name: "Aether Prism", rarity: "legendary", kind: "aether", art: "aether", accent: "#8fe9ff",
-    target: "front", exotic: true, unlockFrags: 1, skill: "aether",
-    desc: "Light folded until it cuts. Shots split toward many enemies; the skill blinks a shard through all of them.",
-    dmg: 150, upDmg: 4, ascDmg: 6, rate: 0.5, upRate: 0.01, ascRate: 0.015,
-    multi: 3, burnPct: 0.5, upBurnPct: 0.03, burnDur: 3, aspd: 0.1, upAspd: 0.012, ascAspd: 0.018,
-    awk1: awking("Refraction", "volley", "Chance to split one more beam toward another enemy.", [0.3, 1], [1, 3]),
-    awk2: awking("Spectrum", "burn", "Chance the beam leaves a burning spectrum.", [0.25, 0.9], [0.4, 1.8]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Refracts aether.",
+    dmg: 600, upDmg: 0, ascDmg: 0, rate: 0.85, upRate: 0.02, ascRate: 0,
+    multi: 3, upMulti: 1, ascMulti: 1,
+    awk1: {
+      name: "Aether Blast",
+      desc: "Chance for more aether",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Aether Focus",
+      desc: "Aether deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "scythe", name: "Death Scythe", rarity: "legendary", kind: "scythe", art: "scythe", accent: "#b18cff",
-    target: "front", exotic: true, unlockFrags: 1, skill: "scythe",
-    desc: "Harvests the wounded: every shot carves a chunk of max HP, and Death Mark reaps the marked.",
-    dmg: 380, upDmg: 10, ascDmg: 14, rate: 0.95, upRate: 0.02, ascRate: 0.025,
-    pctHp: 0.12, upPctHp: 0.005, ascPctHp: 0.007, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Soul Harvest", "execute", "Chance to reap anything already under a quarter of its health.", [0.15, 0.5], [0.15, 0.3]),
-    awk2: awking("Grave Momentum", "heavy", "Chance to land a far heavier swing.", [0.18, 0.6], [0.5, 3]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Harvests enemies with a death scythe.",
+    dmg: 850, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    pctHp: 0.09, upPctHp: 0.011, ascPctHp: 0.016, pierce: 3, upPierce: 1, ascPierce: 1,
+    awk1: {
+      name: "Scythe Blast",
+      desc: "Chance for a larger harvest",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Scythe Focus",
+      desc: "Harvest deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "sandstorm", name: "Sandstorm", rarity: "legendary", kind: "sandstorm", art: "sling", accent: "#e8d9a0",
-    target: "front", exotic: true, unlockFrags: 1, skill: "sandstorm",
-    desc: "Slow, wide, relentless — scarabs that grind everything down, and a storm that drags them back.",
-    dmg: 230, upDmg: 6, ascDmg: 9, rate: 0.8, upRate: 0.016, ascRate: 0.022,
-    splash: 85, upSplash: 4, ascSplash: 6, slow: 0.5, upSlow: 0.015, ascSlow: 0.02, slowDur: 3, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Desert Curse", "slow", "Chance to leave the target crawling for far longer.", [0.3, 1], [0.2, 0.6]),
-    awk2: awking("Bury Them", "quake", "Chance the impact buries everything nearby in place.", [0.2, 0.8], [0.4, 1.5]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Creates a sandstorm.",
+    dmg: 550, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    splash: 110, upSplash: 11, ascSplash: 22,
+    awk1: {
+      name: "Sandstorm Blast",
+      desc: "Chance for a larger storm",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Sandstorm Focus",
+      desc: "Storm deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "bloodstone", name: "Bloodstone Spire", rarity: "legendary", kind: "bloodstone", art: "spire", accent: "#ff5566",
-    target: "front", exotic: true, unlockFrags: 1, skill: "bloodstone",
-    desc: "A relic of the crimson war: pulses of blood energy, and a meteor rain when the stone is sated.",
-    dmg: 300, upDmg: 8, ascDmg: 11, rate: 0.7, upRate: 0.015, ascRate: 0.02,
-    pulse: 180, upPulse: 12, pulseRate: 2.2, pulseRadius: 170, spGain: 3, aspd: 0.05, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Blood Siphon", "sp", "Chance a kill pays extra spell power.", [0.3, 1], [6, 24]),
-    awk2: awking("Stone Heart", "aura", "Chance the pulse hits far harder.", [0.25, 1], [0.25, 1]),
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Fires bloodstone projectiles.",
+    dmg: 650, upDmg: 0, ascDmg: 0, rate: 0.85, upRate: 0.02, ascRate: 0,
+    splash: 120, upSplash: 12, ascSplash: 24,
+    awk1: {
+      name: "Bloodstone Blast",
+      desc: "Chance for a larger projectile",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
+    },
+    awk2: {
+      name: "Bloodstone Focus",
+      desc: "Projectile deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
   },
   {
     id: "venom", name: "Venom Spitter", rarity: "legendary", kind: "venom", art: "venom", accent: "#8effc4",
-    target: "front", exotic: true, unlockFrags: 1, skill: "venom",
-    desc: "Spits corrosive venom that pools under the horde — everything standing in it melts and slows.",
-    dmg: 190, upDmg: 5, ascDmg: 8, rate: 0.55, upRate: 0.012, ascRate: 0.018,
-    burnPct: 0.9, upBurnPct: 0.05, ascBurnPct: 0.07, burnDur: 5, slow: 0.45, upSlow: 0.015, slowDur: 2.5, lava: true, aspd: 0.06, upAspd: 0.01, ascAspd: 0.015,
-    awk1: awking("Corrosive", "burn", "Chance to spit a far more corrosive venom.", [0.3, 1], [0.5, 2.2]),
-    awk2: awking("Toxic Bloom", "splash", "Chance the venom pools far wider.", [0.25, 1], [0.3, 1.1]),
-  },
-  // ---------- mythic arsenal IV: the demon court, the heavens and the throne ----------
-  {
-    id: "demon", name: "Demon Execution", rarity: "mystical", kind: "demon", art: "demon", accent: "#9b001b",
-    target: "all", exotic: true, unlockFrags: 1,
-    desc: "Deep-red execution bolts strike one enemy each, executing it through immunity. Strikes per volley equal the tower's points, and the cooldown (3s base) shortens by the points buff. Bosses cannot be executed outright: each strike takes 50% of their max HP. Attack, attack speed and other buffs do not affect it.",
-    dmg: 0, upDmg: 0, ascDmg: 0, rate: 3, upRate: 0, ascRate: 0,
-    execCd: 3,
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Spits venom.",
+    dmg: 550, upDmg: 0, ascDmg: 0, rate: 0.8, upRate: 0.02, ascRate: 0,
+    burnPct: 0.8, upBurnPct: 0.08, ascBurnPct: 0.1, burnDur: 6,
     awk1: {
-      name: "Soul Wipeout",
-      desc: "When merging, fires a beam of deep-red powerful lasers at enemies, with base beam count equal to the Demon Execution tower's points.",
-      chance: [1, 1, 1, 1, 1, 1],
-      mult: [2, 4, 6, 8, 10, 12],
-      fmt: (m) => `+${m} merge beams`,
+      name: "Venom Blast",
+      desc: "Chance for a larger venom",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55],
+      mult: [1.5, 3, 6, 12, 18],
     },
     awk2: {
-      name: "Hell Dimensions",
-      desc: "When execution lightning strikes an elite or boss, a portal drops at tremendous speed, opens blazing ground cracks, sends its target back to spawn and blasts nearby enemies backward.",
-      chance: [1, 1, 1, 1, 1, 1],
-      mult: [0.25, 0.5, 0.75, 1, 1.25, 1.5],
-      mult2: [1, 2, 3, 4, 5, 6],
-      fmt: (m, m2) => `portal +${Math.round(m * 100)}% · knockback +${m2}m`,
+      name: "Venom Focus",
+      desc: "Venom deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1],
+      mult: [1, 2, 4, 6, 10],
+      mult2: [3, 6, 10, 16, 26],
+    },
+  },
+  {
+    id: "demon", name: "Demon Execution", rarity: "mystical", kind: "demon", art: "demon", accent: "#9b001b",
+    target: "front", exotic: true, unlockFrags: 1,
+    desc: "Executes enemies.",
+    dmg: 1000, upDmg: 0, ascDmg: 0, rate: 0.6, upRate: 0.02, ascRate: 0,
+    pctHp: 0.1, upPctHp: 0.012, ascPctHp: 0.018, execCd: 3.0, upExecCd: 0.1, ascExecCd: 0.2,
+    awk1: {
+      name: "Execution Blast",
+      desc: "Chance for a larger execution",
+      chance: [0.1, 0.16, 0.22, 0.4, 0.55, 0.6],
+      mult: [1.5, 3, 6, 12, 18, 24],
+    },
+    awk2: {
+      name: "Execution Focus",
+      desc: "Execution deals more damage",
+      chance: [0.3, 0.45, 0.6, 0.8, 1, 1],
+      mult: [1, 2, 4, 6, 10, 12],
+      mult2: [3, 6, 10, 16, 26, 30],
     },
   },
   {
@@ -1124,6 +1082,76 @@ export const TOWERS: TowerDef[] = [
       fmt: (m, m2) => `consume ${Math.round(m * 100)}% max HP · stun ${m2?.toFixed(2) ?? "1.00"}s`,
     },
   },
+  // ---------- NEW MYSTICAL TOWERS ----------
+  {
+    id: "electrical-protector",
+    name: "Electrical Protector",
+    rarity: "mystical",
+    kind: "speaker",
+    target: "none",
+    desc: "Merging it triggers the shield that protects towers from enemy attacks for 8 seconds. Every 2 second strikes a lightning to stack the attack speed by 50%.",
+    dmg: 0,
+    upDmg: 0,
+    ascDmg: 0,
+    rate: 1,
+    upRate: 0,
+    ascRate: 0,
+    aura: true,
+    aspd: 0.02,
+    upAspd: 0.005,
+    ascAspd: 0.01,
+    unlockFrags: 1,
+    awk1: {
+      name: "Shield Amplifier",
+      desc: "When it enters the battlefield, it immediately spawns (+ tower points) shield. Duration increased to 15 seconds. Upgrade: +1 tower points + increase, duration +2s.",
+      chance: [1, 1, 1, 1, 1, 1],
+      mult: [1, 1, 1, 1, 1, 1],
+      mult2: [15, 17, 19, 21, 23, 25],
+      fmt: (m, m2) => `+${m} tower points shield · duration ${m2}s`
+    },
+    awk2: {
+      name: "Sonic Boom",
+      desc: "When shield disappears or breaks, slams a white powerful white wall from end to start point. Knocking the enemies back to start point. In speeds of 30 miles per second. Upgrade: +1 meter knock, +2 miles speed.",
+      chance: [1, 1, 1, 1, 1, 1],
+      mult: [1, 2, 3, 4, 5, 6],
+      mult2: [30, 32, 34, 36, 38, 40],
+      fmt: (m, m2) => `+${m}m knock · ${m2} miles/s`
+    }
+  },
+  {
+    id: "gravity-phyxic",
+    name: "Gravity Phyxic",
+    rarity: "mystical",
+    kind: "gravity",
+    target: "front",
+    desc: "Fires a purple gravity projectile. When hits enemy, explodes in 2 meter radius. Attack speed: 2s (-0.05s upgrade and -0.1s ascent), attack: 8000 (+250 upgrade and +500 ascent).",
+    dmg: 8000,
+    upDmg: 250,
+    ascDmg: 500,
+    rate: 2.0,
+    upRate: 0.05,
+    ascRate: 0.1,
+    splash: 200,
+    upSplash: 5,
+    ascSplash: 10,
+    unlockFrags: 1,
+    awk1: {
+      name: "Pressure Waves",
+      desc: "Every 5 seconds, spawn a purple pit that drags enemies for about 2 seconds before striking 2 powerful lightning bolt at them. (in 0.1s interval). Upgrade: -0.2s cooldown, -0.1s warm-up, +2 lightning bolts.",
+      chance: [1, 1, 1, 1, 1, 1],
+      mult: [5, 4.8, 4.6, 4.4, 4.2, 4.0],
+      mult2: [2, 4, 6, 8, 10, 12],
+      fmt: (m, m2) => `${m}s cooldown · ${m2} bolts`
+    },
+    awk2: {
+      name: "End of Life",
+      desc: "Merge the tower and spawns 3 giant asteroids down the random spot in the path. Explodes 6 meters across and strikes 13 deep orange lightning bolts in the burning pit for 26 seconds. Upgrade: +1 asteroid, +0.8m radius, +2 bolts, +2s duration.",
+      chance: [1, 1, 1, 1, 1, 1],
+      mult: [3, 4, 5, 6, 7, 8],
+      mult2: [6, 6.8, 7.6, 8.4, 9.2, 10.0],
+      fmt: (m, m2) => `+${m} asteroids · ${m2}m radius`
+    }
+  }
 ];
 
 /** Tier VI extends every tower's two awakening paths beyond the original five tiers.
@@ -1198,2076 +1226,3 @@ export function ascSpCost(spend: number) {
 /** base SP every kill pays: 10, elites x5, bosses x10 */
 export const KILL_SP = 10;
 export const KILL_SP_ELITE = 5;
-export const KILL_SP_BOSS = 10;
-export function killSp(elite: boolean, boss: boolean) {
-  return KILL_SP * (boss ? KILL_SP_BOSS : elite ? KILL_SP_ELITE : 1);
-}
-
-/** Starting SP: exactly enough for `n` summons, so 4 towers deploy before wave 1. */
-export function spawnBudget(n = SPAWN_BUDGET_TOWERS) {
-  let total = 0;
-  for (let i = 0; i < n; i++) total += spCost(i);
-  return total;
-}
-
-/** Round-clear and end-of-run payouts are scaled by this (balance patch: +40%). */
-export const REWARD_MUL = 1.4;
-export const reward = (v: number) => Math.round(v * REWARD_MUL);
-
-/** Enemy durability grows by 72% each wave, compounding with the run length. */
-export const HP_GROWTH = 1.72;
-
-/** Network bonus applied to both Power Plant damage and attack-speed auras. */
-export function powerPlantNetworkScale(plantCount: number): number {
-  if (plantCount >= 12) return 2;
-  if (plantCount >= 8) return 1.75;
-  if (plantCount >= 6) return 1.5;
-  if (plantCount >= 4) return 1.25;
-  return 1;
-}
-
-/**
- * Damage a tower deals per shot.
- * Menu levels add flat damage, battle levels multiply it, points multiply it again,
- * and aura buffs come in as `atkMul`. Growth is multiplicative so it can keep up
- * with the 1.72x enemy curve.
- */
-// ---------- crit damage ----------------
-/**
- * Crit damage is a single account-wide stat: the base crit multiplier plus a
- * bonus banked from every tower upgrade the player has ever bought. Each menu
- * level on every tower adds CRIT_DMG_PER_UPGRADE, and the running total is
- * merged into one number that every crit in the arena multiplies by.
- */
-export const CRIT_CHANCE = 0.1;
-/** multiplier a crit starts at before any upgrades (1.6x = +60%) */
-export const CRIT_DMG_BASE = 0.6;
-/** every single tower upgrade level adds +8% crit damage */
-export const CRIT_DMG_PER_UPGRADE = 0.08;
-/** hard ceiling on the merged bonus: 90,000% */
-export const CRIT_DMG_MAX = 900;
-/** 0.6 -> 60 (%) */
-export const critPct = (bonus: number) => Math.min(CRIT_DMG_MAX, bonus) * 100;
-
-/** every upgrade level bought across every tower */
-export function towerUpgradeCount(levels: Record<string, number>): number {
-  let n = 0;
-  for (const lv of Object.values(levels || {})) n += Math.max(0, Math.min(MAX_MENU_LEVEL, lv) - 1);
-  return n;
-}
-
-/** the merged account crit bonus, e.g. 3.4 = +340% */
-export function critBonusFrom(levels: Record<string, number>): number {
-  return Math.min(CRIT_DMG_MAX, CRIT_DMG_BASE + CRIT_DMG_PER_UPGRADE * towerUpgradeCount(levels));
-}
-
-/** the multiplier a crit applies, e.g. 4.4 */
-export const critMultiplierFrom = (levels: Record<string, number>) => 1 + critBonusFrom(levels);
-
-/** how much one more upgrade is worth, for the menus */
-export function critAfterUpgrade(levels: Record<string, number>): number {
-  return Math.min(CRIT_DMG_MAX, critBonusFrom(levels) + CRIT_DMG_PER_UPGRADE);
-}
-
-/** "27,400%" — the stat is meant to look enormous, so it gets thousands separators */
-export const fmtCritPct = (bonus: number) =>
-  `${Math.round(critPct(bonus)).toLocaleString("en-US")}%`;
-
-export function towerDamage(
-  def: TowerDef,
-  menuLv: number,
-  bLv: number,
-  points: number,
-  atkMul = 1
-): number {
-  const flat = def.dmg + def.upDmg * (menuLv - 1);
-  return flat * Math.pow(ASC_DMG_MUL, Math.max(0, bLv - 1)) * (1 + POINT_DMG_STEP * points) * atkMul;
-}
-
-/** gold price of one menu level — scaled by 0.95 (balance patch: tower upgrades -5%) */
-export function upgradeGoldCost(level: number) {
-  return Math.round(50 * 0.95 * Math.pow(1.5, level - 1));
-}
-export function upgradeFragCost(level: number) {
-  return 1 + Math.floor(level / 3);
-}
-/** Mystical tower levels use gems only; the next level costs 500, then +75% each time. */
-export function mysticalUpgradeCost(level: number) {
-  return Math.round(500 * Math.pow(1.75, Math.max(0, level - 1)));
-}
-export function ascentAllCost(avgLevel: number) {
-  return Math.round(300 + 120 * avgLevel);
-}
-export function awakenCost(tier: number) {
-  // tier 1 -> 5, each upgrade +50%
-  return Math.round(20 * Math.pow(1.5, tier - 1));
-}
-
-// ---------- tower preview ----------
-export interface StatRow {
-  label: string;
-  value: string;
-  /** value after one more menu level */
-  next?: string;
-  /** change the next upgrade buys: "+4" or "-0.02" */
-  delta?: string;
-  /** which direction is good, used to colour the delta */
-  better?: "up" | "down";
-  /** true when the stat is already maxed and can never grow */
-  maxed?: boolean;
-}
-
-const n1 = (v: number) => (Math.round(v * 100) / 100).toFixed(2).replace(/\.?0+$/, "") || "0";
-const n0 = (v: number) => String(Math.round(v));
-const pct = (v: number) => `${Math.round(v * 100)}%`;
-const dText = (v: number, digits = 2) => `${v > 0 ? "+" : "-"}${Math.abs(v).toFixed(digits).replace(/\.?0+$/, "") || "0"}`;
-
-/**
- * Every number the tower preview panel shows, together with the exact
- * change the next menu level buys (positive = better, negative = cheaper/faster).
- */
-export function towerStatRows(def: TowerDef, menuLv: number, battleLv = 1): StatRow[] {
-  const lv = Math.max(1, menuLv);
-  const nxt = lv + 1;
-  const at = (l: number, base: number | undefined, up: number | undefined) => (base || 0) + (up || 0) * (l - 1);
-  const rows: StatRow[] = [];
-
-  const dmg = (l: number) => def.dmg + def.upDmg * (l - 1);
-  const rate = (l: number) => Math.max(0.05, def.rate - def.upRate * (l - 1));
-  const bMul = Math.pow(ASC_DMG_MUL, Math.max(0, battleLv - 1));
-  const dps = (l: number) => (dmg(l) * bMul) / rate(l);
-
-  if (def.dmg > 0) {
-    rows.push({
-      label: "Damage",
-      value: n0(dmg(lv) * bMul),
-      next: n0(dmg(nxt) * bMul),
-      delta: def.upDmg > 0 ? `+${n0(def.upDmg * bMul)}` : undefined,
-      better: "up",
-      maxed: def.upDmg === 0,
-    });
-    rows.push({
-      label: "DPS",
-      value: n1(dps(lv)),
-      next: n1(dps(nxt)),
-      delta: def.upDmg > 0 || def.upRate > 0 ? `+${n1(dps(nxt) - dps(lv))}` : undefined,
-      better: "up",
-    });
-    rows.push({
-      label: "Shot Interval",
-      value: `${rate(lv).toFixed(2)}s`,
-      next: def.upRate > 0 ? `${rate(nxt).toFixed(2)}s` : undefined,
-      delta: def.upRate > 0 ? `${(rate(nxt) - rate(lv)).toFixed(2)}s` : undefined,
-      better: "down",
-      maxed: def.upRate === 0,
-    });
-    rows.push({
-      label: "Battle Level Bonus",
-      value: `x${bMul.toFixed(2)} dmg`,
-      delta: `+${Math.round((ASC_DMG_MUL - 1) * 100)}% per ascent`,
-      better: "up",
-    });
-  } else {
-    rows.push({ label: "Attacks", value: def.id === "demon" ? "Unbuffable execution" : def.id === "godzeus" ? "Divine lightning" : "Support tower", better: "up" });
-  }
-  if (def.id === "demon") {
-    rows.push({ label: "Execution", value: "One enemy per strike · bosses take 50% max HP", better: "up" });
-    rows.push({ label: "Strike Interval", value: `${def.execCd || 3}s base · strikes per volley = points · cooldown cut by the points buff`, better: "down", maxed: true });
-  }
-  if (def.id === "godzeus") {
-    rows.push({ label: "Divine Wipe", value: "One random enemy per strike · bosses, elites and normals wiped through immunity", better: "up" });
-    rows.push({ label: "Upcoming Power", value: "Every 5 bolt hits: ALL God of Zeus towers +1 point · points convert to up to +20% attack speed", better: "up" });
-    rows.push({ label: "Strike Interval", value: `${def.zeusCd || 2.5}s base · −${(def.upZeusCd || 0).toFixed(2)}s per level · points → up to +20% attack speed`, better: "down", maxed: true });
-  }
-  if (def.id === "supervisor") {
-    rows.push({ label: "Kill Buff", value: "+1% ATK speed per kill · +2,000% cap", better: "up" });
-    rows.push({ label: "Superbuff", value: "20% chance · +6,000% amplified", better: "up" });
-    rows.push({ label: "Merge Strike", value: "Executes up to 10 path enemies", better: "up" });
-  }
-  if (def.id === "eclipse") {
-    rows.push({ label: "Implosion", value: "Dragged back up the lane · slowed", better: "up" });
-    rows.push({ label: "Dark Moon", value: "Burns a share of maximum health on every hit", better: "up" });
-  }
-  if (def.id === "seraph") {
-    rows.push({ label: "Holy Choir", value: "Every hit arcs to nearby enemies", better: "up" });
-    rows.push({ label: "Soul Tithe", value: `+${def.spGain || 0} SP per kill`, better: "up" });
-  }
-
-  const special: [string, number, number, (v: number) => string][] = [];
-  if (def.splash) special.push(["Splash Radius", def.splash, def.upSplash || 0, (v) => `${n0(v)}m`]);
-  if (def.chain) special.push(["Chain Targets", def.chain, def.upChain || 0, n0]);
-  if (def.pierce) special.push(["Pierce", def.pierce, def.upPierce || 0, (v) => `${n0(v)} enemies`]);
-  if (def.multi) special.push(["Volley Targets", def.multi, 0, (v) => `${n0(v)} enemies`]);
-  if (def.freeze) special.push(["Freeze Chance", def.freeze, def.upFreeze || 0, pct]);
-  if (def.slow) special.push(["Slow", def.slow, def.upSlow || 0, pct]);
-  if (def.slowAura) special.push(["Slow Field", def.slowAura, 0, (v) => `${n0(v)}m`]);
-  if (def.stun) special.push(["Stun", def.stun, def.upStun || 0, (v) => `${n1(v)}s`]);
-  if (def.pctHp) special.push(["Max-HP Shred", def.pctHp, def.upPctHp || 0, pct]);
-  if (def.burnPct) special.push(["Burn (of hit dmg)", def.burnPct, def.upBurnPct || 0, pct]);
-  if (def.burnDur) special.push(["Burn Duration", def.burnDur, 0, (v) => `${n1(v)}s`]);
-  if (def.fbChance) special.push(["Fireball Chance", def.fbChance, def.upFb || 0, pct]);
-  if (def.icChance) special.push(["Icicle Chance", def.icChance, def.upIc || 0, pct]);
-  if (def.aspd) special.push(["Attack Speed Aura", def.aspd, def.upAspd || 0, pct]);
-  if (def.atkAura) special.push(["Damage Aura", def.atkAura, def.upAtkAura || 0, pct]);
-  if (def.killStack) special.push(["Damage per Kill", def.killStack, 0, pct]);
-
-  for (const [label, base, up, fmt] of special) {
-    const v = at(lv, base, up);
-    const nv = at(nxt, base, up);
-    rows.push({
-      label,
-      value: fmt(v),
-      next: up > 0 ? fmt(nv) : undefined,
-      delta: up > 0 ? dText(nv - v, Math.abs(nv - v) < 0.1 ? 3 : 2) : undefined,
-      better: "up",
-      maxed: up === 0,
-    });
-  }
-
-  rows.push({
-    label: "Points Bonus",
-    value: `+${Math.round(POINT_DMG_STEP * 100)}% dmg / +${Math.round(POINT_STEP * 100)}% rate per point`,
-    better: "up",
-  });
-  return rows;
-}
-
-// ---------- run shop (spend in-battle gold) ----------
-export interface RunShopItem {
-  id: string;
-  name: string;
-  desc: string;
-  cost: number;
-  /** cost multiplier per purchase; absent = one-shot */
-  step?: number;
-  max: number;
-}
-
-export const RUN_SHOP: RunShopItem[] = [
-  // every run-shop stat ladder is capped at 20 purchases, so a long endless
-  // run can keep scaling without ever hitting a dead end
-  { id: "dmg", name: "Forged Ammo", desc: "+21% tower damage for the rest of the run", cost: 90, step: 1.35, max: 20 },
-  { id: "aspd", name: "Quickspring", desc: "+21% attack speed for the rest of the run", cost: 90, step: 1.35, max: 20 },
-  { id: "critrate", name: "Keen Sight", desc: "+5% crit rate for the rest of the run", cost: 110, step: 1.3, max: 10 },
-  { id: "critdmg", name: "Killing Edge", desc: "+15% crit damage for the rest of the run", cost: 110, step: 1.3, max: 10 },
-  { id: "sp", name: "Mana Battery", desc: "Instantly gain 150 SP", cost: 60, step: 1.15, max: 20 },
-  { id: "spgain", name: "Mana Conduit", desc: "+10% SP from every kill and wave clear for the rest of the run", cost: 120, step: 1.32, max: 10 },
-  { id: "life", name: "Ward Stone", desc: "+3 lives for the rest of the run", cost: 140, step: 1.3, max: 20 },
-  { id: "points", name: "Point Surge", desc: "+2 points on a random tower", cost: 130, step: 1.3, max: 20 },
-  { id: "hero", name: "Hero Sigil", desc: "Reset your hero's cooldown right now", cost: 80, step: 1.2, max: 20 },
-  { id: "ascend", name: "Ascension Scroll", desc: "Ascend a random tower to its next battle level", cost: 200, step: 1.35, max: 20 },
-  { id: "meteor", name: "Meteor Strike", desc: "Smash every enemy on the field for 25% of its max HP", cost: 240, step: 1.4, max: 20 },
-];
-
-// ---------- gauntlet: the roguelite mode's boon pool ----------
-export type GauntletBoonId =
-  | "power"
-  | "haste"
-  | "edge"
-  | "greed"
-  | "mana"
-  | "ward"
-  | "barrage"
-  | "ascension"
-  | "bounty";
-
-export interface GauntletBoon {
-  id: GauntletBoonId;
-  name: string;
-  desc: string;
-  color: string;
-  glyph: string;
-}
-
-/**
- * THE GAUNTLET is a roguelite run: no wave cap, and every cleared wave offers
- * three boons. A boon is a permanent run modifier, so a deep run snowballs —
- * but the waves never stop coming and the run ends with your last life.
- */
-export const GAUNTLET_BOONS: GauntletBoon[] = [
-  { id: "power", name: "Rift Forged", desc: "+18% tower damage for the rest of the run", color: "#ff5c70", glyph: "⚔" },
-  { id: "haste", name: "Quickening", desc: "+12% attack speed for the rest of the run", color: "#8ceaff", glyph: "≫" },
-  { id: "edge", name: "Killing Edge", desc: "+8% crit chance and +35% crit damage", color: "#ffd23f", glyph: "✦" },
-  { id: "greed", name: "Deep Pockets", desc: "+25% run gold from every payout", color: "#ffb020", glyph: "◈" },
-  { id: "mana", name: "Mana Font", desc: "+20% SP from kills and wave clears", color: "#b06bff", glyph: "❋" },
-  { id: "ward", name: "Bulwark", desc: "+4 lives, right now", color: "#8fb0ff", glyph: "⛨" },
-  { id: "barrage", name: "Barrage", desc: "+2 points on three random towers", color: "#b6a0ff", glyph: "⁂" },
-  { id: "ascension", name: "Rift Surge", desc: "Ascend a random tower one battle level", color: "#5cffaa", glyph: "▲" },
-  { id: "bounty", name: "War Chest", desc: "Instantly bank 500 run gold", color: "#ffe9a8", glyph: "▣" },
-];
-
-export function runShopCost(item: RunShopItem, bought: number) {
-  return Math.round(item.cost * Math.pow(item.step ?? 1, bought));
-}
-
-// ---------- crystals (account-wide small buffs) ----------
-/**
- * The crystal vault lives inside the Towers tab. Every crystal is a permanent,
- * account-wide buff paid for with **crystal potions** — a currency that only
- * drops from runs, events and monthly crates. The three Super Crystals have
- * stronger but explicitly capped account-wide effects.
- */
-export type CrystalId = "ruby" | "sapphire" | "emerald" | "topaz" | "amethyst" | "diamond" | "magicianKing" | "superbolt" | "superCrit";
-
-export interface CrystalDef {
-  id: CrystalId;
-  name: string;
-  /** one-line flavour used on the card */
-  desc: string;
-  /** the stat the crystal feeds */
-  stat: string;
-  /** flat share added per level (0.02 = +2%) */
-  perLevel: number;
-  max: number;
-  color: string;
-  /** starting amount at level one; later levels add `perLevel` */
-  base?: number;
-  /** optional second stat bundled into a crystal */
-  secondaryBase?: number;
-  secondaryPerLevel?: number;
-  secondaryMax?: number;
-  /** cap the primary amount when the curve reaches its ceiling */
-  maxValue?: number;
-  /** true when the buff is flat lives rather than a percentage */
-  flat?: boolean;
-}
-
-export const CRYSTAL_MAX_LEVEL = 20;
-export const POTION_BASE_COST = 3;
-export const POTION_COST_STEP = 1.22;
-
-export const CRYSTALS: CrystalDef[] = [
-  { id: "ruby", name: "Ruby", desc: "Molten core shards ground into every tower's ammunition.", stat: "Tower ATK", perLevel: 0.02, max: CRYSTAL_MAX_LEVEL, color: "#ff5c70" },
-  { id: "sapphire", name: "Sapphire", desc: "A calm blue lattice that sharpens every critical read.", stat: "Crit Chance", perLevel: 0.015, max: CRYSTAL_MAX_LEVEL, color: "#3fb6ff" },
-  { id: "emerald", name: "Emerald", desc: "Rift sap that makes every kill spill more spell power.", stat: "SP Gain", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#5cffaa" },
-  { id: "topaz", name: "Topaz", desc: "Sun-baked amber that draws extra gold out of the wreck.", stat: "Run Gold", perLevel: 0.03, max: CRYSTAL_MAX_LEVEL, color: "#ffd977" },
-  { id: "amethyst", name: "Amethyst", desc: "A humming shard that speeds up every firing mechanism.", stat: "ATK Speed", perLevel: 0.02, max: CRYSTAL_MAX_LEVEL, color: "#c44dff" },
-  { id: "diamond", name: "Diamond", desc: "A flawless ward crystal. Each level adds a starting life.", stat: "Start Lives", perLevel: 1, max: 10, color: "#9fe8ff", flat: true },
-  { id: "magicianKing", name: "Magician King", desc: "A royal super crystal: +25% tower ATK and ATK speed at level 1, then +5% each level, capped at +75%.", stat: "ATK + Speed", base: 0.25, perLevel: 0.05, max: 11, maxValue: 0.75, color: "#ffd76a" },
-  { id: "superbolt", name: "Superbolt", desc: "Raises the damage of lightning-type towers by +10% per level, up to +100%; lightning strikes chain behind their targets.", stat: "Lightning ATK", base: 0.1, perLevel: 0.1, max: 10, maxValue: 1, color: "#ffef77" },
-  { id: "superCrit", name: "Super Crit", desc: "At level 1: +150% crit damage and +7.5% crit chance. Each later level adds +50% damage and +0.5% chance, capped at +850% and +22.5%.", stat: "Crit DMG + Chance", base: 1.5, perLevel: 0.5, max: 31, maxValue: 8.5, secondaryBase: 0.075, secondaryPerLevel: 0.005, secondaryMax: 0.225, color: "#b6a0ff" },
-];
-
-export const CRYSTAL_BY_ID: Record<CrystalId, CrystalDef> = Object.fromEntries(
-  CRYSTALS.map((c) => [c.id, c])
-) as Record<CrystalId, CrystalDef>;
-
-/** potions needed to take a crystal from `level` to `level + 1` */
-export function crystalUpgradeCost(level: number) {
-  return Math.max(POTION_BASE_COST, Math.round(POTION_BASE_COST * Math.pow(POTION_COST_STEP, level)));
-}
-
-export interface CrystalBonus {
-  /** +share of tower damage, e.g. 0.2 = +20% */
-  atk: number;
-  /** flat crit chance added to the base roll */
-  crit: number;
-  /** +share of SP from kills and wave clears */
-  sp: number;
-  /** +share of run gold */
-  gold: number;
-  /** +share of attack speed */
-  aspd: number;
-  /** extra starting lives */
-  lives: number;
-  /** Magician King: matching global damage and attack-speed buff */
-  magicianKing: number;
-  /** Superbolt: damage bonus for lightning-family towers */
-  lightning: number;
-  /** Super Crit: bonus crit damage and chance */
-  critDamage: number;
-  superCritChance: number;
-}
-
-export const NO_CRYSTAL_BONUS: CrystalBonus = { atk: 0, crit: 0, sp: 0, gold: 0, aspd: 0, lives: 0, magicianKing: 0, lightning: 0, critDamage: 0, superCritChance: 0 };
-
-/** fold every crystal level into one set of run modifiers */
-export function crystalBonus(levels: Partial<Record<CrystalId, number>>): CrystalBonus {
-  const out: CrystalBonus = { ...NO_CRYSTAL_BONUS };
-  for (const def of CRYSTALS) {
-    const lv = Math.max(0, Math.min(def.max, Math.floor(levels[def.id] || 0)));
-    if (lv <= 0) continue;
-    const v = Math.min(def.maxValue ?? Number.POSITIVE_INFINITY, def.base !== undefined ? def.base + def.perLevel * (lv - 1) : def.perLevel * lv);
-    if (def.id === "ruby") out.atk += v;
-    else if (def.id === "sapphire") out.crit += v;
-    else if (def.id === "emerald") out.sp += v;
-    else if (def.id === "topaz") out.gold += v;
-    else if (def.id === "amethyst") out.aspd += v;
-    else if (def.id === "diamond") out.lives += v;
-    else if (def.id === "magicianKing") out.magicianKing += v;
-    else if (def.id === "superbolt") out.lightning += v;
-    else if (def.id === "superCrit") {
-      out.critDamage += v;
-      out.superCritChance += Math.min(def.secondaryMax ?? Number.POSITIVE_INFINITY, (def.secondaryBase ?? 0) + (def.secondaryPerLevel ?? 0) * (lv - 1));
-    }
-  }
-  return out;
-}
-
-/** "Ruby Lv 4 · +8% Tower ATK" — the line under a crystal card */
-export function crystalBuffText(def: CrystalDef, level: number): string {
-  if (level <= 0) return "Not awakened — spend crystal potions to ignite it";
-  const v = Math.min(def.maxValue ?? Number.POSITIVE_INFINITY, def.base !== undefined ? def.base + def.perLevel * (level - 1) : def.perLevel * level);
-  if (def.id === "superCrit") {
-    const chance = Math.min(def.secondaryMax ?? Number.POSITIVE_INFINITY, (def.secondaryBase ?? 0) + (def.secondaryPerLevel ?? 0) * (level - 1));
-    return `+${Math.round(v * 100)}% crit damage · +${(chance * 100).toFixed(1)}% crit chance`;
-  }
-  if (def.flat) return `+${Math.round(v)} starting ${v === 1 ? "life" : "lives"}`;
-  return `+${(Math.round(v * 1000) / 10).toFixed(1).replace(/\.0$/, "")}% ${def.stat}`;
-}
-
-export type EnemyShape = "slime" | "runner" | "knight" | "mage" | "warlord" | "overlord" | "titan" | "hound" | "wraith" | "golem" | "leviathan" | "herald";
-
-export interface EnemyType {
-  name: string;
-  /** short flavour line used by the bestiary and boss cut-ins */
-  title: string;
-  color: string;
-  /** secondary colour used for plating, robes, cores */
-  accent: string;
-  /** darker tone for shading and outlines */
-  shade: string;
-  shape: EnemyShape;
-  hpMul: number;
-  speed: number;
-  r: number;
-  armor: number;
-  lives: number;
-  gold: number;
-  /** how many legs/limbs the walk cycle animates */
-  legs: number;
-  /** animation rate multiplier for the walk/bob cycle */
-  bobRate: number;
-}
-
-/**
- * Reworked enemy roster. Every entry now carries a full palette (base, accent,
- * shade) plus a `shape` tag that the renderer uses to pick a hand-drawn body,
- * so enemies read as distinct silhouettes instead of coloured polygons.
- */
-// eslint-disable-next-line prefer-const
-export const ENEMY_TYPES: EnemyType[] = [
-  {
-    name: "Slime",
-    title: "Rift Ooze",
-    color: "#5dff7a",
-    accent: "#c7ffd4",
-    shade: "#0f7a33",
-    shape: "slime",
-    hpMul: 1,
-    speed: 55,
-    r: 13,
-    armor: 0,
-    lives: 1,
-    gold: 2,
-    legs: 0,
-    bobRate: 1,
-  },
-  {
-    name: "Runner",
-    title: "Wisp Courier",
-    color: "#ffd23f",
-    accent: "#fff3b0",
-    shade: "#9a6b00",
-    shape: "runner",
-    hpMul: 0.55,
-    // +24% runner speed (this round)
-    speed: 118 * 1.24,
-    r: 11,
-    armor: 0,
-    lives: 1,
-    gold: 3,
-    legs: 2,
-    bobRate: 2.2,
-  },
-  {
-    name: "Knight",
-    title: "Bulwark Knight",
-    color: "#8fb0ff",
-    accent: "#e6edff",
-    shade: "#2a3f7a",
-    shape: "knight",
-    hpMul: 1.7,
-    speed: 46,
-    r: 16,
-    armor: 0.35,
-    lives: 2,
-    gold: 4,
-    legs: 2,
-    bobRate: 0.8,
-  },
-  {
-    name: "Mage",
-    title: "Rift Adept",
-    color: "#d06bff",
-    accent: "#f3d6ff",
-    shade: "#55198a",
-    shape: "mage",
-    hpMul: 1.25,
-    speed: 52,
-    r: 14,
-    armor: 0.15,
-    lives: 2,
-    gold: 5,
-    legs: 0,
-    bobRate: 1.1,
-  },
-  {
-    name: "Warlord",
-    title: "Crimson Warlord",
-    color: "#ff5d5d",
-    accent: "#ffd0b0",
-    shade: "#7a1020",
-    shape: "warlord",
-    hpMul: 15,
-    speed: 34,
-    r: 27,
-    armor: 0.2,
-    lives: 5,
-    gold: 30,
-    legs: 2,
-    bobRate: 0.7,
-  },
-  {
-    name: "Rift Overlord",
-    title: "Sovereign of the Rift",
-    color: "#7b2cff",
-    accent: "#d7b4ff",
-    shade: "#2d0a63",
-    shape: "overlord",
-    hpMul: 26,
-    speed: 30,
-    r: 31,
-    armor: 0.28,
-    lives: 8,
-    gold: 65,
-    legs: 0,
-    bobRate: 0.6,
-  },
-];
-
-/**
- * The third boss. A walking siege engine with its own shape, the biggest health
- * multiplier in the game and the full nine-skill kit.
- */
-const TITAN: EnemyType = {
-  name: "Void Titan",
-  title: "Titan of the Last Rift",
-  color: "#22d3ee",
-  accent: "#d8fbff",
-  shade: "#0b4a5c",
-  shape: "titan",
-  hpMul: 34,
-  speed: 26,
-  r: 34,
-  armor: 0.3,
-  lives: 10,
-  gold: 90,
-  legs: 2,
-  bobRate: 0.5,
-};
-ENEMY_TYPES.push(TITAN);
-
-/** index of the Void Titan in ENEMY_TYPES, for the wave comp and the cutscene */
-export const TITAN_TYPE = ENEMY_TYPES.length - 1;
-
-/**
- * THREE NEW RIFT-BORN MONSTERS.
- *
- * They are appended after the bosses so every existing type index (and every
- * saved run / test that pins one) keeps its meaning. Boss detection is a set
- * lookup rather than "index >= 4", precisely so a late monster can never be
- * mistaken for a boss.
- */
-const HOUND: EnemyType = {
-  name: "Rift Hound",
-  title: "Starving Rift Hound",
-  color: "#ff8a3d",
-  accent: "#ffe0b0",
-  shade: "#7a2c00",
-  shape: "hound",
-  hpMul: 1.35,
-  speed: 96,
-  r: 13,
-  armor: 0.05,
-  lives: 1,
-  gold: 6,
-  legs: 4,
-  bobRate: 2.6,
-};
-const WRAITH: EnemyType = {
-  name: "Cinder Wraith",
-  title: "Ashen Cinder Wraith",
-  color: "#b06bff",
-  accent: "#f0dcff",
-  shade: "#3a0f66",
-  shape: "wraith",
-  hpMul: 1.15,
-  speed: 62,
-  r: 14,
-  armor: 0,
-  lives: 2,
-  gold: 7,
-  legs: 0,
-  bobRate: 1.1,
-};
-const GOLEM: EnemyType = {
-  name: "Shard Golem",
-  title: "Riftglass Shard Golem",
-  color: "#6f8bff",
-  accent: "#cfe2ff",
-  shade: "#1d2c66",
-  shape: "golem",
-  hpMul: 2.6,
-  speed: 34,
-  r: 19,
-  armor: 0.5,
-  lives: 3,
-  gold: 11,
-  legs: 2,
-  bobRate: 0.55,
-};
-/** the append slot for the new mobs — never hardcode the index */
-const MOB_APPEND = ENEMY_TYPES.length;
-ENEMY_TYPES.push(HOUND, WRAITH, GOLEM);
-export const HOUND_TYPE = MOB_APPEND;
-/** wraiths are weightless: nothing can slow them down */
-export const WRAITH_TYPE = MOB_APPEND + 1;
-export const GOLEM_TYPE = MOB_APPEND + 2;
-
-/**
- * THE FOURTH BOSS — Abyss Leviathan. A coiled serpent that drags its own rift
- * behind it, ships the biggest health pool in the game and cycles the full
- * nine-skill kit. It leads the deep waves of every mode.
- */
-const LEVIATHAN: EnemyType = {
-  name: "Abyss Leviathan",
-  title: "Devourer of the Deep Rift",
-  color: "#2ee6c8",
-  accent: "#d6fff7",
-  shade: "#053f39",
-  shape: "leviathan",
-  hpMul: 46,
-  speed: 22,
-  r: 38,
-  armor: 0.34,
-  lives: 12,
-  gold: 120,
-  legs: 0,
-  bobRate: 0.4,
-};
-ENEMY_TYPES.push(LEVIATHAN);
-export const LEVIATHAN_TYPE = ENEMY_TYPES.length - 1;
-
-/**
- * THE FIFTH BOSS — Storm Herald. An iron-skied executioner that rides a
- * personal thunderhead. It is the only boss that attacks the player's economy
- * (SP siphon), the only one that can knock every tower offline at once, and it
- * drags the horde forward behind it. Three skills, all exclusive to it.
- */
-const HERALD: EnemyType = {
-  name: "Storm Herald",
-  title: "Sovereign of the Iron Sky",
-  color: "#7ce7ff",
-  accent: "#ffffff",
-  shade: "#08313d",
-  shape: "herald",
-  hpMul: 52,
-  speed: 25,
-  r: 35,
-  armor: 0.32,
-  lives: 12,
-  gold: 140,
-  legs: 0,
-  bobRate: 0.5,
-};
-ENEMY_TYPES.push(HERALD);
-export const HERALD_TYPE = ENEMY_TYPES.length - 1;
-
-/** every boss index, in the order they enter the campaign */
-export const BOSS_TYPES = [4, 5, 6, TITAN_TYPE, LEVIATHAN_TYPE, HERALD_TYPE];
-export const BOSS_TYPE = 4;
-export const isBossType = (type: number) => BOSS_TYPES.includes(type);
-
-export type BossSkillId =
-  | "summon"
-  | "blink"
-  | "ward"
-  | "enrage"
-  | "nullfield"
-  | "devour"
-  | "meteor"
-  | "chains"
-  | "warp"
-  | "warcry"
-  | "cleave"
-  | "banner"
-  | "quake"
-  | "undertow"
-  | "siphon"
-  | "overcharge"
-  | "maelstrom";
-
-export interface BossSkillRow {
-  id: BossSkillId;
-  name: string;
-  tell: string;
-  color: string;
-  /** icon glyph drawn on the boss bar chip */
-  glyph: string;
-}
-
-/**
- * Every skill a boss can pull out. Bosses do not all get the same kit — the
- * Devil walks in with three, the Rift Overlord cycles all nine — and each skill
- * fires off its own cooldown, so a long boss fight keeps changing shape.
- */
-export const BOSS_SKILLS: BossSkillRow[] = [
-  { id: "summon", name: "Rift Call", tell: "calls minions through the rift", color: "#c44dff", glyph: "❖" },
-  { id: "blink", name: "Void Step", tell: "blinks down the path", color: "#8ceaff", glyph: "➤" },
-  { id: "ward", name: "Bulwark", tell: "shields itself for a moment", color: "#8fb0ff", glyph: "⬢" },
-  { id: "enrage", name: "Blood Frenzy", tell: "enrages below 45% health", color: "#ff5c70", glyph: "✚" },
-  { id: "nullfield", name: "Null Field", tell: "hexes the towers around it", color: "#b06bff", glyph: "⊗" },
-  { id: "devour", name: "Soul Devour", tell: "eats its own minions to heal", color: "#ff8c3d", glyph: "✷" },
-  { id: "meteor", name: "Meteor Fall", tell: "drops burning rocks on the grid", color: "#ff7a3d", glyph: "☄" },
-  { id: "chains", name: "Rift Chains", tell: "shields every minion beside it", color: "#4de8ff", glyph: "⛓" },
-  { id: "warp", name: "Warp Surge", tell: "wrenches the whole horde forward", color: "#b6a0ff", glyph: "⇉" },
-  { id: "warcry", name: "War Cry", tell: "drives every nearby minion into a frenzy", color: "#ff9d4d", glyph: "♫" },
-  { id: "cleave", name: "Shield Cleave", tell: "hacks the nearest tower offline", color: "#ff5d5d", glyph: "⚔" },
-  { id: "banner", name: "Iron Banner", tell: "plates itself in living iron", color: "#ffd23f", glyph: "⚑" },
-  { id: "quake", name: "Foundation Quake", tell: "shatters the ground under the grid", color: "#22d3ee", glyph: "≋" },
-  { id: "undertow", name: "Undertow", tell: "drags the horde into its coils", color: "#2ee6c8", glyph: "🌀" },
-  { id: "siphon", name: "Soul Siphon", tell: "bleeds SP out of your grid", color: "#c98cff", glyph: "🩸" },
-  { id: "overcharge", name: "Overcharge", tell: "arcs lightning through your towers", color: "#7ce7ff", glyph: "⚡" },
-  { id: "maelstrom", name: "Maelstrom", tell: "hurls the whole horde down the lane", color: "#4de8ff", glyph: "🌪" },
-];
-
-export const BOSS_SKILL_BY_ID: Record<BossSkillId, BossSkillRow> = Object.fromEntries(
-  BOSS_SKILLS.map((s) => [s.id, s])
-) as Record<BossSkillId, BossSkillRow>;
-
-/**
- * boss type -> ITS OWN kit. No two bosses share a skill: the Warlord fights
- * with banners and cleaves, the Overlord with the rift, the Titan with the
- * ground itself, the Leviathan with its coils, and the Storm Herald with the
- * sky. Every entry here is exclusive to that boss.
- */
-export const BOSS_KITS: Record<number, BossSkillId[]> = {
-  4: ["warcry", "cleave", "banner"],
-  5: ["summon", "nullfield", "warp"],
-  6: ["quake", "meteor", "enrage"],
-};
-BOSS_KITS[LEVIATHAN_TYPE] = ["devour", "chains", "undertow"];
-BOSS_KITS[HERALD_TYPE] = ["siphon", "overcharge", "maelstrom"];
-
-export const bossKit = (type: number): BossSkillId[] => BOSS_KITS[type] || BOSS_KITS[BOSS_TYPE];
-
-export const BOSS_SUMMON_CD = 9.5;
-export const BOSS_BLINK_CD = 7.5;
-export const BOSS_WARD_CD = 12.5;
-export const BOSS_WARD_TIME = 3.4;
-export const BOSS_ENRAGE_AT = 0.45;
-/** Null Field: towers caught in the hex fire this much slower */
-export const BOSS_NULL_CD = 11.5;
-export const BOSS_NULL_RADIUS = 210;
-export const BOSS_NULL_TIME = 5;
-export const BOSS_NULL_SLOW = 0.62;
-/** Soul Devour: eats its own minions for a share of its max HP each */
-export const BOSS_DEVOUR_CD = 14.5;
-export const BOSS_DEVOUR_HEAL = 0.045;
-/** Meteor Fall: burning rocks that smash towers offline for a few seconds */
-export const BOSS_METEOR_CD = 10.5;
-export const BOSS_METEOR_COUNT = 3;
-export const BOSS_METEOR_DOWN = 4.5;
-/** Rift Chains: minions near the boss take much less damage */
-export const BOSS_CHAINS_CD = 13.5;
-export const BOSS_CHAINS_RADIUS = 230;
-export const BOSS_CHAINS_TIME = 5;
-export const BOSS_CHAINS_DR = 0.55;
-/** Warp Surge: drags the whole horde down the lane */
-export const BOSS_WARP_CD = 16.5;
-export const BOSS_WARP_DIST = 150;
-
-// ---------- boss-exclusive skills ----------
-/** War Cry: nearby minions sprint for a while */
-export const BOSS_WARCRY_CD = 10.5;
-export const BOSS_WARCRY_RADIUS = 320;
-export const BOSS_WARCRY_TIME = 5;
-export const BOSS_WARCRY_HASTE = 0.45;
-/** Shield Cleave: the nearest tower goes offline */
-export const BOSS_CLEAVE_CD = 9.5;
-export const BOSS_CLEAVE_DOWN = 2.2;
-/** Iron Banner: temporary armour plating */
-export const BOSS_BANNER_CD = 13.5;
-export const BOSS_BANNER_TIME = 6;
-export const BOSS_BANNER_ARMOR = 0.25;
-/** Foundation Quake: every tower near the boss is knocked out */
-export const BOSS_QUAKE_CD = 15.5;
-export const BOSS_QUAKE_RADIUS = 300;
-export const BOSS_QUAKE_DOWN = 2.6;
-/** Undertow: pulls the horde backwards into the boss */
-export const BOSS_UNDERTOW_CD = 12.5;
-export const BOSS_UNDERTOW_PULL = 90;
-/** Soul Siphon: steals run SP and heals */
-export const BOSS_SIPHON_CD = 11.5;
-export const BOSS_SIPHON_SP = 90;
-export const BOSS_SIPHON_HEAL = 0.025;
-/** Overcharge: lightning arcs knock towers offline */
-export const BOSS_OVERCHARGE_CD = 8.5;
-export const BOSS_OVERCHARGE_TARGETS = 3;
-export const BOSS_OVERCHARGE_DOWN = 2;
-/** Maelstrom: hurls the horde forward and hastes it */
-export const BOSS_MAELSTROM_CD = 14.5;
-export const BOSS_MAELSTROM_DIST = 130;
-
-export function roundHp(round: number) {
-  return 46 * Math.pow(HP_GROWTH, round - 1);
-}
-
-/**
- * Bosses receive a dedicated +78% health scale; normal enemies and elites use
- * the regular-enemy scale, with elites also carrying their 2.8x elite modifier.
- * Type-specific multipliers remain on top. Speed, armour, lives and gold are untouched.
- */
-export const BOSS_HP_MUL = 1.78;
-
-/**
- * Non-boss enemies receive +90% maximum health at spawn time, including
- * elites, normal waves and Rift Call summons. Bosses use BOSS_HP_MUL instead; elites
- * additionally have 2.8x their type-scaled health.
- */
-export const ENEMY_HP_SCALE = 1.9;
-/** Elites are markedly tougher than their base enemy type. */
-export const ELITE_HP_MUL = 2.8;
-
-/**
- * Compact number for the in-battle health readout: 987, 12.3k, 4.56M, 7.9B.
- * Enemies scale exponentially with the wave, so a raw 47-digit number would
- * never fit over a slime's head.
- */
-export function shortHp(v: number): string {
-  const n = Math.max(0, v);
-  if (n < 1000) return String(Math.ceil(n - 1e-9));
-  const units = ["k", "M", "B", "T", "Qa"];
-  let x = n;
-  let u = -1;
-  while (x >= 1000 && u < units.length - 1) {
-    x /= 1000;
-    u++;
-  }
-  const pick = () => (x >= 100 ? 0 : x >= 10 ? 1 : 2);
-  let digits = pick();
-  let t = x.toFixed(digits);
-  // rounding can push 999.6k to "1000k" - step up a unit instead
-  if (Number(t) >= 1000 && u < units.length - 1) {
-    x /= 1000;
-    u++;
-    digits = pick();
-    t = x.toFixed(digits);
-  }
-  return `${t.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "")}${units[u]}`;
-}
-
-/**
- * Run gold is paid out 50% richer: every kill, every bounty awakening and the
- * wave-clear purse. Account gold from chests and tasks is a different economy
- * and is not touched by this. Whatever is left in the wallet is settled when the
- * run ends, so the bonus carries into the results screen too.
- */
-export const GOLD_GAIN_MUL = 1.5;
-export const runGold = (v: number) => Math.round(v * GOLD_GAIN_MUL);
-
-export const WAVE_ENEMY_COUNT = 15;
-export const SPAWN_INTERVAL_SECONDS = 0.57;
-export const SPAWN_INTERVAL_STEP = 0.00002;
-export function enemySpawnInterval(wave: number): number {
-  return Math.max(0.08, SPAWN_INTERVAL_SECONDS - Math.max(0, wave - 1) * SPAWN_INTERVAL_STEP);
-}
-
-export function waveComp(round: number, randomRoll: () => number = Math.random): number[] {
-  const bosses: number[] = [];
-  // Bosses take slots in the fixed ten-enemy wave rather than adding extra kills.
-  if (round % 4 === 0) bosses.push(round >= 32 ? 6 : round >= 16 ? 5 : 4);
-  if (round >= 16 && round % 4 === 0) bosses.push(round >= 32 ? 5 : 4);
-  if (round >= 32 && round % 8 === 0) bosses.push(6);
-  if (round >= 20 && round % 8 === 0) bosses.push(LEVIATHAN_TYPE);
-  // the Storm Herald takes the deepest slot: first seen on round 24
-  if (round >= 24 && round % 12 === 0) bosses.push(HERALD_TYPE);
-
-  const regularCount = Math.max(0, WAVE_ENEMY_COUNT - bosses.length);
-  const out: number[] = [];
-  for (let i = 0; i < regularCount; i++) {
-    let t = 0;
-    const roll = randomRoll();
-    if (round >= 7 && roll < 0.16) t = 3;
-    else if (round >= 5 && roll < 0.3) t = 2;
-    else if (round >= 3 && roll < 0.54) t = 1;
-    else if (round >= 13 && roll < 0.64) t = GOLEM_TYPE;
-    else if (round >= 11 && roll < 0.76) t = WRAITH_TYPE;
-    else if (round >= 9 && roll < 0.9) t = HOUND_TYPE;
-    out.push(t);
-  }
-  return [...out, ...bosses];
-}
-
-export const BATTLE_ROUNDS = 12;
-/** Endless never stops; this is only used for display before the first wave. */
-export const ENDLESS_ROUNDS = 0;
-
-// ---------- heroes ----------
-export type HeroKind = "nuke" | "freeze" | "burn" | "overdrive" | "thunder";
-
-/** a single beat of a hero's cast timeline, used by the battle renderer */
-export interface SkillPhase {
-  /** seconds after the cast starts */
-  at: number;
-  label: string;
-}
-
-export interface HeroDef {
-  id: string;
-  name: string;
-  color: string;
-  /** secondary colour for the skill's effects */
-  color2: string;
-  cd: number;
-  kind: HeroKind;
-  desc: string;
-  /** shown in the hero card once the ability is levelled up */
-  scaling: string;
-  /** the ultimate's display name */
-  skillName: string;
-  /** how long the cast sequence runs for */
-  castTime: number;
-  /** the beats of the cast, called out in the arena as it unfolds */
-  phases: SkillPhase[];
-  /** bullet list of exactly what the ultimate does */
-  effects: string[];
-}
-
-/**
- * Reworked hero ultimates. Every skill is now a multi-phase, timeline-driven
- * sequence with a real secondary mechanic (singularity pull, shatter damage,
- * lava pools, time dilation, static marks) instead of a single instant hit.
- */
-export const HEROES: HeroDef[] = [
-  {
-    id: "nova",
-    name: "Nova",
-    color: "#b6a0ff",
-    color2: "#9d4bff",
-    cd: 25,
-    kind: "nuke",
-    skillName: "SINGULARITY",
-    castTime: 2.6,
-    desc: "Tears open a singularity that drags the whole field into one point, then collapses it.",
-    scaling: "+30% collapse damage and +0.12s pull per level",
-    phases: [
-      { at: 0, label: "RIFT OPENS" },
-      { at: 0.5, label: "EVENT HORIZON" },
-      { at: 1.9, label: "COLLAPSE!" },
-    ],
-    effects: [
-      "Opens a singularity on the busiest stretch of lane",
-      "Pulls every enemy toward it for 1.9s and holds them there",
-      "Collapses for massive damage, scaled up by how many were caught",
-      "Three meteors crash down during the pull",
-    ],
-  },
-  {
-    id: "glacier",
-    name: "Glacier",
-    color: "#8ceaff",
-    color2: "#b9f4ff",
-    cd: 30,
-    kind: "freeze",
-    skillName: "ABSOLUTE ZERO",
-    castTime: 2.2,
-    desc: "Encases the field in ice, then shatters it — the more health they are missing, the harder they break.",
-    scaling: "+0.4s encase and +8% shatter damage per level",
-    phases: [
-      { at: 0, label: "FROST FRONT" },
-      { at: 0.45, label: "ENCASED" },
-      { at: 1.6, label: "SHATTER!" },
-    ],
-    effects: [
-      "Flash-freezes and encases every enemy solid",
-      "Encased enemies take +100% damage from all sources",
-      "Shatter wave at the end scales with their missing health",
-      "Leaves three frost zones that chill anything crossing them",
-    ],
-  },
-  {
-    id: "ember",
-    name: "Ember",
-    color: "#ff7a3d",
-    color2: "#ffd23f",
-    cd: 30,
-    kind: "burn",
-    skillName: "FIRESTORM",
-    castTime: 2.8,
-    desc: "Walks a meteor barrage down the lane and floods it with lava that keeps burning.",
-    scaling: "+1 meteor and +30% burn damage per level",
-    phases: [
-      { at: 0, label: "SKY IGNITES" },
-      { at: 0.35, label: "BARRAGE" },
-      { at: 2.1, label: "LAVA FLOOD" },
-    ],
-    effects: [
-      "Rains a walking meteor barrage along the whole path",
-      "Each impact detonates for splash damage and stacks burn",
-      "Leaves lava pools that keep burning anything standing in them",
-      "Burn stacks now compound instead of overwriting",
-    ],
-  },
-  {
-    id: "overdrive",
-    name: "Overdrive",
-    color: "#5cffaa",
-    color2: "#8effc4",
-    cd: 35,
-    kind: "overdrive",
-    skillName: "TIME DILATION",
-    castTime: 1.8,
-    desc: "Slams the world into slow motion while every tower fires a free overcharged volley.",
-    scaling: "+1s dilation and +1 free volley per level",
-    phases: [
-      { at: 0, label: "TIME FRACTURES" },
-      { at: 0.4, label: "DILATION" },
-      { at: 1.2, label: "FREE VOLLEY" },
-    ],
-    effects: [
-      "Drops every enemy to 35% speed for the duration",
-      "+150% attack speed and +50% damage on every tower",
-      "Each tower fires a free overcharged volley at the strongest target",
-      "Towers vent chrono-rings while the dilation holds",
-    ],
-  },
-  {
-    id: "thunder",
-    name: "Thunder God",
-    color: "#ffe14d",
-    color2: "#fff6a8",
-    cd: 20,
-    kind: "thunder",
-    skillName: "STORM SOVEREIGN",
-    castTime: 2.4,
-    desc: "A storm front walks the lane, marking everything it touches so deaths re-arc into the next target.",
-    scaling: "+1 bolt, +1 chain and +120% skill power per level · cooldown cuts to a 2.5s floor",
-    phases: [
-      { at: 0, label: "STORM FRONT" },
-      { at: 0.3, label: "BOLT WALK" },
-      { at: 1.8, label: "SOVEREIGN STRIKE" },
-    ],
-    effects: [
-      "A bolt front walks the full length of the lane",
-      "Every bolt chains between everything within its radius",
-      "Struck enemies are marked with static for 6s",
-      "A marked enemy that dies re-arcs its static into nearby enemies",
-    ],
-  },
-];
-
-export const HERO_BY_ID: Record<string, HeroDef> = Object.fromEntries(
-  HEROES.map((h) => [h.id, h])
-);
-
-// ---------- hero levelling ----------
-export const HERO_MAX_LEVEL = 25;
-/** gold needed to take a hero from `lv` to `lv + 1` */
-export const heroUpgradeCost = (lv: number) => Math.round(120 * Math.pow(1.2, Math.max(0, lv - 1)));
-/** every level adds 30% ability power (damage, burn, freeze/overdrive duration).
- *  Thunder God is the exception: his storms scale +120% skill power per level. */
-export const heroPower = (lv: number, id = "") =>
-  id === "thunder" ? 1 + 1.2 * (Math.max(1, lv) - 1) : 1 + 0.3 * (Math.max(1, lv) - 1);
-/** and shaves 3% off the cooldown, down to a floor of 60%.
- *  Thunder God is the exception: −5% per level all the way down to a hard 2.5s floor. */
-export const heroCooldown = (cd: number, lv: number, id = "") =>
-  id === "thunder"
-    ? Math.max(2.5, cd * (1 - 0.05 * (Math.max(1, lv) - 1)))
-    : cd * Math.max(0.6, 1 - 0.03 * (Math.max(1, lv) - 1));
-
-// ---------- hero awakenings ----------
-/**
- * Hero awakenings are a separate track from tower awakenings: they are bought
- * with Magic Tokens, they are per-hero, and they can be taken at any hero
- * level. Each hero gets two exclusive paths.
- */
-export interface HeroAwkSpec {
-  id: string;
-  name: string;
-  /** true when the path is always on instead of riding the ultimate */
-  passive?: boolean;
-  /** one-line flavour shown on the card */
-  desc: string;
-  /** short label for the effect at a given tier (1..6) */
-  fmt: (tier: number) => string;
-}
-
-export const HERO_AWAKENING_MAX_TIER = 6;
-/** Magic Token price of one hero awakening tier */
-export function heroAwakenCost(tier: number) {
-  return Math.round(40 * Math.pow(1.6, Math.max(0, tier - 1)));
-}
-
-/** Electrical Induction: shield strip applied by any lightning strike */
-export const inductionShieldCut = (tier: number) => (tier > 0 ? 1.2 + 0.2 * (tier - 1) : 0);
-/** Electrical Induction: bonus SP and run gold on lightning kills */
-export const inductionBonus = (tier: number) => (tier > 0 ? 0.5 + 0.05 * (tier - 1) : 0);
-/** Bolt from the Blue: the health share that arms the passive bolt */
-export const boltThreshold = (tier: number) => (tier > 0 ? Math.max(0.4, 0.8 - 0.01 * (tier - 1)) : 0);
-/** Bolt from the Blue: chance a hero cast resets its own cooldown */
-export const boltResetChance = (tier: number) => (tier > 0 ? Math.min(0.95, 0.4 + 0.02 * (tier - 1)) : 0);
-/** Bolt from the Blue: the interval left on the cooldown after a reset */
-export const boltResetInterval = (tier: number) => (tier > 0 ? Math.max(0.2, 0.5 - 0.01 * (tier - 1)) : 0);
-
-const awkTier = (tier: number) => Math.max(1, Math.min(HERO_AWAKENING_MAX_TIER, tier));
-
-/**
- * Electrical Judgement (Thunder God, awakening 3). Tier I is the base; every
- * tier adds one bolt, half a second of duration, 2.5% chance and 25 m radius.
- * The chance is the roll each Storm Sovereign cast makes to be replaced.
- */
-export const JUDGEMENT_BOLT_WIDTH = 15;
-export const judgementBolts = (tier: number) => (tier > 0 ? 2 + (tier - 1) : 0);
-export const judgementDuration = (tier: number) => (tier > 0 ? 3 + 0.5 * (tier - 1) : 0);
-export const judgementChance = (tier: number) => (tier > 0 ? 0.3 + 0.025 * (tier - 1) : 0);
-export const judgementRadius = (tier: number) => (tier > 0 ? 1200 + 25 * (tier - 1) : 0);
-
-export const HERO_AWAKENINGS: Record<string, HeroAwkSpec[]> = {
-  thunder: [
-    {
-      id: "induction",
-      name: "Electrical Induction",
-      desc: "Every lightning strike stuns its target and strips their shield for 5s. Lightning kills pay +50% SP and run gold.",
-      fmt: (tier) => {
-        const t = awkTier(tier);
-        return `${Math.round(inductionShieldCut(t) * 100)}% shield cut · +${Math.round(inductionBonus(t) * 100)}% SP & gold on lightning kills`;
-      },
-    },
-    {
-      id: "boltblue",
-      name: "Bolt from the Blue",
-      passive: true,
-      desc: "Passive: enemies that fall below 80% health are struck by a thin bolt. Hero casts have a 40% chance to reset the cooldown to a 0.5s interval.",
-      fmt: (tier) => {
-        const t = awkTier(tier);
-        return `bolts below ${Math.round(boltThreshold(t) * 100)}% HP · ${Math.round(boltResetChance(t) * 100)}% cooldown reset at ${boltResetInterval(t).toFixed(2)}s`;
-      },
-    },
-    {
-      id: "judgement",
-      name: "Electrical Judgement",
-      desc: "Storm Sovereign may skip its chain strikes: two 15 m judgement bolts strike the front-most enemies and blast a 1200 m radius every 0.5s for 3s, burning everything inside.",
-      fmt: (tier) => {
-        const t = awkTier(tier);
-        const pct = (x: number) => Number((x * 100).toFixed(1));
-        return `${judgementBolts(t)} bolts · ${judgementDuration(t).toFixed(1)}s · ${pct(judgementChance(t))}% chance · ${judgementRadius(t)} m blast`;
-      },
-    },
-  ],
-};
-
-export function heroAwkSpec(heroId: string, slot: number): HeroAwkSpec | null {
-  const list = HERO_AWAKENINGS[heroId];
-  return list?.[slot] ?? null;
-}
-
-/** "+120% shield cut · +50% SP & gold …" for the hero card */
-export function heroAwkText(heroId: string, slot: number, tier: number): string {
-  const spec = heroAwkSpec(heroId, slot);
-  if (!spec) return "";
-  if (tier <= 0) return spec.passive ? "Passive · not awakened" : "Not awakened";
-  return spec.fmt(awkTier(tier));
-}
-
-// ---------- daily rewards ----------
-// ---------- chip modules ----------
-/**
- * Chip modules are the crafting currency introduced with the event rotation.
- * Basic chips come from Support Chests and the Items Finding event, advanced
- * chips are rarer, and elite chips only drop from the weekly competition.
- */
-export type ChipId = "basic" | "advanced" | "elite";
-
-export interface ChipDef {
-  id: ChipId;
-  name: string;
-  short: string;
-  color: string;
-  desc: string;
-}
-
-export const CHIPS: ChipDef[] = [
-  { id: "basic", name: "Basic Chip Module", short: "Basic", color: "#8fe9ff", desc: "Standard arcane circuitry. Feeds tower ascension." },
-  { id: "advanced", name: "Advanced Chip Module", short: "Advanced", color: "#c44dff", desc: "Refined lattice core. Worth five basic modules at the exchange." },
-  { id: "elite", name: "Elite Chip Module", short: "Elite", color: "#ffc457", desc: "Competition-only module stamped by the arena marshals." },
-];
-
-export const CHIP_BY_ID: Record<ChipId, ChipDef> = Object.fromEntries(CHIPS.map((c) => [c.id, c])) as Record<ChipId, ChipDef>;
-
-export type ChipBag = Partial<Record<ChipId, number>>;
-
-// ---------- daily rewards ----------
-/** Rewards roll over at 07:00 local time, not at midnight. */
-export const DAILY_RESET_HOUR = 7;
-
-export interface DailyReward {
-  gold?: number;
-  gems?: number;
-  tokens?: number;
-  /** crystal potions, the currency the crystal vault runs on */
-  potions?: number;
-  frags?: number;
-  /** fragment rarity, used when frags are granted */
-  rarity?: Rarity;
-  /** chests handed over already opened — their loot is rolled on claim */
-  chests?: { id: string; n: number }[];
-  /** chip modules granted directly */
-  chips?: ChipBag;
-  /** trophies granted directly */
-  trophies?: number;
-  label: string;
-  /** which icon the calendar tile shows */
-  icon: "gold" | "gem" | "token" | "frag" | "chest" | "chip";
-  /** tile accent colour */
-  accent: string;
-}
-
-/**
- * Seven day streak, claimable once per game-day (a game-day flips at 07:00).
- * Miss a day and the streak restarts from day 1.
- */
-export const DAILY_REWARDS: DailyReward[] = [
-  { gems: 1200, label: "1,200 gems", icon: "gem", accent: "#8ceaff" },
-  { chests: [{ id: "silver", n: 1 }], label: "Silver Chest", icon: "chest", accent: "#cfd8e6" },
-  { chests: [{ id: "legendary", n: 1 }], potions: 2, label: "Legendary Chest + 2 potions", icon: "chest", accent: "#ffc457" },
-  { frags: 5, rarity: "legendary", label: "×5 legendary tower fragments", icon: "frag", accent: "#ffc457" },
-  { gold: 25000, gems: 900, label: "25,000 gold + 900 gems", icon: "gold", accent: "#ffd977" },
-  { chips: { basic: 5, advanced: 2 }, label: "×5 basic + ×2 advanced chips", icon: "chip", accent: "#c44dff" },
-  { chests: [{ id: "legendary", n: 3 }], potions: 3, label: "×3 Legendary Chests + 3 potions", icon: "chest", accent: "#ffc457" },
-];
-
-// ---------- daily tasks ----------
-export type TaskId = "play" | "win" | "kills" | "chests" | "upgrade" | "skill" | "spend" | "waves";
-
-export interface DailyTask {
-  id: TaskId;
-  name: string;
-  desc: string;
-  /** how much progress completes it */
-  need: number;
-  /** task points awarded, which feed the milestone track */
-  points: number;
-  gold: number;
-  gems: number;
-  color: string;
-}
-
-/**
- * Eight objectives that reset with the 07:00 game-day. Completing them feeds a
- * shared task-point track with three milestone chests.
- */
-export const DAILY_TASKS: DailyTask[] = [
-  // task gold/gems are scaled by 0.9 (balance patch: task rewards -10%)
-  { id: "play", name: "Answer the Call", desc: "Finish any run", need: 3, points: 10, gold: 2250, gems: 36, color: "#8fb0ff" },
-  { id: "win", name: "Hold the Line", desc: "Win a Battle run", need: 2, points: 20, gold: 5400, gems: 108, color: "#5cffaa" },
-  { id: "waves", name: "Wave Breaker", desc: "Clear waves", need: 20, points: 15, gold: 3600, gems: 63, color: "#8ceaff" },
-  { id: "kills", name: "Cull the Rift", desc: "Destroy enemies", need: 150, points: 15, gold: 4050, gems: 72, color: "#ff5c70" },
-  { id: "skill", name: "Hero's Moment", desc: "Unleash hero skills", need: 5, points: 10, gold: 1800, gems: 45, color: "#b6a0ff" },
-  { id: "upgrade", name: "Arsenal Work", desc: "Upgrade towers or heroes", need: 4, points: 10, gold: 2700, gems: 54, color: "#ffd977" },
-  { id: "chests", name: "Lockbreaker", desc: "Open chests", need: 3, points: 10, gold: 2250, gems: 50, color: "#c44dff" },
-  { id: "spend", name: "Big Spender", desc: "Spend gold", need: 20000, points: 10, gold: 1350, gems: 81, color: "#ffc457" },
-];
-
-export const TASK_BY_ID: Record<TaskId, DailyTask> = Object.fromEntries(DAILY_TASKS.map((t) => [t.id, t])) as Record<
-  TaskId,
-  DailyTask
->;
-
-export const TASK_POINTS_TOTAL = DAILY_TASKS.reduce((a, t) => a + t.points, 0);
-
-export interface TaskMilestone {
-  points: number;
-  label: string;
-  color: string;
-  chests: { id: string; n: number }[];
-  gems: number;
-  chips: ChipBag;
-  /** crystal potions handed over with the crate */
-  potions?: number;
-}
-
-/** the three chests on the daily task point track */
-export const TASK_MILESTONES: TaskMilestone[] = [
-  { points: 30, label: "Supply Cache", color: "#8fe9ff", chests: [{ id: "silver", n: 1 }], gems: 150, chips: { basic: 2 }, potions: 2 },
-  { points: 60, label: "War Cache", color: "#c44dff", chests: [{ id: "support", n: 1 }, { id: "epic", n: 1 }], gems: 400, chips: { basic: 3, advanced: 1 }, potions: 4 },
-  { points: TASK_POINTS_TOTAL, label: "Perfect Day", color: "#ffc457", chests: [{ id: "legendary", n: 2 }], gems: 1000, chips: { advanced: 3, elite: 1 }, potions: 8 },
-];
-
-// ---------- weekly event rotation ----------
-export type EventId = "luck" | "chestbox" | "trophy" | "items" | "mineshaft" | "moonwell" | "gemrush";
-
-export interface GameEvent {
-  id: EventId;
-  name: string;
-  /** 0 = Sunday … 6 = Saturday, matching Date#getDay */
-  days: number[];
-  tagline: string;
-  desc: string;
-  /** what the event actually changes in game */
-  perk: string;
-  color: string;
-  icon: EventId;
-}
-
-/**
- * One event is live per weekday. Each one applies a real modifier through
- * `eventBonus()` below, so the rotation is more than flavour text.
- */
-export const EVENTS: GameEvent[] = [
-  {
-    id: "luck",
-    name: "Luck Hunting",
-    days: [1],
-    tagline: "Monday",
-    desc: "The rift leaks fortune. Fragment rolls lean rare and every chest rolls one extra fragment.",
-    perk: "+1 chest fragment · fragment rarity bias +0.25",
-    color: "#5cffaa",
-    icon: "luck",
-  },
-  {
-    id: "chestbox",
-    name: "Chest Box",
-    days: [2],
-    tagline: "Tuesday",
-    desc: "The quartermaster is in a giving mood — every chest in the Shop is discounted.",
-    perk: "-25% chest price · free Common Chest each day",
-    color: "#ffd977",
-    icon: "chestbox",
-  },
-  {
-    id: "trophy",
-    name: "Trophy Competition",
-    days: [3],
-    tagline: "Wednesday",
-    desc: "Ladder day. Victories are worth more trophies and defeats cost you less.",
-    perk: "+30 trophies on a win · defeats only cost 10",
-    color: "#b6a0ff",
-    icon: "trophy",
-  },
-  {
-    id: "items",
-    name: "Items Finding",
-    days: [4],
-    tagline: "Thursday",
-    desc: "Salvage crews sweep the battlefield after every run and pull chip modules out of the wreck.",
-    perk: "Battle victories drop 2 basic chips (+1 advanced on a boss wave)",
-    color: "#8fe9ff",
-    icon: "items",
-  },
-  {
-    id: "mineshaft",
-    name: "Mineshaft",
-    days: [5],
-    tagline: "Friday",
-    desc: "The old gold seams under the arena are open. Everything you bank is worth more.",
-    perk: "+60% gold from every run",
-    color: "#ffc457",
-    icon: "mineshaft",
-  },
-  {
-    id: "moonwell",
-    name: "Moonwell",
-    days: [6],
-    tagline: "Saturday",
-    desc: "The moonwell spills silver light over the grid. Every kill feeds more spell power and the horde walks weakened beneath the glow.",
-    perk: "+45% SP per kill · enemy HP -6%",
-    color: "#b6a0ff",
-    icon: "moonwell",
-  },
-  {
-    id: "gemrush",
-    name: "Gem Rush",
-    days: [0],
-    tagline: "Sunday",
-    desc: "Hold the arena for five minutes. Each ordinary kill earns 50 gems; elites pay 5× and bosses 10×. Monsters have 12× health and move 50% faster.",
-    perk: "5-minute survival · 50 gems per kill · elites ×5 · bosses ×10",
-    color: "#8ceaff",
-    icon: "gemrush",
-  },
-];
-
-export const EVENT_BY_ID: Record<EventId, GameEvent> = Object.fromEntries(EVENTS.map((e) => [e.id, e])) as Record<
-  EventId,
-  GameEvent
->;
-
-/** the event live on a given date (defaults to now) */
-export function eventForDate(d: Date = new Date()): GameEvent {
-  const day = d.getDay();
-  return EVENTS.find((e) => e.days.includes(day)) || EVENTS[0];
-}
-
-export interface EventBonus {
-  goldMul: number;
-  gemMul: number;
-  /** spell power earned per kill — the Moonwell's signature modifier */
-  spMul: number;
-  fragBias: number;
-  chestFragBonus: number;
-  chestPriceMul: number;
-  trophyWin: number;
-  trophyLoss: number;
-  hpMul: number;
-  chipDrop: ChipBag | null;
-}
-
-export const GEM_RUSH_SECONDS = 5 * 60;
-export const GEM_RUSH_NORMAL_GEMS = 50;
-export const GEM_RUSH_ELITE_GEMS = 5;
-export const GEM_RUSH_BOSS_GEMS = 10;
-export const GEM_RUSH_HP_MUL = 12;
-export const GEM_RUSH_SPEED_MUL = 1.5;
-export function gemRushKillGems(elite: boolean, boss: boolean): number {
-  return GEM_RUSH_NORMAL_GEMS * (boss ? GEM_RUSH_BOSS_GEMS : elite ? GEM_RUSH_ELITE_GEMS : 1);
-}
-
-export const BASE_EVENT_BONUS: EventBonus = {
-  goldMul: 1,
-  gemMul: 1,
-  spMul: 1,
-  fragBias: 0,
-  chestFragBonus: 0,
-  chestPriceMul: 1,
-  trophyWin: 0,
-  trophyLoss: 0,
-  hpMul: 1,
-  chipDrop: null,
-};
-
-/** numeric modifiers for the given event — the single source of truth for perks */
-export function eventBonus(id: EventId): EventBonus {
-  switch (id) {
-    case "luck":
-      return { ...BASE_EVENT_BONUS, fragBias: 0.25, chestFragBonus: 1 };
-    case "chestbox":
-      return { ...BASE_EVENT_BONUS, chestPriceMul: 0.75 };
-    case "trophy":
-      return { ...BASE_EVENT_BONUS, trophyWin: 30, trophyLoss: 10 };
-    case "items":
-      return { ...BASE_EVENT_BONUS, chipDrop: { basic: 2 } };
-    case "mineshaft":
-      return { ...BASE_EVENT_BONUS, goldMul: 1.6 };
-    case "moonwell":
-      return { ...BASE_EVENT_BONUS, spMul: 1.45, hpMul: 0.94 };
-    case "gemrush":
-      return BASE_EVENT_BONUS;
-  }
-}
-
-// ---------- monthly events ----------
-export type MonthId =
-  | "arsenal"
-  | "heartfire"
-  | "riftwinds"
-  | "awakening"
-  | "golden"
-  | "gemrain"
-  | "siege"
-  | "festival"
-  | "bounty"
-  | "nightfall"
-  | "harvest"
-  | "winter";
-
-export interface MonthlyEvent {
-  id: MonthId;
-  name: string;
-  /** 0 = January … 11 = December, matching Date#getMonth */
-  month: number;
-  tagline: string;
-  desc: string;
-  perk: string;
-  color: string;
-}
-
-/**
- * One event per calendar month, stacking on top of the weekday rotation.
- * Each one applies real numbers through `monthlyEventBonus()`.
- */
-export const MONTHLY_EVENTS: MonthlyEvent[] = [
-  {
-    id: "arsenal",
-    name: "New Year Arsenal",
-    month: 0,
-    tagline: "January",
-    desc: "The forges reopen for the new year. Every tower upgrade is cheaper all month.",
-    perk: "Tower upgrades -15% gold",
-    color: "#8fb0ff",
-  },
-  {
-    id: "heartfire",
-    name: "Heartfire",
-    month: 1,
-    tagline: "February",
-    desc: "The rift runs warm. Enemies pour more spell power into the grid when they fall.",
-    perk: "+35% SP per kill",
-    color: "#ff6b8a",
-  },
-  {
-    id: "riftwinds",
-    name: "Rift Winds",
-    month: 2,
-    tagline: "March",
-    desc: "Tailwinds at your back: the horde marches weaker and the salvage crews pay more.",
-    perk: "Enemy HP -8% · gold +25%",
-    color: "#7fe9ff",
-  },
-  {
-    id: "awakening",
-    name: "Awakening Season",
-    month: 3,
-    tagline: "April",
-    desc: "The towers stir. Fragment finds lean rare and every chest rolls an extra fragment.",
-    perk: "+1 chest fragment · fragment rarity bias +0.3",
-    color: "#c44dff",
-  },
-  {
-    id: "golden",
-    name: "Golden Bloom",
-    month: 4,
-    tagline: "May",
-    desc: "Gold blooms across the arena floor. Everything you bank is worth half again as much.",
-    perk: "+55% gold from every run",
-    color: "#ffd977",
-  },
-  {
-    id: "gemrain",
-    name: "Gem Rain",
-    month: 5,
-    tagline: "June",
-    desc: "The sky crystallises. Gem payouts from runs nearly double.",
-    perk: "+90% gems from every run",
-    color: "#8ceaff",
-  },
-  {
-    id: "siege",
-    name: "Midyear Siege",
-    month: 6,
-    tagline: "July",
-    desc: "The horde tests the walls early — they hit harder, but spill far more spell power.",
-    perk: "+45% SP per kill · enemy HP +8%",
-    color: "#ff5c70",
-  },
-  {
-    id: "festival",
-    name: "Tower Festival",
-    month: 7,
-    tagline: "August",
-    desc: "Artisans flood the arena. Tower upgrades are at their cheapest all year.",
-    perk: "Tower upgrades -20% gold",
-    color: "#8effc4",
-  },
-  {
-    id: "bounty",
-    name: "Bounty Hunt",
-    month: 8,
-    tagline: "September",
-    desc: "The marshals post bounties on the whole horde. Kills pay in gold and spell power.",
-    perk: "+40% gold · +25% SP per kill",
-    color: "#ffc457",
-  },
-  {
-    id: "nightfall",
-    name: "Nightfall",
-    month: 9,
-    tagline: "October",
-    desc: "Long dark nights. The horde is tougher, but the rift gems glow brighter than ever.",
-    perk: "2x gems from runs · enemy HP +12%",
-    color: "#b14dff",
-  },
-  {
-    id: "harvest",
-    name: "Harvest",
-    month: 10,
-    tagline: "November",
-    desc: "Gather everything. Gold pours in and salvage crews pull extra fragments from chests.",
-    perk: "+65% gold · +1 chest fragment",
-    color: "#ff8c3d",
-  },
-  {
-    id: "winter",
-    name: "Winter Festival",
-    month: 11,
-    tagline: "December",
-    desc: "The season of gifts: gems, spell power and cheaper upgrades all month long.",
-    perk: "+55% gems · +20% SP · tower upgrades -10%",
-    color: "#9fe8ff",
-  },
-];
-
-export const MONTH_BY_ID: Record<MonthId, MonthlyEvent> = Object.fromEntries(
-  MONTHLY_EVENTS.map((m) => [m.id, m])
-) as Record<MonthId, MonthlyEvent>;
-
-/** the event live for the calendar month (defaults to now) */
-export function monthlyEventForDate(d: Date = new Date()): MonthlyEvent {
-  const month = d.getMonth();
-  return MONTHLY_EVENTS.find((m) => m.month === month) || MONTHLY_EVENTS[0];
-}
-
-export interface MonthlyBonus {
-  goldMul: number;
-  gemMul: number;
-  spMul: number;
-  hpMul: number;
-  upgradeCostMul: number;
-  fragBias: number;
-  chestFragBonus: number;
-}
-
-export const BASE_MONTHLY_BONUS: MonthlyBonus = {
-  goldMul: 1,
-  gemMul: 1,
-  spMul: 1,
-  hpMul: 1,
-  upgradeCostMul: 1,
-  fragBias: 0,
-  chestFragBonus: 0,
-};
-
-/**
- * REWORKED monthly events — a five-crate reward track split across four weekly
- * phases. Every run banks event points (waves cleared + a clear bonus) and each
- * monthly event pays out at 90 / 240 / 450 / 720 / 1000 points. The early
- * tiers stay front-loaded so a light player still collects, while the Moon
- * Crown at the top takes steady runs into the last week.
- *
- * Weekly phases keep the whole month live: points earned in week 2 land at
- * ×1.15, week 3 at ×1.3 and the final week at ×1.5, so catching up late in the
- * month is always possible.
- */
-export interface MonthlyTier {
-  points: number;
-  label: string;
-  gold: number;
-  gems: number;
-  potions: number;
-  chips?: ChipBag;
-  /** magic tokens — only the grand crates carry them */
-  tokens?: number;
-}
-
-export const MONTHLY_TIER_POINTS = [90, 240, 450, 720, 1000] as const;
-
-/** the five reward crates for a month's event, coloured by the event itself */
-export function monthlyTiers(id: MonthId): MonthlyTier[] {
-  const ev = MONTH_BY_ID[id] || MONTHLY_EVENTS[0];
-  const idx = MONTHLY_EVENTS.indexOf(ev);
-  const mul = 1 + Math.max(0, idx) * 0.06; // later months pay a touch more
-  return [
-    {
-      points: MONTHLY_TIER_POINTS[0],
-      label: "Event Cache",
-      gold: Math.round(6000 * mul),
-      gems: Math.round(90 * mul),
-      potions: 4,
-      chips: { basic: 3 },
-    },
-    {
-      points: MONTHLY_TIER_POINTS[1],
-      label: "Moon Crate",
-      gold: Math.round(12000 * mul),
-      gems: Math.round(190 * mul),
-      potions: 7,
-      chips: { basic: 5 },
-    },
-    {
-      points: MONTHLY_TIER_POINTS[2],
-      label: "Event Vault",
-      gold: Math.round(20000 * mul),
-      gems: Math.round(320 * mul),
-      potions: 10,
-      chips: { basic: 6, advanced: 2 },
-    },
-    {
-      points: MONTHLY_TIER_POINTS[3],
-      label: "Rift Hoard",
-      gold: Math.round(28000 * mul),
-      gems: Math.round(450 * mul),
-      potions: 14,
-      chips: { advanced: 3, elite: 1 },
-      tokens: 25,
-    },
-    {
-      points: MONTHLY_TIER_POINTS[4],
-      label: "Moon Crown",
-      gold: Math.round(40000 * mul),
-      gems: Math.round(680 * mul),
-      potions: 20,
-      chips: { advanced: 4, elite: 2 },
-      tokens: 60,
-    },
-  ];
-}
-
-/**
- * Weekly phase of the live month: 1 through 4. Week 1 is days 1-7, and the
- * last phase always catches the tail of the month whatever its length.
- */
-export function monthPhase(d: Date = new Date()): number {
-  return Math.min(4, Math.floor((d.getDate() - 1) / 7) + 1);
-}
-
-/** points multiplier of the live phase — the late-month comeback curve */
-export const MONTH_PHASE_MUL = [1, 1.15, 1.3, 1.5] as const;
-
-export function monthPhaseMul(d: Date = new Date()): number {
-  return MONTH_PHASE_MUL[Math.min(4, monthPhase(d)) - 1] ?? 1;
-}
-
-/** numeric modifiers for the monthly event — the single source of truth for its perk */
-export function monthlyEventBonus(id: MonthId): MonthlyBonus {
-  switch (id) {
-    case "arsenal":
-      return { ...BASE_MONTHLY_BONUS, upgradeCostMul: 0.85 };
-    case "heartfire":
-      return { ...BASE_MONTHLY_BONUS, spMul: 1.35 };
-    case "riftwinds":
-      return { ...BASE_MONTHLY_BONUS, hpMul: 0.92, goldMul: 1.25 };
-    case "awakening":
-      return { ...BASE_MONTHLY_BONUS, fragBias: 0.3, chestFragBonus: 1 };
-    case "golden":
-      return { ...BASE_MONTHLY_BONUS, goldMul: 1.55 };
-    case "gemrain":
-      return { ...BASE_MONTHLY_BONUS, gemMul: 1.9 };
-    case "siege":
-      return { ...BASE_MONTHLY_BONUS, spMul: 1.45, hpMul: 1.08 };
-    case "festival":
-      return { ...BASE_MONTHLY_BONUS, upgradeCostMul: 0.8 };
-    case "bounty":
-      return { ...BASE_MONTHLY_BONUS, goldMul: 1.4, spMul: 1.25 };
-    case "nightfall":
-      return { ...BASE_MONTHLY_BONUS, gemMul: 2, hpMul: 1.12 };
-    case "harvest":
-      return { ...BASE_MONTHLY_BONUS, goldMul: 1.65, chestFragBonus: 1 };
-    case "winter":
-      return { ...BASE_MONTHLY_BONUS, gemMul: 1.55, spMul: 1.2, upgradeCostMul: 0.9 };
-  }
-}
-
-// ---------- trophies & competition ----------
-export const TROPHY_WIN = 70;
-export const TROPHY_LOSS = 20;
-/** Wins build momentum, rewarding streaks without making a single match decisive. */
-export interface League {
-  name: string;
-  min: number;
-  color: string;
-}
-
-/** Ladder tiers; the player's league is the highest one they clear. */
-export const LEAGUES: League[] = [
-  { name: "Copper", min: 0, color: "#c98b5e" },
-  { name: "Iron", min: 350, color: "#9fb4c7" },
-  { name: "Silver", min: 900, color: "#cfd8e6" },
-  { name: "Gold", min: 1700, color: "#ffd977" },
-  { name: "Crystal", min: 2800, color: "#8ceaff" },
-  { name: "Arcane", min: 4200, color: "#c44dff" },
-  { name: "Mythic", min: 6000, color: "#b6a0ff" },
-  { name: "Rift Legend", min: 8500, color: "#ffc457" },
-];
-
-export function leagueFor(trophies: number): League {
-  let out = LEAGUES[0];
-  for (const l of LEAGUES) if (trophies >= l.min) out = l;
-  return out;
-}
-
-export function nextLeague(trophies: number): League | null {
-  return LEAGUES.find((l) => l.min > trophies) || null;
-}
-
-/** trophies gained (positive) or lost (negative) for a finished battle */
-export const trophyStreakBonus = (currentStreak: number): number => Math.min(50, Math.max(0, Math.floor(currentStreak)) * 5);
-
-export function trophyDelta(won: boolean, bonus: EventBonus = BASE_EVENT_BONUS, currentStreak = 0): number {
-  return won ? TROPHY_WIN + bonus.trophyWin + trophyStreakBonus(currentStreak) : -(TROPHY_LOSS - bonus.trophyLoss);
-}
-
-export interface CompetitionTier {
-  /** minimum rank (1 = champion) needed for the payout */
-  rank: number;
-  label: string;
-  gems: number;
-  gold: number;
-  chips: ChipBag;
-  color: string;
-}
-
-/** Weekly competition payout table, read top-down until the rank fits. */
-export const COMPETITION_TIERS: CompetitionTier[] = [
-  { rank: 1, label: "Champion", gems: 2500, gold: 40000, chips: { elite: 3, advanced: 5 }, color: "#ffc457" },
-  { rank: 3, label: "Top 3", gems: 1400, gold: 24000, chips: { elite: 1, advanced: 3 }, color: "#cfd8e6" },
-  { rank: 10, label: "Top 10", gems: 700, gold: 12000, chips: { advanced: 2, basic: 6 }, color: "#c98b5e" },
-  { rank: 25, label: "Top 25", gems: 300, gold: 5000, chips: { basic: 4 }, color: "#8fe9ff" },
-  { rank: 50, label: "Top 50", gems: 120, gold: 2000, chips: { basic: 2 }, color: "#9fb4c7" },
-];
-
-export function competitionTier(rank: number): CompetitionTier | null {
-  return COMPETITION_TIERS.find((t) => rank <= t.rank) || null;
-}
-
-/** Deterministic rival ladder so the standings do not reshuffle on every render. */
-export interface Rival {
-  name: string;
-  trophies: number;
-}
-
-const RIVAL_NAMES = [
-  "Kaelthas", "Mirabel", "Torin", "Sable", "Volkan", "Nyx", "Rhen", "Ossian",
-  "Petra", "Ilyana", "Dorn", "Yuki", "Castor", "Brann", "Vesper", "Lumen",
-  "Hadrik", "Seren", "Oryx", "Talia", "Garruk", "Fenna", "Ziv", "Marek",
-  "Aurel", "Thale", "Nadir", "Quill", "Rosk", "Idris", "Belka", "Corvin",
-  "Dazhen", "Eiko", "Fjall", "Grim", "Halia", "Ivar", "Jorun", "Kesh",
-  "Lyra", "Mogul", "Nessa", "Orin", "Pike", "Qara", "Riven", "Sten",
-  "Tove", "Ulric", "Vanya", "Wrenn", "Xalia", "Ysolde", "Zarek", "Ardan",
-  "Brisa", "Cael", "Delphi", "Eron",
-];
-
-/** cheap 32-bit string hash so rival stats are stable per name + week */
-function hash32(str: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0) / 4294967296;
-}
-
-/**
- * Build the weekly standings around the player. Rivals are seeded from the
- * week stamp so the board is stable for the whole week but refreshes on Monday.
- */
-export function competitionBoard(playerTrophies: number, weekStamp: string, playerName = "You"): Rival[] {
-  const rivals: Rival[] = RIVAL_NAMES.map((name, i) => {
-    const r = hash32(`${name}:${weekStamp}`);
-    // spread rivals around the player so the ladder always feels competitive
-    const spread = 1 - i / RIVAL_NAMES.length;
-    const base = Math.round(playerTrophies * (0.45 + spread * 1.15) + (r - 0.5) * 420);
-    return { name, trophies: Math.max(0, base) };
-  });
-  rivals.push({ name: playerName, trophies: playerTrophies });
-  return rivals.sort((a, b) => b.trophies - a.trophies);
-}
-
-export const OVERDRIVE_TIME = 8;
-export const OVERDRIVE_ASPD = 1.5;
-export const OVERDRIVE_DMG = 0.5;
-/** chilled enemies take extra damage */
-export const SLOW_VULN = 0.25;
-
-export interface ChestDef {
-  id: string;
-  name: string;
-  /** 0 = priced in gold, 1 = priced in gems */
-  gem: 0 | 1;
-  cost: number;
-  color: string;
-  gold: [number, number];
-  frags: [number, number];
-  /** chip modules rolled on open */
-  chips?: { id: ChipId; min: number; max: number }[];
-  /** hero shards rolled on open */
-  heroShards?: [number, number];
-  /** fragment rarity bias 0..1 */
-  bias: number;
-  /** special fixed-outcome reward table for the Mystical Chest */
-  special?: "mystical";
-  blurb: string;
-}
-
-export const CHESTS: ChestDef[] = [
-  { id: "common", name: "Common Chest", cost: 80, gem: 1, color: "#9fb4c7", gold: [8, 20], frags: [1, 2], bias: 0, blurb: "Cheap and cheerful." },
-  { id: "silver", name: "Silver Chest", cost: 200, gem: 1, color: "#cfd8e6", gold: [30, 70], frags: [3, 5], bias: 0.15, blurb: "Steady fragment income." },
-  {
-    id: "support",
-    name: "Support Chest",
-    cost: 900,
-    gem: 0,
-    color: "#5cffaa",
-    gold: [120, 260],
-    frags: [1, 3],
-    chips: [
-      { id: "basic", min: 2, max: 5 },
-      { id: "advanced", min: 0, max: 2 },
-    ],
-    bias: 0.1,
-    blurb: "Chip modules for the workshop.",
-  },
-  {
-    id: "hero",
-    name: "Heroes Chest",
-    cost: 500,
-    gem: 1,
-    color: "#b6a0ff",
-    gold: [60, 150],
-    frags: [0, 1],
-    heroShards: [4, 9],
-    bias: 0.3,
-    blurb: "Hero shards — level heroes for free.",
-  },
-  { id: "epic", name: "Epic Chest", cost: 800, gem: 1, color: "#c44dff", gold: [60, 140], frags: [5, 8], bias: 0.45, blurb: "Epic-leaning fragments." },
-  { id: "legendary", name: "Legendary Chest", cost: 2000, gem: 1, color: "#ffc457", gold: [150, 320], frags: [8, 12], bias: 1, blurb: "Best odds at a legendary." },
-  { id: "mystical", name: "Mystical Chest", cost: 4000, gem: 1, color: "#ff315c", gold: [0, 0], frags: [0, 0], bias: 1, special: "mystical", blurb: "65%: five legendary fragments · 35%: one mystical fragment — Supervisor, Eclipse Oracle or Astral Seraph." },
-];
-
-export const CHEST_BY_ID: Record<string, ChestDef> = Object.fromEntries(CHESTS.map((c) => [c.id, c]));
-
-// ---------- hero shards ----------
-/** shards needed to push a hero one level, regardless of current level */
-export const HERO_SHARD_COST = 12;
-
-// ---------- mail ----------
-/**
- * The mailbox. Messages are static content with an optional attachment; the save
- * only records which ones have been read and which rewards were taken, so a new
- * message can be shipped simply by adding a row here.
- */
-export type MailKind = "system" | "reward" | "season" | "gift";
-
-export interface MailItem {
-  id: string;
-  kind: MailKind;
-  from: string;
-  subject: string;
-  body: string;
-  /** shown when the mail is not claimable (a plain announcement) */
-  color: string;
-  /** optional reward, claimed with the CLAIM button */
-  reward?: { gold?: number; gems?: number; tokens?: number; potions?: number; frags?: number; chips?: number };
-  /** game-day stamp the message pretends to have been sent on */
-  age: string;
-}
-
-export const MAIL_KIND: Record<MailKind, { label: string; color: string; glyph: string }> = {
-  system: { label: "SYSTEM", color: "#8fb0ff", glyph: "⚙" },
-  reward: { label: "REWARD", color: "#ffd977", glyph: "★" },
-  season: { label: "SEASON", color: "#b6a0ff", glyph: "◈" },
-  gift: { label: "GIFT", color: "#8ceaff", glyph: "✦" },
-};
-
-export const MAIL: MailItem[] = [
-  {
-    id: "welcome",
-    kind: "gift",
-    from: "The Rift Watch",
-    subject: "Welcome to the Watch",
-    body: "Your first squad is paid for. Take these supplies and hold the line — the rift does not sleep.",
-    color: "#8ceaff",
-    reward: { gold: 4000, gems: 150, chips: 4 },
-    age: "day 1",
-  },
-  {
-    id: "season-open",
-    kind: "season",
-    from: "Season Command",
-    subject: "Season 1 has begun",
-    body: "Trophies now feed the season track. Every tier you pass hands over a crate — see Specials → Season.",
-    color: "#b6a0ff",
-    reward: { tokens: 5, gems: 100 },
-    age: "day 1",
-  },
-  {
-    id: "arsenal",
-    kind: "system",
-    from: "Quartermaster",
-    subject: "New towers unlocked",
-    body: "The Mythic Arsenal has been cleared for deployment. Reaper's Toll, Prism Array, Aegis Core and Hellgate are in the roster.",
-    color: "#c9a7ff",
-    reward: { frags: 6 },
-    age: "day 2",
-  },
-  {
-    id: "awakenings",
-    kind: "system",
-    from: "Awakened Council",
-    subject: "Every tower can awaken",
-    body: "Two awakenings per tower, six tiers each. Tier VI pushes each effect beyond its former limit. Spend Magic Tokens at the Towers screen to grow stronger.",
-    color: "#ffd977",
-    reward: { tokens: 8 },
-    age: "day 3",
-  },
-  {
-    id: "boss-warning",
-    kind: "system",
-    from: "Rift Watch",
-    subject: "Something bigger is coming",
-    body: "Scouts report a Titan walking the far side of the rift. It arrives after round 30. Bring crit damage.",
-    color: "#22d3ee",
-    age: "day 4",
-  },
-];
-
-export const MAIL_BY_ID: Record<string, MailItem> = Object.fromEntries(MAIL.map((m) => [m.id, m]));
-
-// ---------- season ----------
-/**
- * The season track. Season points come off the trophy ladder (and a little off
- * wins), each tier pays out once, and the season rolls over on a fixed
- * 30-day cycle keyed to the epoch — so the numbering is the same for everyone.
- */
-export const SEASON_LENGTH_DAYS = 30;
-export const SEASON_POINTS_PER_TROPHY = 1;
-export const SEASON_POINTS_PER_WIN = 12;
-
-export interface SeasonTier {
-  /** season points needed to unlock this tier */
-  at: number;
-  name: string;
-  color: string;
-  gems?: number;
-  gold?: number;
-  tokens?: number;
-  frags?: number;
-  chips?: number;
-}
-
-export const SEASON_TIERS: SeasonTier[] = [
-  { at: 0, name: "Scout", color: "#8fb0ff", gold: 1500, gems: 40 },
-  { at: 120, name: "Ranger", color: "#8ceaff", gold: 3000, gems: 60, chips: 1 },
-  { at: 300, name: "Warden", color: "#5cffaa", gold: 5000, gems: 90, chips: 2 },
-  { at: 560, name: "Captain", color: "#ffd977", gold: 8000, gems: 140, tokens: 3 },
-  { at: 900, name: "Commander", color: "#ffc457", gold: 12000, gems: 200, chips: 3 },
-  { at: 1350, name: "Champion", color: "#ff8c3d", gold: 18000, gems: 280, tokens: 6 },
-  { at: 1900, name: "Warlord", color: "#b6a0ff", gold: 26000, gems: 380, chips: 5 },
-  { at: 2600, name: "Ascendant", color: "#c44dff", gold: 36000, gems: 500, tokens: 10 },
-  { at: 3500, name: "Mythic", color: "#b6a0ff", gold: 50000, gems: 700, frags: 8 },
-  { at: 4600, name: "Rift Sovereign", color: "#ffd977", gold: 75000, gems: 1000, tokens: 20, frags: 12 },
-];
-
-/** which season we are in, counted from the epoch in 30-day blocks */
-export function seasonNumber(now = Date.now()): number {
-  return 1 + Math.floor(now / (SEASON_LENGTH_DAYS * 86400000));
-}
-
-/** 0..1 progress through the current season */
-export function seasonProgress(now = Date.now()): number {
-  const span = SEASON_LENGTH_DAYS * 86400000;
-  return (now % span) / span;
-}
-
-/** season points earned so far, from the trophy ladder */
-export function seasonPoints(trophies: number, wins: number): number {
-  return Math.max(0, Math.round(trophies)) * SEASON_POINTS_PER_TROPHY + Math.max(0, wins) * SEASON_POINTS_PER_WIN;
-}
-
-/** index of the highest tier the player has unlocked, -1 if none */
-export function seasonTierFor(points: number): number {
-  let idx = -1;
-  SEASON_TIERS.forEach((t, i) => {
-    if (points >= t.at) idx = i;
-  });
-  return idx;
-}

@@ -44,26 +44,32 @@ export default function Mail({
     if (!wasRead) mutate((s) => openMail(s, id));
   };
 
-  const doClaim = (id: string) => {
-    const m = mailItem(save, id);
-    if (!m || !ready.includes(id)) return;
-    // roll on a draft so the loot is ready synchronously for the reward card,
-    // then commit through mutate — the claimed-guard does the real work
-    const draft = cloneSave(save);
-    const loot = claimMail(draft, id);
-    if (!loot) {
-      sfx.error();
-      return push("Nothing to collect here", "#ff5c70");
-    }
-    mutate((s) => {
-      claimMail(s, id);
-    });
-    sfx.chest();
-    setClaim({
-      title: m.subject.toUpperCase(),
-      subtitle: `From ${m.from}`,
-      lines: lootLines(loot),
-      color: m.color,
+    const doClaim = (id: string) => {
+      const m = mailItem(save, id);
+      if (!m || !ready.includes(id)) return;
+      // roll on a draft so the loot is ready synchronously for the reward card,
+      // then commit through mutate — the claimed-guard does the real work
+      const draft = cloneSave(save);
+      const loot = claimMail(draft, id);
+      if (!loot) {
+        sfx.error();
+        return push("Nothing to collect here", "#ff5c70");
+      }
+      mutate((s) => {
+        claimMail(s, id);
+      });
+      // DRAMATIC SCI-FI/RPG SOUND: chest + gold/gem rain
+      sfx.chest();
+      if (loot.gold >= GOLD_RAIN_MIN) sfx.goldRain();
+      if (loot.gems >= GEM_RAIN_MIN) sfx.gemRain();
+      setClaim({
+        title: m.subject.toUpperCase(),
+        subtitle: `From ${m.from}`,
+        lines: lootLines(loot),
+        color: m.kind === "gem" ? "#8ceaff" : m.kind === "gold" ? "#ffd977" : "#b6a0ff",
+        chest: m.chest,
+      });
+    };      color: m.color,
       chest: false,
     });
     push("Attachment collected", m.color);
@@ -84,7 +90,10 @@ export default function Mail({
     mutate((s) => {
       claimAllMail(s);
     });
+    // DRAMATIC SCI-FI/RPG SOUND: chest crack + gold/gem rain
     sfx.chestCrack();
+    if (loot.gold >= GOLD_RAIN_MIN) sfx.goldRain();
+    if (loot.gems >= GEM_RAIN_MIN) sfx.gemRain();
     setClaim({
       title: "ALL ATTACHMENTS",
       subtitle: `${ready.length} message${ready.length === 1 ? "" : "s"} cleared`,
