@@ -13,7 +13,7 @@ import {
   type SaveData,
 } from "../game/save";
 import { sfx } from "../game/audio";
-import { RewardClaim, CoinIcon, GemIcon, TokenIcon, ChipIcon, PotionIcon, type ClaimData } from "../components/ui";
+import { RewardClaim, GOLD_RAIN_MIN, GEM_RAIN_MIN, CoinIcon, GemIcon, TokenIcon, ChipIcon, PotionIcon, type ClaimData } from "../components/ui";
 
 /**
  * The mailbox.
@@ -58,22 +58,19 @@ export default function Mail({
       mutate((s) => {
         claimMail(s, id);
       });
-      // DRAMATIC SCI-FI/RPG SOUND: chest + gold/gem rain
       sfx.chest();
       if (loot.gold >= GOLD_RAIN_MIN) sfx.goldRain();
       if (loot.gems >= GEM_RAIN_MIN) sfx.gemRain();
+      const kindColor = MAIL_KIND[m.kind].color;
       setClaim({
         title: m.subject.toUpperCase(),
         subtitle: `From ${m.from}`,
         lines: lootLines(loot),
-        color: m.kind === "gem" ? "#8ceaff" : m.kind === "gold" ? "#ffd977" : "#b6a0ff",
-        chest: m.chest,
+        color: kindColor,
+        // a mail with a chest attached opens with the full crate ceremony
+        chest: !!m.chest,
       });
-    };      color: m.color,
-      chest: false,
-    });
-    push("Attachment collected", m.color);
-  };
+    };
 
   const doClaimAll = () => {
     if (!ready.length) {

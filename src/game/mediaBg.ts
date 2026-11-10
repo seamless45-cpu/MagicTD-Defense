@@ -1,10 +1,12 @@
 /**
  * BACKGROUND MEDIA
  *
- * The player can put their own photo or video behind the game. The file is
- * kept in IndexedDB (a video is far too large for localStorage), so it never
- * leaves the device. Photos and videos are both accepted. Videos are always
- * played muted: the page never plays their sound.
+ * The player can put their own photo behind the game — that photo is also the
+ * battle scene, so the same pick shows up on the arena. The file is kept in
+ * IndexedDB (too large for localStorage) and never leaves the device.
+ *
+ * Photo only. `classifyBgFile` still reports a `video` kind so legacy records
+ * saved by older builds are understood, but uploads now reject video outright.
  */
 
 export type BgKind = "image" | "video";
@@ -79,6 +81,9 @@ export function subscribeBackground(fn: Listener): () => void {
 export async function saveBackground(file: File): Promise<BgRecord> {
   const verdict = classifyBgFile(file);
   if ("error" in verdict) throw new Error(verdict.error);
+  // Photos only: a video can still be read back from an old save, but it can
+  // never be uploaded again.
+  if (verdict.kind !== "image") throw new Error("Choose a photo — videos are not supported");
   const record: BgRecord = { blob: file, kind: verdict.kind, name: file.name };
   await run("readwrite", (store) => store.put(record, KEY));
   notify();

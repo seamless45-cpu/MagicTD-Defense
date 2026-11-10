@@ -3,7 +3,7 @@ import type { SaveData } from "../game/save";
 import { bumpTask, grantLoot, lootLines, rollChest, type ChestLoot } from "../game/save";
 import { sfx } from "../game/audio";
 import { CHESTS, CHIPS, HERO_BY_ID, TOWERS, TOWER_BY_ID, RARITY, eventBonus, eventForDate, monthlyEventBonus, monthlyEventForDate, type Rarity } from "../game/data";
-import { ChipIcon, CoinIcon, ClaimChest, GemIcon, Modal, RewardClaim, ShardIcon, TokenIcon, TowerIcon, type ClaimData } from "../components/ui";
+import { ChipIcon, CoinIcon, ClaimChest, GemIcon, GOLD_RAIN_MIN, GEM_RAIN_MIN, Modal, RewardClaim, ShardIcon, TokenIcon, TowerIcon, type ClaimData } from "../components/ui";
 
 /** gold price of one fragment of each rarity */
 const FRAG_PRICE: Record<Rarity, number> = { normal: 120, decent: 320, epic: 750, legendary: 1400, mystical: 999999 };
@@ -122,7 +122,7 @@ export default function Shop({
       // DRAMATIC SCI-FI/RPG SOUND: chest blast + crack + loot
       sfx.chestBlast();
       sfx.chestCrack();
-      sfx.chestLoot(rolled.lines.length || 3);
+      sfx.chestLoot(lootLines(rolled).length || 3);
       mutate((s) => grantLoot(s, rolled));
       setClaim({
         title: chest.name.toUpperCase(),
@@ -419,7 +419,8 @@ export default function Shop({
             if (loot) {
               if (loot.gold >= GOLD_RAIN_MIN) sfx.goldRain();
               if (loot.gems >= GEM_RAIN_MIN) sfx.gemRain();
-              push(`Banked ${lootLines(loot).length} reward${lootLines(loot).length === 1 ? "" : "s"}`, chest?.color || "#ffd977");
+              const n = lootLines(loot).length;
+              push(`Banked ${n} reward${n === 1 ? "" : "s"}`, chest?.color || "#ffd977");
             }
           }}
         />

@@ -98,10 +98,6 @@ export function BackgroundMediaRow({ save, mutate }: { save: SaveData; mutate: (
               }}
             />
           </label>
-                e.target.value = "";
-              }}
-            />
-          </label>
           {bg && (
             <button className="btn px-3 py-1.5 text-xs" data-testid="media-bg-clear" onClick={() => void clearBackground()}>
               REMOVE

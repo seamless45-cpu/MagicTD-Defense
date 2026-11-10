@@ -6,6 +6,7 @@ import { addChips, addMonthPoints, applyBattleTrophies, bumpTask, clampZoom, col
 import { FullscreenButton } from "./Menus";
 import { sfx } from "../game/audio";
 import { MediaBackground } from "../components/MediaBackground";
+import { saveBackground } from "../game/mediaBg";
 import {
   TOWERS,
   TOWER_BY_ID,
@@ -649,6 +650,23 @@ interface G {
   /** gauntlet: boons banked this run, and the three currently on offer */
   boons: GauntletBoon[];
   boonOffer: GauntletBoon[] | null;
+  /** Shield Amplifier: seconds of tower overshield granted on boon pick */
+  shieldDuration: number;
+  /** Sonic Boom: extra knockback distance (cells) on wave start */
+  knockbackDist: number;
+  /** Pressure Waves: extra seconds enemies stay dragged by the gravity pit */
+  dragDuration: number;
+  /** End of Life: asteroids dropped at wave start, and their blast radius */
+  asteroidCount: number;
+  asteroidRadius: number;
+  /** Eclipse Rift: share of max HP burned off each spawn */
+  hpBurn: number;
+  /** God Zeus Singularity: share of max HP consumed from elites/bosses */
+  hpConsume: number;
+  /** Heavenly Laser: bonus tower range as a fraction */
+  laserRange: number;
+  /** Supervisor Doomsday: bonus damage amplification as a fraction */
+  amplify: number;
   /** what has been bought in the run shop this battle */
   shopBought: Record<string, number>;
   /** fps counter for the performance HUD */
@@ -816,6 +834,15 @@ function newGame(mode: GameMode, save: SaveData, startRound = 1): G {
     waveSpawned: 0,
     boons: [],
     boonOffer: null,
+    shieldDuration: 0,
+    knockbackDist: 0,
+    dragDuration: 0,
+    asteroidCount: 0,
+    asteroidRadius: 0,
+    hpBurn: 0,
+    hpConsume: 0,
+    laserRange: 0,
+    amplify: 0,
     shopBought: {},
     fps: 60,
     fpsT: 0,
@@ -2192,6 +2219,16 @@ function rockSprite(color: string): HTMLCanvasElement | null {
 }
 
 // ---------- component ----------
+/** tiny camera glyph for the in-battle scene upload button */
+function SceneGlyph() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+      <path d="M3 8h3l2-3h8l2 3h3v11H3z" />
+      <circle cx="12" cy="13" r="3.4" />
+    </svg>
+  );
+}
+
 export default function Battle({
   mode,
   save,
@@ -3130,7 +3167,7 @@ export default function Battle({
           break;
         case "supernova":
           // Supervisor Doomsday: +15% amplification per stack
-          g.amplification += 0.15 * eff;
+          g.amplify += 0.15 * eff;
           break;
       }
       toastRef.current(`${b.glyph} ${b.name} · ${b.desc} (Stack ${eff}/${maxStack})`, b.color);
@@ -10742,27 +10779,34 @@ export default function Battle({
   return (
     <div className="app-bg relative flex h-full flex-col">
       <MediaBackground dim={save.bgDim} paused={save.powerSaver} />
-      <input
-        type="file"
-        accept="image/*"
-        className="sr-only"
-        id="battle-media-upload"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            // saveBackground logic would go here or via BackgroundMediaRow in Menus
-            // For proof, we assume the MediaBackground component handles the URL via saveBackground
-            // In this proof, we just trigger the upload flow if possible, or show the integration.
-            // Since MediaBackground.tsx already has BackgroundMediaRow, we just render MediaBackground here.
-            // The user prompt says: "Prove scene changes in battle using upload media (supports photos, videos disabled)".
-            // We'll add a simple upload button in Battle if needed, or just rely on MediaBackground rendering the photoUrl.
-            // Action #15 said: "Integrated photo upload input (accepting image/*, disabling video) and passed the URL to MediaBackground behind the canvas."
-            // Let's add a simple input overlay or assume the BackgroundMediaRow is accessible.
-            // Actually, Action #17 says: "Inserted MediaBackground import and rendering logic directly into the Battle component return statement".
-          }
-          e.target.value = "";
-        }}
-      />
+      {/*
+        SCENE UPLOAD: the arena paints over the app background, so the player can
+        swap the photo behind the battlefield from right here. Photo-only (video
+        is not offered); the pick is written to the same on-device media record
+        the rest of the app reads, so it also becomes the global background.
+      */}
+      <label className="scene-upload" data-testid="battle-scene-upload">
+        <SceneGlyph />
+        <span>SCENE</span>
+        <input
+          type="file"
+          accept="image/*"
+          className="sr-only"
+          data-testid="battle-scene-input"
+          aria-label="Upload a battle scene photo"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (!file) return;
+            void saveBackground(file)
+              .then(() => toastRef.current?.("Battle scene changed", "#8ceaff"))
+              .catch((err: Error) => {
+                sfx.error();
+                toastRef.current?.(err.message || "Could not use that photo", "#ff5c70");
+              });
+          }}
+        />
+      </label>
       <Toasts toasts={toasts} />
       {g?.roulette && !g.final && !g.cut && !g.enemies.some((e) => !e.dead && isBossType(e.type)) && (() => {
         const elapsed = Math.max(0, g.roulette.total - g.roulette.t);
